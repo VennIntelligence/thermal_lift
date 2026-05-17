@@ -1,0 +1,6 @@
+{
+  "noise_floor_celsius": 0.0724,
+  "method": "smooth adjacent-coordinate MAE",
+  "source": "Ep004",
+  "notes": "within single session, cross-session jumps are 49x higher"
+}

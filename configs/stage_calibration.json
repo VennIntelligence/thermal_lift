@@ -1,0 +1,9 @@
+{
+  "theta_deg": 47.6,
+  "theta_rad": 0.8308,
+  "pixel_size_um": 20.0,
+  "detector_rows": 480,
+  "detector_cols": 640,
+  "wavelength_band": "LWIR 8-14 um",
+  "notes": "theta from Ep007 SAA grid search, 0.1 deg precision"
+}

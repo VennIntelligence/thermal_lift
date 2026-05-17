@@ -1,0 +1,10 @@
+# Fragment files to assemble into ep01_data_processing.ipynb
+# Order matters — listed top to bottom
+01_setup.py
+02_matrix_validation.py
+03_bmp_txt_pairing.py
+04_missing_data.py
+05_coverage_map.py
+06_temperature_stats.py
+07_session_detection.py
+08_summary.py

@@ -1,0 +1,15 @@
+{
+  "x_coords_um": [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40],
+  "y_coords_um": [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40],
+  "repeat_ids": [0, 1, 2],
+  "fine_step_um": 2,
+  "coarse_step_um": 4,
+  "fine_range": "0-20 um",
+  "coarse_range": "20-40 um",
+  "total_displacement_um": 40,
+  "total_displacement_px": 2.0,
+  "projected_displacement_px": 1.35,
+  "repeat_coordinates": [[0,0], [2,0], [4,0], [6,0], [8,0], [10,0]],
+  "known_missing_r0": [[14,6], [16,6], [16,16]],
+  "notes": "known_missing_r0 来自旧项目，待新数据校验确认"
+}

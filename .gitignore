@@ -1,0 +1,36 @@
+# ===== Python =====
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+*.egg
+dist/
+build/
+
+# ===== UV / Venv =====
+.venv/
+algos/*/.venv/
+
+# ===== macOS =====
+.DS_Store
+._*
+.Spotlight-V100
+.Trashes
+
+# ===== 数据（太大，手动拷贝到新机器） =====
+data/
+
+# ===== 生成产物（由 notebook 执行重建） =====
+output/
+
+# ===== Notebook 构建产物（从 fragments/ 重建） =====
+# fragments/*.py 是源码，会被 track
+# .ipynb 是构建产物，由 build_notebook.py 生成
+notebooks/**/*.ipynb
+
+# ===== Jupyter =====
+.ipynb_checkpoints/
+
+# ===== IDE =====
+.vscode/
+.idea/

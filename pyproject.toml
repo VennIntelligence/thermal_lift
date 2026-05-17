@@ -1,0 +1,19 @@
+[project]
+name = "thermal-lift"
+version = "0.1.0"
+description = "热场微扫描超分辨率重建 — 全局脚本与工具"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "matplotlib>=3.8",
+    "pandas>=2.1",
+    "scipy>=1.12",
+    "tqdm>=4.66",
+    "jupyter>=1.0",
+    "nbconvert>=7.0",
+    "nbformat>=5.9",
+    "thermal-core",
+]
+
+[tool.uv.sources]
+thermal-core = { path = "core", editable = true }
