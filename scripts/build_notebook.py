@@ -19,6 +19,12 @@ import sys
 from pathlib import Path
 
 
+def print_usage() -> None:
+    """Print command usage."""
+    print("用法: python scripts/build_notebook.py <notebook_dir> [--execute]")
+    print("示例: python scripts/build_notebook.py notebooks/ep01_data_processing --execute")
+
+
 def parse_py_to_cells(filepath: Path) -> list[dict]:
     """解析单个 .py 文件为 notebook cells 列表"""
     content = filepath.read_text(encoding="utf-8")
@@ -116,7 +122,7 @@ def build_notebook(cells: list[dict], output_path: Path):
     print(f"✅ 已构建: {output_path} ({len(cells)} cells)")
 
 
-def execute_notebook(notebook_path: Path):
+def execute_notebook(notebook_path: Path) -> bool:
     """执行 notebook，将输出（含图片）嵌入 .ipynb。
 
     执行后的 notebook 打开即可看到全部结果，用户也可以重新从头运行。
@@ -147,22 +153,27 @@ def execute_notebook(notebook_path: Path):
     try:
         ep.preprocess(nb, {"metadata": {"path": str(project_root)}})
         print(f"✅ 执行完成")
+        ok = True
     except Exception as e:
         print(f"⚠️ 执行中有错误（已保存部分结果）: {e}")
+        ok = False
 
     with open(notebook_path, "w", encoding="utf-8") as f:
         nbformat.write(nb, f)
     print(f"💾 已保存（含执行输出）: {notebook_path}")
+    return ok
 
 
 def main():
-    if len(sys.argv) < 2:
-        print("用法: python scripts/build_notebook.py <notebook_dir> [--execute]")
-        print("示例: python scripts/build_notebook.py notebooks/ep01_data_processing --execute")
-        sys.exit(1)
-
     args = [a for a in sys.argv[1:] if not a.startswith("--")]
     flags = [a for a in sys.argv[1:] if a.startswith("--")]
+    if "--help" in flags or "-h" in flags:
+        print_usage()
+        sys.exit(0)
+    if not args:
+        print_usage()
+        sys.exit(1)
+
     do_execute = "--execute" in flags
 
     target_dir = Path(args[0])
@@ -217,7 +228,8 @@ def main():
 
     # 执行（可选）
     if do_execute:
-        execute_notebook(output_path)
+        if not execute_notebook(output_path):
+            sys.exit(1)
     else:
         print("💡 提示: 加 --execute 参数可自动执行并嵌入输出（含图片）")
 

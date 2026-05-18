@@ -22,6 +22,7 @@ data/
 
 # ===== 生成产物（由 notebook 执行重建） =====
 output/
+*.zip
 
 # ===== Notebook 构建产物（从 fragments/ 重建） =====
 # fragments/*.py 是源码，会被 track

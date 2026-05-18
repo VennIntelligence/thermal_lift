@@ -5,15 +5,26 @@
 
 ---
 
+## 当前主线
+
+- 客户目标：工业芯片检测中看清芯片内部结构/形状。
+- 数据基础：263 帧 TXT/BMP 中，主 session=2 的 255 帧是 2x contour-level SR POC 的默认输入；跨 session 帧不得混用。
+- 位移策略：stage command 只作 prior / 初始化 / 约束，不作对齐真值。
+- EP04 定位：localization 是 alignment anchor / quality gate，用来筛选可靠帧对、ROI 和参数，不是最终交付目标。
+- POC 验收：以 LR 单帧、bicubic 2×、多帧平均和 2x SR 的轮廓可见性对比为核心。
+
+---
+
 ## 📋 Episode 路线图
 
 | Episode | 名称 | 状态 | 目录 |
 |---------|------|------|------|
 | EP01 | 数据处理与验证 | ✅ 首轮完成 | `ep01_data_processing/` |
 | EP02 | 位移标定与旋转角验证 | ✅ 首轮完成 | `ep02_displacement_calibration/` |
-| EP03 | 理论极限分析 | ⬜ 未开始 | — |
-| EP04 | 基线算法实现 | ⬜ 未开始 | — |
-| EP05 | 高级 SR 算法 | ⬜ 未开始 | — |
+| EP03 | 理论边界与最小验证 | ✅ 首轮完成；不作为 SR 否定结论 | `ep03_theoretical_limits/` |
+| EP04 | Data-driven localization / alignment quality gate | ✅ EP04-A 完成；作为锚点和质控 | `ep04_global_validation/` |
+| EP05 | 2x SR capacity and alignment baseline | ✅ 完成；EP06 输入依据 | `ep05_sr_reassessment/` |
+| EP06 | 2x contour-level SR POC | ✅ 完成；classic SR 双轨对比 | `ep06_sr_poc/` |
 
 > 路线图随项目推进更新。新 Episode 创建时在此注册。
 

@@ -7,11 +7,12 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from scipy.ndimage import gaussian_filter, sobel
 
 from thermal_core.io import load_frame
 
 
-PIXEL_SIZE_UM = 20.0
+PIXEL_SIZE_UM = 10.0
 
 
 def center_roi(shape: tuple[int, int], size: int = 320) -> tuple[slice, slice]:
@@ -51,6 +52,30 @@ def _znorm(frame: np.ndarray) -> np.ndarray:
     if scale == 0.0:
         return centered
     return centered / scale
+
+
+def preprocess_for_registration(
+    frame: np.ndarray,
+    mode: str = "raw",
+    *,
+    highpass_sigma: float = 12.0,
+) -> np.ndarray:
+    """Prepare a cropped frame for displacement registration.
+
+    ``raw`` keeps the thermal field after z-normalization, ``highpass`` removes
+    a smooth thermal baseline, and ``gradient`` keeps Sobel edge magnitude.
+    """
+    data = np.asarray(frame, dtype=np.float32)
+    if mode == "raw":
+        return _znorm(data)
+    if mode == "highpass":
+        baseline = gaussian_filter(data, sigma=highpass_sigma, mode="nearest")
+        return _znorm(data - baseline)
+    if mode == "gradient":
+        gx = sobel(data, axis=1, mode="nearest")
+        gy = sobel(data, axis=0, mode="nearest")
+        return _znorm(np.hypot(gx, gy))
+    raise ValueError("preprocess mode must be 'raw', 'highpass', or 'gradient'")
 
 
 def _overlap_for_shift(
@@ -127,10 +152,20 @@ def subpixel_ncc(
     search_radius: int = 5,
     fit_radius: int = 2,
     roi_size: int = 320,
+    preprocess: str = "raw",
+    highpass_sigma: float = 12.0,
 ) -> dict[str, float | int | bool]:
     """Estimate image displacement from frame A to frame B using NCC."""
-    a = _znorm(_crop(frame_a, roi, roi_size))
-    b = _znorm(_crop(frame_b, roi, roi_size))
+    a = preprocess_for_registration(
+        _crop(frame_a, roi, roi_size),
+        preprocess,
+        highpass_sigma=highpass_sigma,
+    )
+    b = preprocess_for_registration(
+        _crop(frame_b, roi, roi_size),
+        preprocess,
+        highpass_sigma=highpass_sigma,
+    )
 
     shifts = np.arange(-search_radius, search_radius + 1)
     corr = np.empty((shifts.size, shifts.size), dtype=float)
@@ -170,10 +205,20 @@ def phase_correlation(
     frame_b: np.ndarray,
     roi: tuple[slice, slice] | None = None,
     roi_size: int = 320,
+    preprocess: str = "raw",
+    highpass_sigma: float = 12.0,
 ) -> dict[str, float | int]:
     """Estimate image displacement from frame A to frame B by phase correlation."""
-    a = _znorm(_crop(frame_a, roi, roi_size))
-    b = _znorm(_crop(frame_b, roi, roi_size))
+    a = preprocess_for_registration(
+        _crop(frame_a, roi, roi_size),
+        preprocess,
+        highpass_sigma=highpass_sigma,
+    )
+    b = preprocess_for_registration(
+        _crop(frame_b, roi, roi_size),
+        preprocess,
+        highpass_sigma=highpass_sigma,
+    )
     wy = np.hanning(a.shape[0])[:, None]
     wx = np.hanning(a.shape[1])[None, :]
     window = wy * wx
@@ -256,6 +301,62 @@ def build_frame_pairs(
     return pd.DataFrame(rows)
 
 
+def build_time_adjacent_pairs(
+    df_audit: pd.DataFrame,
+    *,
+    r_value: int | None = None,
+    session_col: str | None = None,
+    max_order_gap: int = 1,
+) -> pd.DataFrame:
+    """Build physically time-adjacent frame pairs from acquisition order."""
+    session = _session_column(df_audit, session_col)
+    sorted_df = df_audit.sort_values("acquisition_order").reset_index(drop=True)
+    rows = []
+
+    for a, b in zip(sorted_df.to_dict("records"), sorted_df.iloc[1:].to_dict("records")):
+        if int(a[session]) != int(b[session]):
+            continue
+        order_gap = int(b["acquisition_order"] - a["acquisition_order"])
+        if order_gap <= 0 or order_gap > max_order_gap:
+            continue
+        if r_value is not None and (int(a["R"]) != r_value or int(b["R"]) != r_value):
+            continue
+
+        delta_x = int(b["X"] - a["X"])
+        delta_y = int(b["Y"] - a["Y"])
+        if delta_y == 0 and delta_x > 0:
+            move_type = "x_step"
+        elif delta_x < 0 and delta_y > 0:
+            move_type = "row_transition"
+        elif delta_x == 0 and delta_y == 0:
+            move_type = "repeat"
+        else:
+            move_type = "other"
+
+        rows.append({
+            "pair_type": "time_adjacent",
+            "move_type": move_type,
+            "session": int(a[session]),
+            "order_a": int(a["acquisition_order"]),
+            "order_b": int(b["acquisition_order"]),
+            "order_gap": order_gap,
+            "file_a": a["file"],
+            "file_b": b["file"],
+            "X_a": int(a["X"]),
+            "Y_a": int(a["Y"]),
+            "R_a": int(a["R"]),
+            "X_b": int(b["X"]),
+            "Y_b": int(b["Y"]),
+            "R_b": int(b["R"]),
+            "delta_X_um": delta_x,
+            "delta_Y_um": delta_y,
+            "delta_um": float(np.hypot(delta_x, delta_y)),
+            "delta_T_mean_c": float(b["T_mean"] - a["T_mean"]) if "T_mean" in a else np.nan,
+        })
+
+    return pd.DataFrame(rows)
+
+
 def build_repeat_pairs(
     df_audit: pd.DataFrame,
     repeat_coords: list[tuple[int, int]] | None = None,
@@ -300,6 +401,8 @@ def measure_frame_pairs(
     roi_size: int = 320,
     search_radius: int = 5,
     method: str = "ncc",
+    preprocess: str = "raw",
+    highpass_sigma: float = 12.0,
 ) -> pd.DataFrame:
     """Measure displacements for a frame-pair table."""
     if method not in {"ncc", "phase"}:
@@ -320,12 +423,16 @@ def measure_frame_pairs(
             read(pair["file_b"]),
             roi_size=roi_size,
             search_radius=search_radius,
+            preprocess=preprocess,
+            highpass_sigma=highpass_sigma,
         ) if method == "ncc" else estimator(
             read(pair["file_a"]),
             read(pair["file_b"]),
             roi_size=roi_size,
+            preprocess=preprocess,
+            highpass_sigma=highpass_sigma,
         )
-        rows.append({**pair.to_dict(), "method": method, **result})
+        rows.append({**pair.to_dict(), "method": method, "preprocess": preprocess, **result})
 
     return pd.DataFrame(rows)
 

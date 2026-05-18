@@ -1,0 +1,19 @@
+[project]
+name = "ep06-sr-poc"
+version = "0.1.0"
+description = "EP06 2x contour-level super-resolution POC orchestration"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "matplotlib>=3.8",
+    "pandas>=2.1",
+    "tqdm>=4.66",
+    "thermal-core",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+thermal-core = { path = "../../core", editable = true }

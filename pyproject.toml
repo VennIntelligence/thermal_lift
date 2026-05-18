@@ -13,6 +13,7 @@ dependencies = [
     "nbconvert>=7.0",
     "nbformat>=5.9",
     "thermal-core",
+    "opencv-python-headless>=4.8",
 ]
 
 [tool.uv.sources]

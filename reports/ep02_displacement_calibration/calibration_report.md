@@ -1,60 +1,85 @@
-# EP02 Calibration Report
+# EP02 Raster Path, Stage Prior, and Alignment Evidence
 
 ## Scope
 
-This report uses same-session adjacent TXT thermal frames from EP01 and estimates image displacement with NCC plus quadratic peak fitting.
-The calibration set is restricted to EP01's main acquisition session (`session=2`), not filename-sorted pseudo-sessions.
+EP02 reconstructs the main-session raster acquisition path, maps filename/stage coordinates into detector-space stage priors, and records which displacement evidence can be used for downstream alignment. It does not treat stage command as alignment truth and does not use small 2 um adjacent-step diagnostics to judge multi-frame SR feasibility.
 
-## Main Result
+The downstream contract is: EP02 provides acquisition path plus coordinate prior; EP04/EP05-style data-driven contour/NCC alignment provides the alignment anchor and quality gate before EP06 2x contour-level SR.
 
-The current NCC measurements do **not** validate the previous theta value of 47.6 deg.
+## Key Results
 
-| Metric | Value |
-|---|---:|
-| Main-session adjacent frame pairs | 463 |
-| NCC fit-ok rate | 1.000 |
-| Median NCC peak | 0.99545 |
-| Image-row theta fit | 145.690 deg |
-| Y-up diagnostic theta fit | 34.053 deg |
-| Y-up 95% bootstrap CI | [33.226, 34.829] deg |
-| Reference theta inside CI | False |
-| Rotation-model RMS residual | 0.1567 px |
-| Valid repeatability pairs | 0 / 2 main-session pairs |
-| Repeatability median error (valid only) | n/a |
-| Repeatability p95 error (valid only) | n/a |
-| Linearity projection R2 | 0.0001 |
+| Item | Result | Interpretation |
+|---|---:|---|
+| Main session frames | 255 | session=2 only |
+| R=0 raster frames | 248 | primary step-and-shoot grid |
+| Within-row X transitions | 232 | acquisition-time adjacent |
+| Row transitions | 15 | Y advance plus X reset |
+| Unique coordinates | 253 | filename coordinate coverage |
+| Stage prior theta | 47.6 deg | configured prior |
+| Detector pitch | 10.0 um/pixel | detector sampling pitch |
+| Stage-prior dx/dy span | 5.65 px / 5.65 px | global detector-space prior coverage |
+| 2x phase bins | 4/4 non-empty | prior covers all half-pixel bins |
 
-## Interpretation
+2x phase-bin frame counts from the configured prior:
 
-NCC produces high correlation peaks, but the measured displacement field is inconsistent with a single rigid rotation and a fixed 20.0 um/px scale. The clearest remaining failure mode is the Y-scan: 2 um and 4 um command steps do not scale linearly in the measured displacement.
+| phase-y bin \\ phase-x bin | 0 | 1 |
+|---|---:|---:|
+| 0 | 66 | 63 |
+| 1 | 64 | 62 |
 
-Therefore EP02 should be treated as a failed independent validation of theta rather than a replacement calibration. The global `configs/stage_calibration.json` should remain unchanged until the displacement measurement method is improved or independently checked.
+## Small-Step Diagnostics
 
-## Acquisition-Order and Motion Direction Check
+| Diagnostic | Value | Use |
+|---|---:|---|
+| X coordinate-neighbor acquisition gap median | 1 frame | valid local smoke test |
+| Y coordinate-neighbor acquisition gap median | 16 frames | not time-adjacent |
+| X 2 um visible NCC projection | 0.0936 px | local image response |
+| X 2 um stage-prior magnitude | 0.2000 px | nominal prior |
+| X 4/2 visible projection ratio | 2.05 | short-time linearity check |
+| Y 4/2 visible projection ratio | 0.64 | fails calibration monotonicity |
 
-EP01 found that the earlier 13-session interpretation was a filename-sorting artifact. Using acquisition time collapses the data into a short warm-up/repeat segment and one 255-frame main scan. EP02 now uses only that main scan.
+The X result supports local direction and short-time linearity under this ROI/preprocess choice. It is not an absolute stage-amplitude validation. The Y coordinate-neighbor result is a raster-path failure diagnostic: fixed-X Y neighbors are separated by about one row of acquisition time, so thermal evolution contaminates NCC.
 
-Within the main scan, X-scan median directions span -35.24 deg to -31.54 deg in y-up coordinates, and Y-scan median directions span 52.35 deg to 54.26 deg. The larger anomaly is magnitude: Y-scan 2 um steps have median displacement 0.3515 px, while Y-scan 4 um steps have median displacement 0.2262 px. A 4 um command should not produce a smaller displacement than a 2 um command.
+## Data-Driven Alignment Evidence
 
-This means the low-temperature jump frames were not the main cause of the Y-scan failure. The next check should focus on Y-scan frame-pair construction, scan reversal/backlash, axis sign conventions, or NCC bias under thermal-field changes.
+Existing EP05 alignment scores were available and were read as downstream alignment evidence:
 
-## SR Impact
+| Method | Median holdout Chamfer (px) | Median gradient corr |
+|---|---:|---:|
+| No alignment | 0.3813 | 0.7023 |
+| Stage prior only | 0.2402 | 0.8817 |
+| Filename affine prior | 0.1708 | 0.9551 |
+| Data-driven NCC init | 0.1563 | 0.9668 |
+| Data-driven contour refined | 0.1341 | 0.9487 |
 
-The fitted model RMS residual is 0.1567 px. This exceeds the 0.1 px practical threshold used for 2x SR feasibility and is above the 0.05 px target for 4x SR. Repeatability is also weakly constrained because only 0 main-session repeat pairs avoid boundary peaks. Current displacement evidence is insufficient for reliable SR reconstruction.
+Data-driven contour refinement reduces median holdout Chamfer by **44.2%** relative to stage-prior-only alignment, and by **64.8%** relative to no alignment. This is the quantitative reason EP02 treats stage/filename coordinates as priors while reserving alignment truth for data-driven contour/NCC metrics.
 
-## Output Files
+## Decision Table
 
-- `frame_pairs.csv`
-- `displacement_measurements.csv`
-- `motion_direction_diagnostic.csv`
-- `theta_estimate.json`
-- `repeatability.csv`
-- `linearity.csv`
-- `displacement_vector_field.png`
-- `dx_dy_vs_coordinates.png`
-- `motion_direction_diagnostic.png`
-- `theta_bootstrap.png`
-- `theta_residuals.png`
-- `repeatability_boxplot.png`
-- `linearity_regression.png`
-- `sr_impact_summary.png`
+| Evidence | Use for | Do not use for |
+|---|---|---|
+| Stage/filename coordinate prior | coverage planning, initialization, regularization | alignment truth or success metric |
+| Data-driven contour/NCC alignment | alignment anchor and quality gate before 2x contour-level SR | replacing the physical coordinate system |
+| X time-adjacent small steps | local direction and short-time linearity smoke test | global SR feasibility claim or absolute stage-amplitude truth |
+| Y coordinate-adjacent pairs | raster-path failure diagnosis and coordinate metadata | Y displacement calibration |
+| AVI continuous scans | auxiliary direction and naming sanity check | SR input or high-precision theta replacement |
+
+## Outputs
+
+Primary notebook figures:
+
+- `output/ep02_displacement_calibration/ep02_raster_acquisition_path.png`
+- `output/ep02_displacement_calibration/ep02_stage_prior_coverage.png`
+- `output/ep02_displacement_calibration/ep02_small_step_smoke_tests.png`
+- `output/ep02_displacement_calibration/ep02_data_driven_alignment_comparison.png`
+
+Primary tables:
+
+- `output/ep02_displacement_calibration/time_adjacent_method_measurements.csv`
+- `output/ep02_displacement_calibration/y_coordinate_method_measurements.csv`
+- `output/ep02_displacement_calibration/ep02_data_driven_alignment_comparison.csv`
+- `output/ep02_displacement_calibration/ep02_alignment_evidence_decision_table.csv`
+
+## Conclusion
+
+EP02 provides raster path reconstruction, detector-space coordinate prior coverage, and bounded small-step diagnostics. The correct next step is data-driven alignment on the main session, followed by quality-gated 2x contour-level SR.

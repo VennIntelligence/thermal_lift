@@ -144,6 +144,7 @@ METHOD_PALETTE = {
 | tick labels      | 8        | normal  | 坐标轴刻度值              |
 | legend text      | 8        | normal  | 图例文字                  |
 | annotation text  | 7 – 8    | normal  | heatmap 内数字、bar 顶端值  |
+| explanatory annotation | 9 | normal | 概念示意图中的关键物理量标注 |
 | colorbar label   | 8        | normal  | colorbar 侧标注           |
 
 ### 物理量标注规范
@@ -153,6 +154,46 @@ METHOD_PALETTE = {
 - 百分比残差用 `[%]`。
 - 物理量 label 始终用「描述 + 单位」格式，例如 `"Mean absolute residual [°C]"`。
 - **不要在 label 里放段落式长文**：axis label 不超过 50 个字符；需要补充说明的信息放在 title 或 annotation 中。
+
+## Resolution-Distinction Diagram Standard
+
+当解释 detector pitch、calibrated spatial resolution 和 SR output grid 的区别时，必须优先使用同一物理距离轴上的示意图，而不是只用文字说明。该图用于避免把 `10 um/pixel` detector sampling pitch、`20 um` 系统空间分辨率、`5 um/sample` 2x 输出网格混为同一个量。
+
+标准做法：
+
+- 横轴统一为 physical distance along one image axis `[um]`。
+- 同时画出 detector sample ticks、calibrated spatial-resolution footprint、2x SR grid、可选 4x grid。
+- 关键物理量解释性注解使用 9 pt，略大于普通 annotation，保证 notebook 和论文草图里可读。
+- 图中文字保持英文；中文解释放在 notebook markdown 或报告正文中。
+
+最小 Python 示例：
+
+```python
+from thermal_core.ep03 import (
+    build_sampling_resolution_table,
+    plot_sampling_resolution_diagram,
+)
+
+sampling_resolution = build_sampling_resolution_table(
+    detector_pitch_um=10.0,
+    spatial_resolution_um=20.0,
+    target_grid_um=5.0,
+)
+
+fig = plot_sampling_resolution_diagram(
+    sampling_resolution,
+    detector_pitch_um=10.0,
+    spatial_resolution_um=20.0,
+    target_grid_um=5.0,
+    annotation_fontsize=9.0,
+)
+fig.savefig(
+    "sampling_resolution_distinction.png",
+    dpi=300,
+    bbox_inches="tight",
+    facecolor="white",
+)
+```
 
 ## Layout & Readability Rules
 

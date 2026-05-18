@@ -7,9 +7,9 @@
   "fine_range": "0-20 um",
   "coarse_range": "20-40 um",
   "total_displacement_um": 40,
-  "total_displacement_px": 2.0,
-  "projected_displacement_px": 1.35,
+  "total_displacement_px": 4.0,
+  "projected_displacement_px": 2.70,
   "repeat_coordinates": [[0,0], [2,0], [4,0], [6,0], [8,0], [10,0]],
   "known_missing_r0": [[14,6], [16,6], [16,16]],
-  "notes": "known_missing_r0 来自旧项目，待新数据校验确认"
+  "notes": "known_missing_r0 来自旧项目，待新数据校验确认；pixel pitch 已由 BMP 标尺修正为 10 um/pixel，因此 40 um 命令位移为 4.0 px，detector-x 分量约 2.70 px"
 }

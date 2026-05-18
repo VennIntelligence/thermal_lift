@@ -54,8 +54,15 @@ def plot_coverage_heatmap(
 
 
 # ──────────────────────────────────────────────
-# 温度统计四子图
+# 温度分布诊断图
 # ──────────────────────────────────────────────
+
+def _ecdf_xy(values: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Return sorted x and cumulative probability for an ECDF."""
+    x = np.sort(np.asarray(values, dtype=float))
+    y = np.arange(1, len(x) + 1, dtype=float) / len(x)
+    return x, y
+
 
 def plot_temperature_histograms(
     df: pd.DataFrame,
@@ -63,24 +70,81 @@ def plot_temperature_histograms(
     save_path: str | Path | None = None,
     save_fn=None,
 ) -> plt.Figure:
-    """绘制逐帧温度统计四子图 (mean/std/min/max)。"""
-    fig, axes = make_figure("double_col", nrows=2, ncols=2, height=3.0)
+    """绘制逐帧温度分布诊断图 (ECDF + rug + robust summary).
+
+    普通直方图在本数据集上会被少量预热/补采帧拉宽横轴，并产生大量空 bin。
+    ECDF 不依赖 bin，rug 直接显示每一帧的位置，能更清楚地区分主扫描主体、
+    温度段跳变和少量离群帧。
+    """
+    fig, axes = make_figure("double_col", nrows=2, ncols=2, height=3.2)
 
     configs = [
-        ("T_mean", "(a) Frame Mean Temperature", METHOD_COLOR_LIST[0]),
-        ("T_std",  "(b) Frame Temperature Std",  METHOD_COLOR_LIST[4]),
-        ("T_min",  "(c) Frame Min Temperature",  METHOD_COLOR_LIST[1]),
-        ("T_max",  "(d) Frame Max Temperature",  METHOD_COLOR_LIST[2]),
+        ("T_mean", "(a) Frame Mean Temperature", "Mean"),
+        ("T_std",  "(b) Frame Temperature Std",  "Std"),
+        ("T_min",  "(c) Frame Min Temperature",  "Min"),
+        ("T_max",  "(d) Frame Max Temperature",  "Max"),
     ]
 
-    for ax, (col, title, color) in zip(axes.flat, configs):
-        ax.hist(df[col], bins=25, edgecolor="white", linewidth=0.5,
-                alpha=0.85, color=color)
-        ax.set_xlabel(f"{col.replace('T_', '')} Temperature [°C]")
-        ax.set_ylabel("Frame Count")
-        ax.set_title(title)
+    has_main_flag = "is_main_session" in df.columns
+    main_mask = df["is_main_session"].astype(bool).to_numpy() if has_main_flag else None
+    colors = {
+        "all": METHOD_COLOR_LIST[0],
+        "main": METHOD_COLOR_LIST[0],
+        "other": METHOD_COLOR_LIST[2],
+        "iqr": "#888888",
+    }
 
-    fig.suptitle(f"Per-Frame Temperature Statistics ({len(df)} frames)")
+    for ax, (col, title, label) in zip(axes.flat, configs):
+        values = df[col].to_numpy(dtype=float)
+        q1, median, q3 = np.quantile(values, [0.25, 0.50, 0.75])
+        iqr = q3 - q1
+        low_fence = q1 - 1.5 * iqr
+        high_fence = q3 + 1.5 * iqr
+        n_out = int(((values < low_fence) | (values > high_fence)).sum())
+
+        ax.axvspan(q1, q3, color=colors["iqr"], alpha=0.12, linewidth=0, label="IQR")
+        ax.axvline(median, color="#333333", linewidth=0.9, linestyle="--", label="Median")
+
+        if has_main_flag and main_mask is not None and main_mask.any() and (~main_mask).any():
+            x_main, y_main = _ecdf_xy(values[main_mask])
+            x_other, y_other = _ecdf_xy(values[~main_mask])
+            ax.step(x_main, y_main, where="post", color=colors["main"],
+                    linewidth=1.5, label=f"Main session (n={main_mask.sum()})")
+            ax.step(x_other, y_other, where="post", color=colors["other"],
+                    linewidth=1.2, label=f"Other frames (n={(~main_mask).sum()})")
+            ax.plot(values[main_mask], np.full(main_mask.sum(), -0.035), "|",
+                    color=colors["main"], markersize=5, alpha=0.55,
+                    transform=ax.get_xaxis_transform(), clip_on=False)
+            ax.plot(values[~main_mask], np.full((~main_mask).sum(), -0.075), "|",
+                    color=colors["other"], markersize=7, alpha=0.9,
+                    transform=ax.get_xaxis_transform(), clip_on=False)
+        else:
+            x_all, y_all = _ecdf_xy(values)
+            ax.step(x_all, y_all, where="post", color=colors["all"],
+                    linewidth=1.5, label=f"All frames (n={len(values)})")
+            ax.plot(values, np.full(len(values), -0.045), "|",
+                    color=colors["all"], markersize=5, alpha=0.55,
+                    transform=ax.get_xaxis_transform(), clip_on=False)
+
+        ax.text(
+            0.02, 0.96,
+            f"median={median:.3f}°C\nIQR={iqr:.3f}°C\nTukey outliers={n_out}",
+            transform=ax.transAxes,
+            ha="left", va="top", fontsize=7,
+            bbox={"boxstyle": "round,pad=0.25", "facecolor": "white",
+                  "edgecolor": "#cccccc", "linewidth": 0.5, "alpha": 0.9},
+        )
+        ax.set_ylim(-0.09, 1.02)
+        ax.set_xlabel(f"{label} Temperature [°C]")
+        ax.set_ylabel("ECDF")
+        ax.set_title(title)
+        ax.grid(axis="y", alpha=0.25, linewidth=0.5)
+
+    handles, labels = axes.flat[0].get_legend_handles_labels()
+    axes.flat[0].legend(handles, labels, loc="center", bbox_to_anchor=(0.58, 0.34),
+                        fontsize=7,
+                        frameon=True, framealpha=0.92, borderpad=0.3,
+                        handlelength=1.2, handletextpad=0.4)
 
     if save_fn and save_path:
         save_fn(fig, save_path)

@@ -1,10 +1,6 @@
 01_setup.py
-02_data_loading.py
-03_frame_pair_selection.py
-04_cross_correlation.py
-05_displacement_field.py
-06_theta_fitting.py
-07_bootstrap_ci.py
-08_repeatability.py
-09_linearity.py
-10_summary.py
+02_raster_path.py
+03_stage_prior_coverage.py
+04_small_step_diagnostics.py
+05_data_driven_alignment.py
+06_decision_table.py

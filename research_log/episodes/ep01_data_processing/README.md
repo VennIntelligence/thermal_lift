@@ -1,114 +1,116 @@
-# EP01 — 数据处理与验证
+# EP01 — SR 数据基础与主 session 建模
 
-> **目标**: 建立可信赖的数据基础 — 不仅清洗数据，更要独立验证所有旧项目声称的参数  
-> **状态**: ✅ 首轮数据审计完成  
+> **目标**: 把原始 LWIR TXT/BMP 数据整理成后续 2x contour-level SR 可直接继承的输入模型。
+> **状态**: ✅ 已重写为主 session 数据基础审计
 > **起始日期**: 2026-05-16
+> **当前口径**: EP01 不判断 SR 是否可行；EP01 只定义哪些帧可一起用于重建、按什么顺序使用、哪些温度段必须隔离。
 
 ---
 
-## 🧠 第一性原理：EP01 要回答的核心问题
+## 核心问题
 
-在进入任何算法工作之前，我们必须确认：
+1. **原始帧是否完整可读？**
+   263 个 TXT 温度矩阵全部可读，矩阵尺寸一致为 480×640，无 NaN/Inf。
 
-1. **数据完好吗？** — 263 帧是否都可读、尺寸正确、无损坏？
-2. **坐标映射对吗？** — 文件名 → (X, Y, R) → 物理位移，这条链可靠吗？
-3. **旋转角 θ 对吗？** — 47.6° 是旧项目数值优化出来的，从未物理测量过，这是 SR 成败的关键参数
-4. **位移台精度够吗？** — 标称 1μm，但实际重复定位误差多大？
-5. **噪声有多大？** — 噪声底决定了 SR 的理论极限
-6. **Session 结构清楚吗？** — 哪些帧可以一起用，哪些不能混？
+2. **TXT/BMP 是否一一对应？**
+   263 个 TXT 与 263 个 BMP 完整配对。TXT 是数值重建输入，BMP 是同名视觉参考。
 
----
+3. **坐标覆盖是否足够支撑主 session SR？**
+   全数据覆盖 253/256 个实际坐标；缺失坐标为 (14,6)、(16,6)、(16,16)。主 session 同样覆盖这 253 个实际坐标。
 
-## 📋 任务清单
+4. **真实采集顺序是什么？**
+   文件名不是时序。后续必须使用 `acquisition_order`/mtime，而不是按 `X_Y_R` 文件名字母序排序。
 
-### Phase 0: 项目脚手架 ✅
-
-- [x] 0.1 创建 AGENTS.md 记忆文件
-- [x] 0.2 创建项目目录结构
-- [x] 0.3 创建物理参数配置文件（`configs/*.json`）
-- [x] 0.4 初始化根目录 UV 项目
-
-### Phase 1: 数据重命名 ✅
-
-- [x] 1.1 编写重命名脚本（dry-run 验证）
-- [x] 1.2 执行重命名（526 文件，0 错误）
-- [x] 1.3 生成 rename_mapping.csv → `output/ep01_data_processing/`
-
-### Phase 2: 数据完整性审计 ✅
-
-- [x] 2.1 **矩阵读取验证** — 263 帧全部 480×640，0 NaN，0 Inf
-- [x] 2.2 **BMP-TXT 配对检查** — 263/263 完美配对，0 孤立文件
-- [x] 2.3 **缺失数据校验** — 3 个 known_missing 坐标**完全不存在**（不仅是缺 R=0）
-- [x] 2.4 **坐标覆盖率可视化** — 覆盖率图已生成
-
-### Phase 3: 温度统计与 Session 检测 ✅
-
-- [x] 3.1 **逐帧温度统计** — 全局 [18.21, 26.80]°C，均温 [19.69, 23.85]°C
-- [x] 3.2 **温度分布直方图** — 已生成四子图
-- [x] 3.3 **Session 自动检测** — 按真实采集顺序检测到 3 个温度段（主扫描 session=2, 255 帧）
-- [x] 3.4 **Session 分类验证** — 文件名排序的 13 sessions 已确认是排序伪影
-
-### Phase 4: 噪声表征
-
-- [ ] 4.1 **噪声底重新测量** — 相邻坐标差分法，与 0.0724°C 对比
-- [ ] 4.2 **固定模式噪声（FPN）检查** — 空间噪声是否有结构化模式
-- [ ] 4.3 **Session 内时间稳定性** — 同 session 不同帧之间的温度漂移
-
-### Phase 5: 文档与产出
-
-- [ ] 5.1 **数据集描述文档** → `docs/dataset_description.md`（已初稿，待数据验证后更新）
-- [x] 5.2 **审计报告** → `reports/ep01_data_processing/audit_report.md`
-- [x] 5.3 **验证 Notebook** → `notebooks/ep01_data_processing/`
-
-> ℹ️ 旋转角 θ 独立验证 + 位移台精度评估 → 已拆到 **EP02**
+5. **哪些帧可用于默认 SR POC？**
+   采集顺序下检测到 3 个温度段；主 session 为 session=2，共 255 帧，是默认 2x contour-level SR 输入。
 
 ---
 
-## 📊 关键数据指标
+## 任务清单
 
-| 指标 | 旧项目值 | 本项目验证 | 状态 |
-|------|----------|------------|------|
-| TXT 数量 | 263 | 263 | ✅ |
-| BMP 数量 | 263 | 263 | ✅ |
-| 矩阵尺寸 | 480×640 | 480×640 (全部一致) | ✅ |
-| 唯一坐标 | 253 | 253 | ✅ |
-| 3-repeat 坐标 | 6 个 (Y=0) | **4 个**: (0,0)(2,0)(6,0)(8,0) + 2个2-repeat: (4,0)(10,0) | ⚠️ 与旧项目不符 |
-| 缺失坐标 | 3 个缺 R=0 | 3 个坐标**完全不存在**: (14,6)(16,6)(16,16) | ⚠️ 不仅缺R=0 |
-| NaN/Inf | — | 0 / 0 | ✅ |
-| 旋转角 θ | 47.6° ± 0.1° | — | ⬜ **需独立验证** |
-| 噪声底 | 0.0724°C | — | ⬜ 待重新测量 |
-| 温度范围 | 18–27°C | [18.21, 26.80]°C | ✅ 基本一致 |
-| 均温范围 | — | [19.69, 23.85]°C | ✅ 新增 |
-| Session 数 | 22/6/4 分类 | 采集顺序 3 个温度段；主扫描 session=2, 255 帧 | ✅ |
-| 文件名序 session | — | 13 sessions | ⚠️ 排序伪影，不用于后续标定 |
-| 位移台精度 | ~1 μm | — | ⬜ 待评估 |
+### Phase 1: 文件清单与矩阵审计 ✅
+
+- [x] 扫描 TXT/BMP 文件清单
+- [x] 验证 TXT/BMP 配对关系
+- [x] 读取全部 TXT 温度矩阵
+- [x] 审计矩阵尺寸、NaN/Inf、温度范围
+- [x] 补充逐帧中位温、5-95% trimmed mean 等稳健温度统计
+
+### Phase 2: 坐标/R 覆盖建模 ✅
+
+- [x] 统计 `(X,Y,R)` 分布
+- [x] 验证缺失坐标和重复坐标
+- [x] 绘制全数据坐标覆盖 heatmap
+- [x] 绘制主 session vs 其他 session 坐标覆盖 heatmap
+
+### Phase 3: 采集顺序与 session 建模 ✅
+
+- [x] 基于 `acquisition_order`/mtime 建立真实采集顺序
+- [x] 绘制文件名顺序 vs 采集顺序温度曲线对比图
+- [x] 检测采集顺序下的 3 个温度段
+- [x] 标记 `session` 与 `is_main_session`
+- [x] 输出主 session 255 帧作为默认 SR 输入规则
+
+### Phase 4: 文档与产物 ✅
+
+- [x] 更新 notebook fragments
+- [x] 构建并执行 EP01 notebook
+- [x] 更新正式报告 `reports/ep01_data_processing/audit_report.md`
+- [x] 输出机器可读 CSV 到 `output/ep01_data_processing/`
 
 ---
 
-## 📝 决策记录
+## 关键数据指标
+
+| 指标 | EP01 结果 | SR 含义 |
+|------|----------|---------|
+| TXT 数量 | 263 | 完整审计对象 |
+| BMP 数量 | 263 | 同名视觉参考完整 |
+| 矩阵尺寸 | 480×640 | 全部帧共享同一 detector grid |
+| NaN/Inf | 0 / 0 | TXT 可直接用于数值处理 |
+| 全数据坐标覆盖 | 253/256 | 近完整二维扫描网格 |
+| 主 session | session=2, 255 帧 | 默认 SR POC 输入 |
+| 主 session 坐标覆盖 | 253/256 | 主 session 覆盖全部实际存在坐标 |
+| 文件名序 session | 13 个表观段 | 排序伪影，不用于后续 |
+| 采集顺序 session | 3 个温度段 | 用于帧选择与温度隔离 |
+| session 边界跳变 | 1.66°C / 4.16°C | 数十倍噪声底，跨 session 不混合 |
+| 主 session 均温跨度 | 0.62°C | 后续对齐和 SR 应在该温度带内完成 |
+
+---
+
+## 决策记录
 
 | 日期 | 决策 | 理由 |
 |------|------|------|
-| 2026-05-16 | 采用 `X_Y_R.ext` 命名格式 | 消歧义，枚举合法坐标唯一解 |
-| 2026-05-16 | 原地重命名（不复制） | 避免数据重复，526 文件已 dry-run 验证 |
-| 2026-05-16 | θ 必须独立验证 | 旧项目仅用数值优化估计，是 SR 成败关键参数 |
-| 2026-05-16 | 探测器尺寸 640×480 | EP01 实测全部 263 帧均为 480行×640列 |
-| 2026-05-16 | 3-repeat 坐标仅 4 个 | 旧项目称 6 个，实测仅 (0,0)(2,0)(6,0)(8,0) 有 R=0,1,2 |
-| 2026-05-16 | 3 个缺失坐标完全不存在 | (14,6)(16,6)(16,16) 无任何 R 值，不仅缺 R=0 |
-| 2026-05-17 | Notebook/报告输出必须解释数据 | 每个图、表、关键指标后都要说明数据是什么、分布是什么、核心发现是什么 |
-| 2026-05-17 | Session 必须按 `acquisition_order` 检测 | 文件名排序会把 repeat/预热帧插入主扫描，制造 13 个假 session |
-| 2026-05-17 | 重命名坐标核查通过 | R=0 采集顺序为 Y 行递增、行内 X 递增，行内 X 顺序不匹配数为 0 |
+| 2026-05-16 | 采用 `X_Y_R.ext` 命名格式 | 消除原始连写文件名歧义，保留坐标/R 信息 |
+| 2026-05-16 | TXT 作为数值输入，BMP 作为视觉参考 | TXT 是 raw 温度矩阵，BMP 不是 SR 输入 |
+| 2026-05-17 | Session 检测必须使用 `acquisition_order`/mtime | 文件名排序会制造 13 个表观 session |
+| 2026-05-17 | 主 session=2 作为默认 SR 输入 | 该段包含 255 帧并覆盖全部实际存在坐标 |
+| 2026-05-18 | EP01 范围收敛到 SR 数据基础 | 旋转角、alignment anchor、SR 算法验证分别由后续 Episode 处理 |
+| 2026-05-18 | stage/文件名坐标只作为 prior | 对齐真值必须由图像数据与后续 EP04 localization 质量门控约束 |
 
 ---
 
-## 📂 相关文件
+## 输出文件
 
-- 物理配置: `configs/stage_calibration.json`, `configs/noise_floor.json`, `configs/coordinate_set.json`
-- 数据集描述: `docs/dataset_description.md`
-- 重命名脚本: `scripts/rename_data.py`
-- 重命名映射: `output/ep01_data_processing/rename_mapping.csv`
-- 审计报告: `reports/ep01_data_processing/audit_report.md`
-- 审计 CSV: `output/ep01_data_processing/frame_audit.csv`
-- 采集顺序核查: `output/ep01_data_processing/acquisition_order_audit.csv`
-- Notebooks: `notebooks/ep01_data_processing/`
-- 构建: `uv run python scripts/build_notebook.py notebooks/ep01_data_processing --execute`
+- Notebook fragments: `notebooks/ep01_data_processing/fragments/`
+- Notebook 构建产物: `notebooks/ep01_data_processing/ep01_data_processing.ipynb`
+- 正式报告: `reports/ep01_data_processing/audit_report.md`
+- 帧审计 CSV: `output/ep01_data_processing/frame_audit.csv`
+- 采集顺序审计 CSV: `output/ep01_data_processing/acquisition_order_audit.csv`
+- SR 汇总 CSV: `output/ep01_data_processing/sr_data_basis_summary.csv`
+- 图表:
+  - `coordinate_coverage_map.png`
+  - `frame_temperature_statistics.png`
+  - `robust_temperature_timeline.png`
+  - `order_comparison.png`
+  - `session_detection.png`
+  - `session_coordinate_coverage.png`
+
+---
+
+## 重建命令
+
+```bash
+uv run python scripts/build_notebook.py notebooks/ep01_data_processing --execute
+```
