@@ -3,8 +3,10 @@
 from __future__ import annotations
 
 import json
+from collections import Counter
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import asdict, dataclass
+from itertools import combinations
 from pathlib import Path
 from typing import Iterable
 
@@ -12,6 +14,7 @@ import cv2
 import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+from matplotlib.colors import BoundaryNorm, ListedColormap
 from matplotlib.collections import LineCollection
 from scipy.interpolate import make_interp_spline
 from scipy.ndimage import gaussian_filter, map_coordinates
@@ -1765,6 +1768,129 @@ def plot_anchor_scanline_support(
     return fig
 
 
+def _segment_scanline_matrix(results: pd.DataFrame) -> tuple[np.ndarray, pd.DataFrame, list[float]]:
+    """Return a pass/fail matrix ordered to expose bad segments and bad scanlines."""
+    if results.empty:
+        return np.empty((0, 0)), pd.DataFrame(), []
+
+    data = results.copy()
+    data["segment_id_int"] = pd.to_numeric(data["segment_id"], errors="coerce")
+    data["scanline_y_um"] = pd.to_numeric(data["scanline_y_um"], errors="coerce")
+    data["pass_value"] = _bool_mask(data, "pass_fail").astype(float)
+    data = data.dropna(subset=["segment_id_int", "scanline_y_um"])
+    if data.empty:
+        return np.empty((0, 0)), pd.DataFrame(), []
+
+    scanlines = sorted(data["scanline_y_um"].unique().tolist())
+    matrix_frame = data.pivot_table(
+        index="segment_id_int",
+        columns="scanline_y_um",
+        values="pass_value",
+        aggfunc="max",
+    ).reindex(columns=scanlines)
+    order = (
+        pd.DataFrame(
+            {
+                "segment_id": matrix_frame.index.astype(int),
+                "segment_pass_rate": matrix_frame.mean(axis=1).to_numpy(dtype=float),
+            }
+        )
+        .sort_values(["segment_pass_rate", "segment_id"], ascending=[True, True])
+        .reset_index(drop=True)
+    )
+    matrix_frame = matrix_frame.reindex(order["segment_id"].astype(float).tolist())
+    return matrix_frame.to_numpy(dtype=float), order, scanlines
+
+
+def plot_segment_scanline_pass_heatmap(
+    outer_results: pd.DataFrame,
+    inner_results: pd.DataFrame,
+) -> plt.Figure:
+    """Plot segment x scanline pass/fail heatmaps for outer and inner gates."""
+    fig, axes = make_figure("double_col", nrows=1, ncols=2, height=4.4)
+    axes = np.asarray(axes).ravel()
+    cmap = ListedColormap([EP04_GATE_REJECT_COLOR, EP04_ANCHOR_COLOR])
+    cmap.set_bad("#F4F5F7")
+    norm = BoundaryNorm([-0.5, 0.5, 1.5], cmap.N)
+    last_image = None
+
+    for ax, contour, results in [
+        (axes[0], "outer", outer_results),
+        (axes[1], "inner", inner_results),
+    ]:
+        matrix, order, scanlines = _segment_scanline_matrix(results)
+        if matrix.size == 0:
+            ax.text(0.5, 0.5, f"No {contour} rows", transform=ax.transAxes, ha="center", va="center")
+            ax.set_axis_off()
+            continue
+
+        masked = np.ma.masked_invalid(matrix)
+        last_image = ax.imshow(masked, aspect="auto", interpolation="nearest", cmap=cmap, norm=norm)
+        ax.set_xticks(np.arange(len(scanlines)))
+        ax.set_xticklabels([f"{int(v)}" for v in scanlines], rotation=45, ha="right")
+        n_rows = len(order)
+        y_ticks = np.unique(np.linspace(0, n_rows - 1, min(6, n_rows), dtype=int))
+        ax.set_yticks(y_ticks)
+        ax.set_yticklabels(order.loc[y_ticks, "segment_id"].astype(int).astype(str).tolist())
+        ax.set_xlabel("Scanline Y [um]")
+        ax.set_ylabel("Segment ID, sorted by pass rate")
+        ax.set_title(f"{contour.title()} segment x scanline gate")
+        ax.grid(False)
+
+    if last_image is not None:
+        cbar = fig.colorbar(last_image, ax=axes.tolist(), ticks=[0, 1], fraction=0.035, pad=0.02)
+        cbar.ax.set_yticklabels(["reject", "pass"])
+        format_colorbar(cbar, "Row-level gate")
+    return fig
+
+
+def scanline_segment_failure_summary_table(
+    outer_results: pd.DataFrame,
+    inner_results: pd.DataFrame,
+) -> pd.DataFrame:
+    """Summarize whether failures concentrate by scanline or by segment."""
+    rows: list[dict] = []
+    for contour, results in [("outer", outer_results), ("inner", inner_results)]:
+        if results.empty:
+            continue
+        data = results.copy()
+        data["pass_bool"] = _bool_mask(data, "pass_fail")
+        data["segment_id_int"] = pd.to_numeric(data["segment_id"], errors="coerce")
+        data["scanline_y_um"] = pd.to_numeric(data["scanline_y_um"], errors="coerce")
+        data = data.dropna(subset=["segment_id_int", "scanline_y_um"])
+        if data.empty:
+            continue
+
+        by_scanline = (
+            data.groupby("scanline_y_um", dropna=False)
+            .agg(row_count=("pass_bool", "size"), row_pass_rate=("pass_bool", "mean"))
+            .reset_index()
+            .sort_values(["row_pass_rate", "scanline_y_um"])
+        )
+        by_segment = (
+            data.groupby("segment_id_int", dropna=False)
+            .agg(row_count=("pass_bool", "size"), segment_pass_rate=("pass_bool", "mean"))
+            .reset_index()
+            .sort_values(["segment_pass_rate", "segment_id_int"])
+        )
+        weakest_line = by_scanline.iloc[0]
+        weakest_segment = by_segment.iloc[0]
+        rows.append(
+            {
+                "contour": contour,
+                "evaluated_rows": int(len(data)),
+                "overall_row_pass_rate": float(data["pass_bool"].mean()),
+                "weakest_scanline_y_um": float(weakest_line["scanline_y_um"]),
+                "weakest_scanline_pass_rate": float(weakest_line["row_pass_rate"]),
+                "zero_pass_scanlines": int(by_scanline["row_pass_rate"].eq(0.0).sum()),
+                "weakest_segment_id": int(weakest_segment["segment_id_int"]),
+                "weakest_segment_pass_rate": float(weakest_segment["segment_pass_rate"]),
+                "zero_pass_segments": int(by_segment["segment_pass_rate"].eq(0.0).sum()),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def _split_fail_reasons(value: object) -> list[str]:
     reasons = [item.strip() for item in str(value).split(";")]
     return [item for item in reasons if item and item != "pass" and item.lower() != "nan"]
@@ -1786,6 +1912,152 @@ def failure_reason_table(results: pd.DataFrame, *, contour: str) -> pd.DataFrame
             "share_of_failed_rows": counts.to_numpy(dtype=float) / max(int(len(failed)), 1),
         }
     )
+
+
+def failure_cooccurrence_table(
+    outer_results: pd.DataFrame,
+    inner_results: pd.DataFrame,
+    *,
+    top_n: int = 8,
+) -> pd.DataFrame:
+    """Summarize multi-label failure reasons and their strongest co-occurrences."""
+    rows: list[dict] = []
+    for contour, results in [("outer", outer_results), ("inner", inner_results)]:
+        if results.empty:
+            continue
+        failed = results.loc[~_bool_mask(results, "pass_fail")].copy()
+        reason_lists = [sorted(set(_split_fail_reasons(value))) for value in failed["fail_reason"]]
+        reason_counts: Counter[str] = Counter()
+        pair_counts: Counter[tuple[str, str]] = Counter()
+        for reasons in reason_lists:
+            reason_counts.update(reasons)
+            pair_counts.update(combinations(reasons, 2))
+
+        failed_rows = int(len(failed))
+        for reason, count in reason_counts.most_common(int(top_n)):
+            co_counts: Counter[str] = Counter()
+            for pair, pair_count in pair_counts.items():
+                if reason == pair[0]:
+                    co_counts[pair[1]] += pair_count
+                elif reason == pair[1]:
+                    co_counts[pair[0]] += pair_count
+            top_co_reason = ""
+            top_co_count = 0
+            if co_counts:
+                top_co_reason, top_co_count = co_counts.most_common(1)[0]
+            rows.append(
+                {
+                    "contour": contour,
+                    "reason": reason,
+                    "triggered_rows": int(count),
+                    "failed_rows": failed_rows,
+                    "share_of_failed_rows": float(count / max(failed_rows, 1)),
+                    "top_co_reason": top_co_reason,
+                    "top_co_triggered_rows": int(top_co_count),
+                    "top_co_share_of_reason": float(top_co_count / max(int(count), 1)),
+                }
+            )
+    return pd.DataFrame(rows)
+
+
+def ncc_esf_failure_diagnostic_table(
+    outer_results: pd.DataFrame,
+    inner_results: pd.DataFrame,
+) -> pd.DataFrame:
+    """Separate NCC quality from ESF/model/stability failure modes."""
+    rows: list[dict] = []
+    esf_reasons = {
+        "sigma_out_of_range",
+        "split_half_high",
+        "low_phase_coverage",
+        "psf_sensitivity_high",
+    }
+    for contour, results in [("outer", outer_results), ("inner", inner_results)]:
+        if results.empty:
+            continue
+        data = results.copy()
+        data["pass_bool"] = _bool_mask(data, "pass_fail")
+        failed = data.loc[~data["pass_bool"]].copy()
+        reason_lists = [set(_split_fail_reasons(value)) for value in failed["fail_reason"]]
+
+        def share_with(predicate) -> float:
+            if not reason_lists:
+                return np.nan
+            return float(np.mean([predicate(reasons) for reasons in reason_lists]))
+
+        ncc_peak = pd.to_numeric(failed.get("median_ncc_peak", pd.Series(index=failed.index)), errors="coerce")
+        ncc_fit_ok = pd.to_numeric(failed.get("ncc_fit_ok_fraction", pd.Series(index=failed.index)), errors="coerce")
+        phase = pd.to_numeric(failed.get("phase_coverage_px", pd.Series(index=failed.index)), errors="coerce")
+        sigma = pd.to_numeric(failed.get("fitted_sigma_px", pd.Series(index=failed.index)), errors="coerce")
+        split = pd.to_numeric(failed.get("split_half_diff_px", pd.Series(index=failed.index)), errors="coerce")
+        rows.append(
+            {
+                "contour": contour,
+                "failed_rows": int(len(failed)),
+                "median_failed_ncc_peak": float(ncc_peak.median()) if not ncc_peak.dropna().empty else np.nan,
+                "p10_failed_ncc_peak": float(ncc_peak.quantile(0.10)) if not ncc_peak.dropna().empty else np.nan,
+                "share_failed_ncc_peak_above_gate": float(ncc_peak.ge(QUALITY_GATES["min_ncc_peak"]).mean()) if len(failed) else np.nan,
+                "median_failed_ncc_fit_ok_fraction": float(ncc_fit_ok.median()) if not ncc_fit_ok.dropna().empty else np.nan,
+                "ncc_unreliable_share": share_with(lambda reasons: "ncc_unreliable" in reasons),
+                "fit_error_share": share_with(lambda reasons: any(reason.startswith("fit_error") for reason in reasons)),
+                "sigma_out_of_range_share": share_with(lambda reasons: "sigma_out_of_range" in reasons),
+                "split_half_high_share": share_with(lambda reasons: "split_half_high" in reasons),
+                "low_phase_coverage_share": share_with(lambda reasons: "low_phase_coverage" in reasons),
+                "esf_or_stability_share": share_with(
+                    lambda reasons: bool(reasons & esf_reasons)
+                    or any(reason.startswith("fit_error") for reason in reasons)
+                ),
+                "median_failed_phase_coverage_px": float(phase.median()) if not phase.dropna().empty else np.nan,
+                "median_failed_sigma_px": float(sigma.median()) if not sigma.dropna().empty else np.nan,
+                "median_failed_split_half_px": float(split.median()) if not split.dropna().empty else np.nan,
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def ep06_role_margin_table(recommendations: pd.DataFrame) -> pd.DataFrame:
+    """Audit how far each EP06 role sits from alignment-input numeric thresholds."""
+    if recommendations.empty:
+        return pd.DataFrame()
+
+    data = recommendations.copy()
+    data["pass_rate"] = pd.to_numeric(data.get("pass_rate"), errors="coerce")
+    data["split_half_median_px"] = pd.to_numeric(data.get("split_half_median_px"), errors="coerce")
+    data["crb_ratio_median"] = pd.to_numeric(data.get("crb_ratio_median"), errors="coerce")
+    data["phase_coverage_median_px"] = pd.to_numeric(data.get("phase_coverage_median_px"), errors="coerce")
+    data["pass_rate_margin"] = data["pass_rate"] - 0.70
+    data["split_margin_px"] = 0.06 - data["split_half_median_px"]
+    data["crb_ratio_margin"] = 5.0 - data["crb_ratio_median"]
+    data["phase_margin_px"] = data["phase_coverage_median_px"] - QUALITY_GATES["min_phase_range_px"]
+
+    norm_columns = {
+        "pass_rate_to_0.70": data["pass_rate_margin"] / 0.70,
+        "split_to_0.06px": data["split_margin_px"] / 0.06,
+        "crb_to_5x": data["crb_ratio_margin"] / 5.0,
+        "phase_to_0.15px": data["phase_margin_px"] / QUALITY_GATES["min_phase_range_px"],
+    }
+    norm = pd.DataFrame(norm_columns, index=data.index)
+    data["alignment_margin_min"] = norm.min(axis=1)
+    data["closest_alignment_gate"] = norm.idxmin(axis=1)
+
+    rows: list[dict] = []
+    for (contour, role), group in data.groupby(["contour", "ep06_role"], dropna=False, sort=True):
+        closest = group["closest_alignment_gate"].mode()
+        rows.append(
+            {
+                "contour": contour,
+                "ep06_role": role,
+                "n_segments": int(len(group)),
+                "median_pass_rate_margin": float(group["pass_rate_margin"].median()),
+                "median_split_margin_px": float(group["split_margin_px"].median()),
+                "median_crb_ratio_margin": float(group["crb_ratio_margin"].median()),
+                "median_phase_margin_px": float(group["phase_margin_px"].median()),
+                "p10_alignment_margin_min": float(group["alignment_margin_min"].quantile(0.10)),
+                "closest_alignment_gate": str(closest.iloc[0]) if not closest.empty else "",
+                "near_threshold_segments": int(group["alignment_margin_min"].abs().le(0.15).sum()),
+            }
+        )
+    return pd.DataFrame(rows)
 
 
 def _display_gate_label(value: object) -> str:
@@ -2053,6 +2325,14 @@ def create_ep04_anchor_gate_figures(
             inner_segment_summary,
         ),
         "ep06_gate_recommendations.png": plot_ep06_gate_recommendations(recommendations),
+        "segment_scanline_pass_heatmap.png": plot_segment_scanline_pass_heatmap(
+            outer_results,
+            inner_results,
+        ),
+        "normal_angle_coverage.png": plot_normal_angle_coverage_comparison(
+            outer_segment_summary,
+            inner_segment_summary,
+        ),
     }
     saved = {}
     for name, fig in figures.items():

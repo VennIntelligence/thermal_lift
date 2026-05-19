@@ -291,6 +291,39 @@ def stage_prior_summary(
     )
 
 
+def stage_prior_contract_table(
+    frame_audit: pd.DataFrame,
+    *,
+    theta_deg: float,
+    pixel_size_um: float,
+    max_rows: int = 10,
+) -> pd.DataFrame:
+    main = main_session(frame_audit)
+    cols = ["acquisition_order", "file", "X", "Y", "R"]
+    prior = add_stage_prior(main[cols], theta_deg=theta_deg, pixel_size_um=pixel_size_um)
+    prior = prior.sort_values("acquisition_order").head(max_rows).copy()
+    prior["stage_prior_dx_px"] = prior["stage_prior_dx_px"].round(4)
+    prior["stage_prior_dy_px"] = prior["stage_prior_dy_px"].round(4)
+    prior["stage_prior_phase_x"] = prior["stage_prior_phase_x"].round(4)
+    prior["stage_prior_phase_y"] = prior["stage_prior_phase_y"].round(4)
+    prior["contract"] = "prior/init/regularization only"
+    return prior[
+        [
+            "acquisition_order",
+            "file",
+            "X",
+            "Y",
+            "R",
+            "stage_prior_dx_px",
+            "stage_prior_dy_px",
+            "stage_prior_phase_x",
+            "stage_prior_phase_y",
+            "phase2_bin",
+            "contract",
+        ]
+    ]
+
+
 def load_ep02_tables(output_dir: Path) -> dict[str, pd.DataFrame]:
     required = {
         "gap": "coordinate_pair_time_gap_audit.csv",
@@ -564,7 +597,7 @@ def decision_table() -> pd.DataFrame:
             "evidence": "Stage/filename coordinate prior",
             "use_for": "coverage planning, initialization, regularization",
             "do_not_use_for": "alignment truth or success metric",
-            "reason": "commanded X/Y is metadata; real frame alignment must be checked in the image data",
+            "reason": "commanded X/Y is metadata; alignment evidence must be supported by the image data",
         },
         {
             "evidence": "Data-driven contour/NCC alignment",
@@ -599,3 +632,215 @@ def write_decision_table(output_dir: Path) -> pd.DataFrame:
     output_dir.mkdir(parents=True, exist_ok=True)
     table.to_csv(output_dir / "ep02_alignment_evidence_decision_table.csv", index=False)
     return table
+
+
+def _read_required_csv(output_dir: Path, filename: str) -> pd.DataFrame:
+    path = output_dir / filename
+    if not path.exists():
+        raise FileNotFoundError(f"Missing EP02 table: {path}")
+    return pd.read_csv(path)
+
+
+def _format_ci(lower: float, upper: float, digits: int = 2) -> str:
+    return f"[{lower:.{digits}f}, {upper:.{digits}f}]"
+
+
+def time_adjacent_method_comparison(output_dir: Path) -> pd.DataFrame:
+    """Summarize true time-adjacent X steps and row transitions by method."""
+    summary = _read_required_csv(output_dir, "time_adjacent_method_summary.csv")
+    method_order = {"raw_ncc": 0, "highpass_ncc": 1, "gradient_ncc": 2, "phase_corr": 3}
+    move_order = {"x_step": 0, "row_transition": 1}
+    method_label = {
+        "raw_ncc": "raw NCC",
+        "highpass_ncc": "high-pass NCC",
+        "gradient_ncc": "gradient NCC",
+        "phase_corr": "phase correlation",
+    }
+    move_label = {
+        "x_step": "X-step, acquisition gap=1",
+        "row_transition": "row transition, Y advance + X reset",
+    }
+    out = summary.copy()
+    out["method_sort"] = out["method_label"].map(method_order).fillna(99)
+    out["move_sort"] = out["move_type"].map(move_order).fillna(99)
+    out = out.sort_values(["move_sort", "method_sort"]).reset_index(drop=True)
+    out["evidence window"] = out["move_type"].map(move_label).fillna(out["move_type"])
+    out["method"] = out["method_label"].map(method_label).fillna(out["method_label"])
+    out["pairs"] = out["n_pairs"].astype(int)
+    out["prior mag [px]"] = out["median_ref_mag_px"].round(4)
+    out["visible/prior projection"] = out["median_projection_ratio"].round(3)
+    out["RMS vs prior [px]"] = out["rms_ref_residual_px"].round(4)
+    out["perp median [px]"] = out["median_abs_perpendicular_px"].round(4)
+    out["median score"] = out["median_peak_score"].round(4)
+    out["use boundary"] = np.where(
+        out["move_type"].eq("x_step"),
+        "local direction/linearity smoke test only",
+        "not a clean Y-only calibration pair",
+    )
+    return out[
+        [
+            "evidence window",
+            "method",
+            "pairs",
+            "prior mag [px]",
+            "visible/prior projection",
+            "RMS vs prior [px]",
+            "perp median [px]",
+            "median score",
+            "use boundary",
+        ]
+    ]
+
+
+def y_coordinate_failure_table(output_dir: Path) -> pd.DataFrame:
+    """Summarize coordinate-neighbor Y-only failure across preprocessing methods."""
+    summary = _read_required_csv(output_dir, "y_coordinate_method_summary.csv")
+    method_order = {"raw_ncc": 0, "highpass_ncc": 1, "gradient_ncc": 2}
+    method_label = {
+        "raw_ncc": "raw NCC",
+        "highpass_ncc": "high-pass NCC",
+        "gradient_ncc": "gradient NCC",
+    }
+    rows = []
+    for method, group in summary.groupby("method_label"):
+        by_delta = group.set_index("delta_um")
+        if not {2.0, 4.0}.issubset(by_delta.index):
+            continue
+        two = by_delta.loc[2.0]
+        four = by_delta.loc[4.0]
+        rows.append(
+            {
+                "method_sort": method_order.get(method, 99),
+                "method": method_label.get(method, method),
+                "pairs 2um / 4um": f"{int(two['n_pairs'])} / {int(four['n_pairs'])}",
+                "2um projection/prior": round(float(two["median_projection_ratio"]), 3),
+                "4um projection/prior": round(float(four["median_projection_ratio"]), 3),
+                "visible 4um/2um": round(float(four["median_parallel_px"] / two["median_parallel_px"]), 3),
+                "expected 4um/2um": 2.0,
+                "RMS 2um / 4um [px]": f"{float(two['rms_ref_residual_px']):.4f} / {float(four['rms_ref_residual_px']):.4f}",
+                "interpretation": "stable failure; do not use as Y calibration",
+            }
+        )
+    out = pd.DataFrame(rows).sort_values("method_sort").drop(columns="method_sort")
+    return out.reset_index(drop=True)
+
+
+def avi_theta_compact_table(output_dir: Path, *, reference_theta_deg: float = 47.6) -> pd.DataFrame:
+    """Format AVI theta estimates as auxiliary validation evidence."""
+    summary = _read_required_csv(output_dir, "avi_theta_summary.csv")
+    method_order = {"gradient": 0, "highpass": 1}
+    source_order = {"x-only": 0, "y-only": 1, "combined": 2}
+    out = summary.copy()
+    out["method_sort"] = out["method"].map(method_order).fillna(99)
+    out["source_sort"] = out["source"].map(source_order).fillna(99)
+    out = out.sort_values(["method_sort", "source_sort"]).reset_index(drop=True)
+    out["theta mean [deg]"] = out["mean_deg"].round(2)
+    out["theta median [deg]"] = out["median_deg"].round(2)
+    out["95% CI [deg]"] = [
+        _format_ci(lo, hi, digits=2)
+        for lo, hi in zip(out["ci_lower_deg"].to_numpy(float), out["ci_upper_deg"].to_numpy(float))
+    ]
+    out["range [deg]"] = [
+        _format_ci(lo, hi, digits=2)
+        for lo, hi in zip(out["min_deg"].to_numpy(float), out["max_deg"].to_numpy(float))
+    ]
+    out[f"covers {reference_theta_deg:.1f} deg"] = out["within_ci_47_6"].map({True: "yes", False: "no"})
+    out["use boundary"] = np.where(
+        out["source"].eq("combined") & out["method"].eq("gradient"),
+        "auxiliary validation; keep config theta",
+        "diagnostic subgroup, not config replacement",
+    )
+    return out[
+        [
+            "method",
+            "source",
+            "n",
+            "theta mean [deg]",
+            "theta median [deg]",
+            "95% CI [deg]",
+            "range [deg]",
+            f"covers {reference_theta_deg:.1f} deg",
+            "use boundary",
+        ]
+    ]
+
+
+def avi_txt_line_match_table(output_dir: Path) -> pd.DataFrame:
+    """Summarize AVI filename-to-TXT line mapping checks for X and Y scans."""
+    specs = [
+        ("X-scan AVI", "avi_txt_xline_match_summary.csv", "fixed_y", "xN.avi -> TXT fixed Y=N", "expected"),
+        ("X-scan AVI", "avi_txt_xline_match_summary.csv", "fixed_x", "xN.avi -> TXT fixed X=N", "rejected"),
+        ("Y-scan AVI", "avi_txt_yline_match_summary.csv", "fixed_x", "yN.avi -> TXT fixed X=N", "expected"),
+        ("Y-scan AVI", "avi_txt_yline_match_summary.csv", "fixed_y", "yN.avi -> TXT fixed Y=N", "rejected"),
+    ]
+    rows = []
+    for avi_group, filename, mapping, hypothesis, decision in specs:
+        df = _read_required_csv(output_dir, filename)
+        subset = df[df["mapping"].eq(mapping)]
+        if subset.empty:
+            continue
+        rows.append(
+            {
+                "AVI group": avi_group,
+                "mapping hypothesis": hypothesis,
+                "decision": decision,
+                "lines": int(subset["avi"].nunique()),
+                "contour axis diff [deg]": round(float(subset["contour_axis_diff_to_avi_highpass_deg"].median()), 2),
+                "high-pass axis diff [deg]": round(float(subset["highpass_axis_diff_to_avi_median_deg"].median()), 2),
+                "gradient axis diff [deg]": round(float(subset["gradient_axis_diff_to_avi_median_deg"].median()), 2),
+                "acquisition gap median": round(float(subset["acquisition_gap_median"].median()), 1),
+                "interpretation": (
+                    "filename mapping is correct"
+                    if decision == "expected"
+                    else "orthogonal line hypothesis"
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
+def historical_ncc_failure_audit(output_dir: Path) -> pd.DataFrame:
+    """Record the old coordinate-adjacent NCC failure as a bounded diagnostic."""
+    theta = load_json(output_dir / "theta_estimate.json")
+    linearity = _read_required_csv(output_dir, "linearity.csv")
+    repeat = _read_required_csv(output_dir, "repeatability.csv")
+    y_failure = y_coordinate_failure_table(output_dir)
+
+    projection = linearity.set_index("component").loc["projection"]
+    valid_repeat = repeat.query("fit_ok == True and edge_peak == False")
+    hp_ratio = float(
+        y_failure.loc[y_failure["method"].eq("high-pass NCC"), "visible 4um/2um"].iloc[0]
+    )
+    rows = [
+        {
+            "old diagnostic": "coordinate-adjacent NCC theta",
+            "value": f"{theta['theta_deg_y_up_diagnostic']:.2f} deg, CI {_format_ci(theta['ci_lower_y_up'], theta['ci_upper_y_up'], 2)}",
+            "current interpretation": "failure audit; does not update theta",
+        },
+        {
+            "old diagnostic": "reference theta in old CI",
+            "value": "yes" if theta["reference_in_y_up_ci"] else "no",
+            "current interpretation": "evidence that coordinate-adjacent NCC was contaminated",
+        },
+        {
+            "old diagnostic": "single-rotation RMS residual",
+            "value": f"{theta['rms_error_px_y_up']:.4f} px",
+            "current interpretation": "local registration residual, not an SR threshold",
+        },
+        {
+            "old diagnostic": "projection linearity R2",
+            "value": f"{float(projection['r2']):.4f}",
+            "current interpretation": "old coordinate-neighbor model failed globally",
+        },
+        {
+            "old diagnostic": "valid repeat pairs",
+            "value": f"{len(valid_repeat)} / {len(repeat)}",
+            "current interpretation": "no usable repeatability calibration from these pairs",
+        },
+        {
+            "old diagnostic": "Y high-pass visible 4um/2um",
+            "value": f"{hp_ratio:.3f} (expected about 2)",
+            "current interpretation": "Y-only coordinate neighbors fail monotonicity",
+        },
+    ]
+    return pd.DataFrame(rows)

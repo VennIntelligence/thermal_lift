@@ -109,6 +109,43 @@ def build_sampling_resolution_table(
     )
 
 
+def build_output_grid_nyquist_table(
+    *,
+    detector_pitch_um: float = 10.0,
+    spatial_resolution_um: float = 20.0,
+    grid_factors: tuple[int, ...] = (1, 2, 4),
+) -> pd.DataFrame:
+    """Return output-grid sample spacing and the implied Nyquist period.
+
+    The Nyquist period is twice the sample spacing of an output grid. It is a
+    sampling property, not a calibrated optical-resolution claim.
+    """
+    rows: list[dict] = []
+    for factor in grid_factors:
+        grid_pitch_um = float(detector_pitch_um) / float(factor)
+        nyquist_period_um = 2.0 * grid_pitch_um
+        rows.append(
+            {
+                "grid_label": f"{int(factor)}x",
+                "output_sample_um": grid_pitch_um,
+                "output_sample_detector_px": 1.0 / float(factor),
+                "nyquist_period_um": nyquist_period_um,
+                "nyquist_period_detector_px": nyquist_period_um / float(detector_pitch_um),
+                "nyquist_cyc_per_detector_px": 0.5 * float(factor),
+                "current_spatial_resolution_um": float(spatial_resolution_um),
+                "resolution_to_nyquist_period": float(spatial_resolution_um) / nyquist_period_um,
+                "interpretation": (
+                    "LR detector grid"
+                    if factor == 1
+                    else "default 2x contour-level POC grid"
+                    if factor == 2
+                    else "exploratory display/ablation grid, not a default claim"
+                ),
+            }
+        )
+    return pd.DataFrame(rows)
+
+
 def build_mtf_attenuation_table(
     *,
     detector_pitch_um: float = 10.0,
@@ -132,6 +169,68 @@ def build_mtf_attenuation_table(
                     "attenuation_db": 20.0 * np.log10(max(mtf, 1e-12)),
                 }
             )
+    return pd.DataFrame(rows)
+
+
+def build_mtf_snr_recoverability_table(
+    contrast_table: pd.DataFrame,
+    *,
+    noise_sigma_c: float,
+    sigmas_px: tuple[float, ...] = (0.2, 0.35, 0.5),
+    grid_factors: tuple[int, ...] = (1, 2, 4),
+    detector_pitch_um: float = 10.0,
+) -> pd.DataFrame:
+    """Combine local contrast, Gaussian MTF, and noise into effective SNR.
+
+    ``effective_snr = DeltaT * MTF(f, sigma) / noise`` is a necessary-condition
+    risk indicator. It does not prove SR success, because it ignores alignment
+    errors, model mismatch, thermal drift, and structural consistency.
+    """
+    if contrast_table.empty:
+        raise ValueError("contrast_table must contain at least one contrast level")
+    required = {"label", "delta_t_c"}
+    missing = required - set(contrast_table.columns)
+    if missing:
+        raise ValueError(f"contrast_table missing columns: {sorted(missing)}")
+
+    rows: list[dict] = []
+    for _, contrast in contrast_table.iterrows():
+        delta_t_c = float(contrast["delta_t_c"])
+        source = str(contrast.get("source", "reference"))
+        label = str(contrast["label"])
+        for factor in grid_factors:
+            frequency = 0.5 * float(factor)
+            for sigma in sigmas_px:
+                mtf = float(gaussian_mtf(frequency, float(sigma)))
+                effective_delta_t = delta_t_c * mtf
+                effective_snr = effective_delta_t / float(noise_sigma_c)
+                if effective_snr >= 5.0:
+                    risk_band = "observable"
+                elif effective_snr >= 3.0:
+                    risk_band = "borderline"
+                elif effective_snr >= 1.0:
+                    risk_band = "weak"
+                else:
+                    risk_band = "noise-dominated"
+                rows.append(
+                    {
+                        "source": source,
+                        "contrast_label": label,
+                        "delta_t_c": delta_t_c,
+                        "input_snr": delta_t_c / float(noise_sigma_c),
+                        "grid_factor": int(factor),
+                        "grid_label": f"{int(factor)}x",
+                        "grid_pitch_um": float(detector_pitch_um) / float(factor),
+                        "nyquist_cyc_per_detector_px": frequency,
+                        "sigma_psf_px": float(sigma),
+                        "mtf_amplitude": mtf,
+                        "effective_delta_t_c": effective_delta_t,
+                        "effective_snr": effective_snr,
+                        "passes_3x_noise": bool(effective_snr >= 3.0),
+                        "passes_5x_noise": bool(effective_snr >= 5.0),
+                        "risk_band": risk_band,
+                    }
+                )
     return pd.DataFrame(rows)
 
 
@@ -214,6 +313,74 @@ def build_crb_localization_table(
                     },
                 ]
             )
+    return pd.DataFrame(rows)
+
+
+def build_crb_sensitivity_table(
+    noise_sigma_c: float,
+    *,
+    contrasts_c: tuple[float, ...] = (0.3, 0.7, 1.0, 2.0),
+    sigma_values_px: tuple[float, ...] = (0.2, 0.35, 0.5, 1.0),
+    n_frames_values: tuple[int, ...] = (1, 4, 16, 64, 255),
+    phase_coverage_values_px: tuple[float, ...] = (0.0, 0.5, 1.0),
+) -> pd.DataFrame:
+    """Scan optimistic ESF CRB sensitivity over contrast, PSF, frames, phases."""
+    rows: list[dict] = []
+    for n_frames in n_frames_values:
+        coverages = (0.0,) if int(n_frames) <= 1 else phase_coverage_values_px
+        for phase_coverage in coverages:
+            shifts = uniform_phase_deltas(int(n_frames), float(phase_coverage))
+            for sigma in sigma_values_px:
+                for contrast in contrasts_c:
+                    crb_px = crb_multi_frame(
+                        contrast,
+                        sigma,
+                        noise_sigma_c,
+                        shifts,
+                    )
+                    if crb_px <= 0.05:
+                        gate_band = "passes 0.05 px"
+                    elif crb_px <= 0.10:
+                        gate_band = "passes 0.10 px"
+                    else:
+                        gate_band = "above 0.10 px"
+                    rows.append(
+                        {
+                            "delta_t_c": float(contrast),
+                            "sigma_psf_px": float(sigma),
+                            "n_frames": int(n_frames),
+                            "phase_coverage_px": float(phase_coverage),
+                            "crb_px": crb_px,
+                            "passes_0p05_px": bool(crb_px <= 0.05),
+                            "passes_0p10_px": bool(crb_px <= 0.10),
+                            "gate_band": gate_band,
+                        }
+                    )
+    return pd.DataFrame(rows)
+
+
+def build_crb_gate_summary_table(
+    sensitivity_table: pd.DataFrame,
+    *,
+    gates_px: tuple[float, ...] = (0.10, 0.05),
+) -> pd.DataFrame:
+    """Summarize the minimum scanned contrast needed to pass each CRB gate."""
+    group_cols = ["sigma_psf_px", "n_frames", "phase_coverage_px"]
+    rows: list[dict] = []
+    for keys, group in sensitivity_table.groupby(group_cols, sort=True):
+        row = {
+            "sigma_psf_px": float(keys[0]),
+            "n_frames": int(keys[1]),
+            "phase_coverage_px": float(keys[2]),
+        }
+        for gate in gates_px:
+            passing = group[group["crb_px"] <= float(gate)]
+            row[f"min_delta_t_for_{gate:.2f}px_gate_c"] = (
+                float(passing["delta_t_c"].min()) if not passing.empty else np.nan
+            )
+        row["best_crb_px_in_scan"] = float(group["crb_px"].min())
+        row["worst_crb_px_in_scan"] = float(group["crb_px"].max())
+        rows.append(row)
     return pd.DataFrame(rows)
 
 
@@ -631,6 +798,78 @@ def plot_mtf_psf_curves(
     return fig
 
 
+def plot_mtf_snr_recoverability_heatmap(
+    recoverability_table: pd.DataFrame,
+    *,
+    min_log10_snr: float = -2.0,
+) -> plt.Figure:
+    """Plot effective SNR at grid Nyquist frequencies as a risk heatmap."""
+    table = recoverability_table.copy()
+    table["column_label"] = table.apply(
+        lambda row: f"{row['grid_label']}\nsigma={row['sigma_psf_px']:.2f}",
+        axis=1,
+    )
+    contrast_order = (
+        table[["source", "contrast_label", "delta_t_c", "input_snr"]]
+        .drop_duplicates()
+        .sort_values(["source", "delta_t_c", "contrast_label"])
+    )
+    contrast_order["row_label"] = contrast_order.apply(
+        lambda row: f"{row['contrast_label']}\n{row['delta_t_c']:.3g} C, SNR {row['input_snr']:.1f}",
+        axis=1,
+    )
+    column_order = (
+        table[["grid_factor", "sigma_psf_px", "column_label"]]
+        .drop_duplicates()
+        .sort_values(["grid_factor", "sigma_psf_px"])
+    )
+
+    table = table.merge(
+        contrast_order[["source", "contrast_label", "delta_t_c", "row_label"]],
+        on=["source", "contrast_label", "delta_t_c"],
+        how="left",
+    )
+    pivot = table.pivot_table(
+        index="row_label",
+        columns="column_label",
+        values="effective_snr",
+        aggfunc="first",
+    ).reindex(
+        index=contrast_order["row_label"].to_list(),
+        columns=column_order["column_label"].to_list(),
+    )
+    values = pivot.to_numpy(dtype=float)
+    log_values = np.log10(np.maximum(values, 10.0 ** min_log10_snr))
+
+    fig, ax = make_figure("double_col", height=max(3.6, 0.38 * len(pivot.index) + 1.4))
+    im = ax.imshow(log_values, cmap=COLORMAPS["coverage"], aspect="auto", vmin=min_log10_snr, vmax=2.0)
+    ax.set_xticks(np.arange(len(pivot.columns)))
+    ax.set_xticklabels(pivot.columns, rotation=0, ha="center")
+    ax.set_yticks(np.arange(len(pivot.index)))
+    ax.set_yticklabels(pivot.index)
+    ax.set_title("MTF x SNR Recoverability Risk at Grid Nyquist")
+    ax.set_xlabel("Output grid and assumed Gaussian PSF")
+    ax.set_ylabel("Local contrast scale")
+
+    for row in range(values.shape[0]):
+        for col in range(values.shape[1]):
+            value = values[row, col]
+            if value >= 100.0:
+                label = f"{value:.0f}"
+            elif value >= 10.0:
+                label = f"{value:.1f}"
+            elif value >= 1.0:
+                label = f"{value:.2f}"
+            else:
+                label = f"{value:.2g}"
+            color = "white" if log_values[row, col] < 0.35 else "black"
+            ax.text(col, row, label, ha="center", va="center", fontsize=7, color=color)
+
+    cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
+    format_colorbar(cbar, "log10 effective SNR")
+    return fig
+
+
 def plot_noise_floor_snr(
     snr_table: pd.DataFrame,
     segments: pd.DataFrame,
@@ -889,4 +1128,65 @@ def plot_crb_esf_localization(
         labelspacing=0.55,
         markerscale=1.15,
     )
+    return fig
+
+
+def plot_crb_sensitivity_surface(
+    sensitivity_table: pd.DataFrame,
+    *,
+    sigma_values_px: tuple[float, ...] = (0.35, 0.5),
+    phase_coverage_values_px: tuple[float, ...] = (0.5, 1.0),
+) -> plt.Figure:
+    """Plot CRB sensitivity over contrast and frame count for selected cases."""
+    nrows = len(sigma_values_px)
+    ncols = len(phase_coverage_values_px)
+    fig, axes = make_figure("double_col", nrows=nrows, ncols=ncols, height=4.8)
+    axes_arr = np.asarray(axes, dtype=object).reshape(nrows, ncols)
+
+    images = []
+    for r, sigma in enumerate(sigma_values_px):
+        for c, coverage in enumerate(phase_coverage_values_px):
+            ax = axes_arr[r, c]
+            subset = sensitivity_table[
+                np.isclose(sensitivity_table["sigma_psf_px"], float(sigma))
+                & np.isclose(sensitivity_table["phase_coverage_px"], float(coverage))
+            ]
+            pivot = subset.pivot_table(
+                index="n_frames",
+                columns="delta_t_c",
+                values="crb_px",
+                aggfunc="first",
+            ).sort_index().sort_index(axis=1)
+            values = pivot.to_numpy(dtype=float)
+            log_values = np.log10(np.maximum(values, 1e-3))
+            im = ax.imshow(log_values, cmap=COLORMAPS["coverage"], aspect="auto", vmin=-2.2, vmax=0.0)
+            images.append(im)
+            ax.contour(
+                np.arange(values.shape[1]),
+                np.arange(values.shape[0]),
+                values,
+                levels=[0.05, 0.10],
+                colors=["#FFFFFF", "#30343B"],
+                linewidths=[1.0, 1.0],
+            )
+            for row in range(values.shape[0]):
+                for col in range(values.shape[1]):
+                    value = values[row, col]
+                    label = f"{value:.3f}" if value < 0.1 else f"{value:.2f}"
+                    color = "white" if log_values[row, col] < -0.65 else "black"
+                    ax.text(col, row, label, ha="center", va="center", fontsize=6.5, color=color)
+
+            ax.set_xticks(np.arange(len(pivot.columns)))
+            ax.set_xticklabels([f"{x:.1f}" for x in pivot.columns])
+            ax.set_yticks(np.arange(len(pivot.index)))
+            ax.set_yticklabels([str(int(x)) for x in pivot.index])
+            ax.set_title(f"sigma={sigma:.2f} px, phase={coverage:.1f} px")
+            ax.set_xlabel("Delta T [C]")
+            if c == 0:
+                ax.set_ylabel("Frames")
+            else:
+                ax.set_ylabel("")
+
+    cbar = fig.colorbar(images[-1], ax=axes_arr.ravel().tolist(), fraction=0.046, pad=0.02)
+    format_colorbar(cbar, "log10 CRB [px]")
     return fig
