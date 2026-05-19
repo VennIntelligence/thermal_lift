@@ -119,6 +119,18 @@ def edge_mask(frame: np.ndarray, percentile: float) -> np.ndarray:
     return mask.astype(np.float32)
 
 
+def center_crop(image: np.ndarray, zoom_factor: float) -> np.ndarray:
+    """Crop the central field of view so displayed structure is magnified."""
+    if zoom_factor <= 1.0:
+        return image
+    rows, cols = image.shape[:2]
+    crop_rows = max(1, int(round(rows / zoom_factor)))
+    crop_cols = max(1, int(round(cols / zoom_factor)))
+    y0 = max(0, (rows - crop_rows) // 2)
+    x0 = max(0, (cols - crop_cols) // 2)
+    return image[y0 : y0 + crop_rows, x0 : x0 + crop_cols]
+
+
 def load_main_frames(audit_csv: Path, data_dir: Path, alignment: pd.DataFrame) -> pd.DataFrame:
     audit = pd.read_csv(audit_csv)
     main = audit[boolish(audit["is_main_session"])].copy()
@@ -234,24 +246,33 @@ def plot_grid(method_outputs: dict[str, dict[str, np.ndarray]], output_path: Pat
     setup_academic_style()
     methods = list(method_outputs)
     row_labels = [
-        "TXT infrared mean overlay",
-        "TXT infrared edge persistence",
-        "BMP crop mean overlay",
-        "BMP crop edge persistence",
+        "TXT mean overlay",
+        "TXT edge persistence",
+        "BMP mean overlay",
+        "BMP edge persistence",
     ]
-    fig, axes = plt.subplots(4, 4, figsize=(13.8, 12.0), constrained_layout=True)
+    fig, axes = plt.subplots(4, 4, figsize=(10.2, 8.3), constrained_layout=True, facecolor="white")
     for col, method in enumerate(methods):
         outputs = method_outputs[method]
-        axes[0, col].imshow(outputs["txt_mean"], cmap=COLORMAPS["temperature"], interpolation="nearest")
-        axes[1, col].imshow(outputs["txt_edges"], cmap=COLORMAPS["coverage"], vmin=0, vmax=1, interpolation="nearest")
-        axes[2, col].imshow(outputs["bmp_mean"], interpolation="nearest")
-        axes[3, col].imshow(outputs["bmp_edges"], cmap=COLORMAPS["coverage"], vmin=0, vmax=1, interpolation="nearest")
-        axes[0, col].set_title(method)
+        axes[0, col].imshow(center_crop(outputs["txt_mean"], 3.0), cmap=COLORMAPS["temperature"], interpolation="nearest")
+        axes[1, col].imshow(
+            center_crop(outputs["txt_edges"], 3.0), cmap=COLORMAPS["coverage"], vmin=0, vmax=1, interpolation="nearest"
+        )
+        axes[2, col].imshow(center_crop(outputs["bmp_mean"], 3.0), interpolation="nearest")
+        axes[3, col].imshow(
+            center_crop(outputs["bmp_edges"], 3.0), cmap=COLORMAPS["coverage"], vmin=0, vmax=1, interpolation="nearest"
+        )
+        axes[0, col].set_title(method, fontsize=11, pad=4)
         for row in range(4):
             axes[row, col].axis("off")
+            axes[row, col].set_facecolor("white")
             if col == 0:
-                axes[row, col].set_ylabel(row_labels[row], fontsize=9)
-    fig.suptitle(f"All main-session TXT/BMP overlays, n={n_frames} paired frames", fontsize=12, fontweight="bold")
+                axes[row, col].set_ylabel(row_labels[row], fontsize=11)
+    fig.suptitle(
+        f"All main-session TXT/BMP overlays, center 3x crop, n={n_frames} paired frames",
+        fontsize=13,
+        fontweight="bold",
+    )
     savefig_academic(fig, output_path)
 
 

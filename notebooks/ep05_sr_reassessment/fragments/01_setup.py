@@ -32,10 +32,22 @@ import pandas as pd
 from IPython.display import Image, display
 
 from thermal_core.ep05 import (
+    contour_alignment_tail_table,
+    data_driven_correction_table,
+    fractional_phase_distribution_table,
     load_capacity_outputs,
+    load_contour_alignment_outputs,
+    load_displacement_outputs,
+    load_overlay_alignment_outputs,
+    multi_scale_phase_coverage_table,
     ordered_method_table,
     overlay_density_table,
+    overlay_group_summary_table,
+    overlay_group_winner_table,
     phase_capacity_table,
+    trajectory_capacity_table,
+    visible_shift_key_table,
+    worst_contour_frames_table,
 )
 from thermal_core.plotting import setup_academic_style
 
@@ -43,33 +55,69 @@ PROJECT_ROOT = Path.cwd()
 while not (PROJECT_ROOT / "AGENTS.md").exists() and PROJECT_ROOT != PROJECT_ROOT.parent:
     PROJECT_ROOT = PROJECT_ROOT.parent
 
-OUTPUT_DIR = PROJECT_ROOT / "output" / "ep05_alignment_sr_capacity"
-REQUIRED_OUTPUTS = [
-    "alignment_sr_capacity_summary.json",
-    "alignment_method_summary.csv",
-    "alignment_method_holdout_scores.csv",
-    "phase_bin_summary_2x.csv",
-    "phase_bin_counts_2x.csv",
-    "alignment_method_comparison.png",
-    "phase_bin_coverage_2x.png",
-    "alignment_overlay_evidence.png",
-    "alignment_overlay_density_metrics.csv",
+DISPLACEMENT_DIR = PROJECT_ROOT / "output" / "ep05_sr_reassessment"
+CAPACITY_DIR = PROJECT_ROOT / "output" / "ep05_alignment_sr_capacity"
+CONTOUR_DIR = PROJECT_ROOT / "output" / "ep05_contour_alignment"
+OVERLAY_DIR = PROJECT_ROOT / "output" / "ep05_overlay_alignment"
+OUTPUT_DIR = CAPACITY_DIR
+
+REQUIRED_OUTPUTS = {
+    DISPLACEMENT_DIR: [
+        "displacement_reassessment_summary.json",
+        "displacement_measurements.csv",
+        "displacement_summary_by_class.csv",
+        "main_session_cumulative_trajectory.csv",
+        "main_session_cumulative_trajectory.png",
+        "visible_shift_by_pair_class.png",
+        "endpoint_displacement_vectors.png",
+    ],
+    CAPACITY_DIR: [
+        "alignment_sr_capacity_summary.json",
+        "alignment_method_summary.csv",
+        "alignment_method_holdout_scores.csv",
+        "phase_bin_summary_2x.csv",
+        "phase_bin_counts_2x.csv",
+        "alignment_method_comparison.png",
+        "phase_bin_coverage_2x.png",
+        "alignment_overlay_evidence.png",
+        "alignment_overlay_density_metrics.csv",
+    ],
+    CONTOUR_DIR: [
+        "contour_alignment_results.csv",
+        "contour_alignment_summary.json",
+    ],
+    OVERLAY_DIR: [
+        "overlay_alignment_summary.csv",
+        "all_main_4x4_txt_bmp_overlay.png",
+        "all_main_4x4_edge_line_overlay.png",
+    ],
+}
+missing = [
+    f"{directory.relative_to(PROJECT_ROOT)}/{name}"
+    for directory, names in REQUIRED_OUTPUTS.items()
+    for name in names
+    if not (directory / name).exists()
 ]
-missing = [name for name in REQUIRED_OUTPUTS if not (OUTPUT_DIR / name).exists()]
 if missing:
     raise FileNotFoundError(
-        "Missing EP05 capacity outputs. Run: "
-        "uv run python scripts/run_ep05_alignment_sr_capacity_check.py. "
+        "Missing EP05 reassessment outputs. Re-run the EP05 reassessment, contour, overlay, "
+        "and capacity scripts before building this notebook. "
         f"Missing: {missing}"
     )
 
 setup_academic_style()
 outputs = load_capacity_outputs(OUTPUT_DIR)
+displacement_outputs = load_displacement_outputs(DISPLACEMENT_DIR)
+contour_outputs = load_contour_alignment_outputs(CONTOUR_DIR)
+overlay_outputs = load_overlay_alignment_outputs(OVERLAY_DIR)
 summary_json = outputs["summary_json"]
 
 pd.set_option("display.max_colwidth", 120)
 print(f"Project root: {PROJECT_ROOT}")
-print(f"Capacity output: {OUTPUT_DIR.relative_to(PROJECT_ROOT)}")
+print(f"Displacement output: {DISPLACEMENT_DIR.relative_to(PROJECT_ROOT)}")
+print(f"Capacity output: {CAPACITY_DIR.relative_to(PROJECT_ROOT)}")
+print(f"Contour output: {CONTOUR_DIR.relative_to(PROJECT_ROOT)}")
+print(f"Overlay output: {OVERLAY_DIR.relative_to(PROJECT_ROOT)}")
 print(f"Main frames scored: {summary_json['n_main_frames_scored']}")
 print(f"Reference frame: {summary_json['reference_file']}")
 print(f"ROI size: {summary_json['roi_size']} px, edge percentile: {summary_json['edge_percentile']:.1f}")

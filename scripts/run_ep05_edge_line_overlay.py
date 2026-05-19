@@ -1,7 +1,7 @@
-"""Build transparent edge-line overlays for TXT and BMP frames.
+"""Build white-background edge-line overlays for TXT and BMP frames.
 
 This is a visual sanity check for apparent motion.  It keeps only detected
-edge pixels from each frame; all non-edge pixels are transparent.
+edge pixels from each frame; all non-edge pixels are rendered against white.
 """
 
 from __future__ import annotations
@@ -116,6 +116,18 @@ def txt_edge_mask(frame: np.ndarray) -> np.ndarray:
 def bmp_edge_mask(rgb_crop: np.ndarray) -> np.ndarray:
     gray = np.dot(rgb_crop[..., :3], np.array([0.299, 0.587, 0.114], dtype=np.float32))
     return auto_canny(robust_u8(gray))
+
+
+def center_crop(image: np.ndarray, zoom_factor: float) -> np.ndarray:
+    """Crop the central field of view so displayed structure is magnified."""
+    if zoom_factor <= 1.0:
+        return image
+    rows, cols = image.shape[:2]
+    crop_rows = max(1, int(round(rows / zoom_factor)))
+    crop_cols = max(1, int(round(cols / zoom_factor)))
+    y0 = max(0, (rows - crop_rows) // 2)
+    x0 = max(0, (cols - crop_cols) // 2)
+    return image[y0 : y0 + crop_rows, x0 : x0 + crop_cols]
 
 
 def load_bmp_crop(path: Path, raster: DataRaster | None) -> tuple[np.ndarray, DataRaster]:
@@ -236,25 +248,30 @@ def persistence_rgba(persistence: np.ndarray) -> np.ndarray:
 def plot_grid(outputs: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]], output_path: Path, n_frames: int) -> None:
     setup_academic_style()
     methods = list(outputs)
-    fig, axes = plt.subplots(4, 4, figsize=(13.8, 12.0), constrained_layout=True)
+    fig, axes = plt.subplots(4, 4, figsize=(10.2, 8.3), constrained_layout=True, facecolor="white")
     row_specs = [
         ("txt", 0, "TXT edge lines"),
-        ("txt", 1, "TXT edge persistence"),
+        ("txt", 1, "TXT persistence"),
         ("bmp", 0, "BMP edge lines"),
-        ("bmp", 1, "BMP edge persistence"),
+        ("bmp", 1, "BMP persistence"),
     ]
     for col, method in enumerate(methods):
-        axes[0, col].set_title(method)
+        axes[0, col].set_title(method, fontsize=11, pad=4)
         for row_idx, (modality, kind, label) in enumerate(row_specs):
             edge_rgba, persistence = outputs[method][modality]
             image = edge_rgba if kind == 0 else persistence_rgba(persistence)
-            axes[row_idx, col].imshow(image, interpolation="nearest")
+            axes[row_idx, col].imshow(center_crop(image, 3.0), interpolation="nearest")
             axes[row_idx, col].axis("off")
-            axes[row_idx, col].set_facecolor((1, 1, 1, 0))
+            axes[row_idx, col].set_facecolor("white")
             if col == 0:
-                axes[row_idx, col].set_ylabel(label, fontsize=9)
-    fig.suptitle(f"Transparent edge-only overlays, n={n_frames} paired main-session frames", fontsize=12, fontweight="bold")
-    fig.patch.set_alpha(0.0)
+                axes[row_idx, col].set_ylabel(label, fontsize=11)
+    fig.patch.set_facecolor("white")
+    fig.patch.set_alpha(1.0)
+    fig.suptitle(
+        f"White-background edge-only overlays, center 3x crop, n={n_frames} paired frames",
+        fontsize=13,
+        fontweight="bold",
+    )
     savefig_academic(fig, output_path, close=True)
 
 
