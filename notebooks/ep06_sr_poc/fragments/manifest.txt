@@ -1,8 +1,10 @@
 01_setup.py
 02_algorithm_overview.py
 03_synthetic_validation.py
+03b_alignment_ablation.py
 04_main_results.py
 05_control_track.py
 06_quantitative_evaluation.py
+06b_alignment_forward_model_sweep.py
 07_roi_analysis.py
 08_conclusions.py

@@ -14,7 +14,7 @@ from typing import Any
 
 import numpy as np
 import pandas as pd
-from scipy.ndimage import gaussian_filter, sobel
+from scipy.ndimage import gaussian_filter, laplace, sobel
 from tqdm import tqdm
 
 SCRIPT_DIR = Path(__file__).resolve().parent
@@ -92,12 +92,15 @@ def tv_gradient(image: np.ndarray, eps: float = 1e-6) -> np.ndarray:
 
 
 def artifact_score(image: np.ndarray) -> float:
-    grad = gradient_magnitude(np.asarray(image, dtype=np.float32))
-    if not np.isfinite(grad).all():
+    image = np.asarray(image, dtype=np.float32)
+    if not np.isfinite(image).all():
         return float("inf")
-    p95 = float(np.percentile(grad, 95))
-    p50 = float(np.percentile(grad, 50))
-    return float(p95 / max(p50, 1e-6))
+    high_freq = image - gaussian_filter(image, sigma=1.0, mode="nearest")
+    lap = laplace(image, mode="nearest")
+    base = float(np.std(image))
+    if base <= 1e-12:
+        return 0.0
+    return float((np.std(high_freq) + 0.25 * np.std(lap)) / base)
 
 
 def nrmse(a: np.ndarray, b: np.ndarray) -> float:
@@ -166,6 +169,8 @@ def run_map_tv_algorithm(
     max_iter: int,
     step_size: float,
     tol: float,
+    tv_inner_iter: int,
+    use_fista: bool,
     workers: int,
     track: str,
 ) -> tuple[np.ndarray, pd.DataFrame]:
@@ -186,6 +191,8 @@ def run_map_tv_algorithm(
         max_iter=max_iter,
         step_size=step_size,
         tol=tol,
+        tv_inner_iter=tv_inner_iter,
+        use_fista=use_fista,
         workers=workers,
         track=track,
     )
@@ -226,6 +233,10 @@ def select_lambda(
     max_iter: int,
     step_size: float,
     tol: float,
+    tv_inner_iter: int,
+    use_fista: bool,
+    selection_artifact_weight: float,
+    selection_std_weight: float,
     workers: int,
     track: str,
 ) -> tuple[float, pd.DataFrame]:
@@ -234,6 +245,7 @@ def select_lambda(
     rows: list[dict[str, float | int | str | bool]] = []
     init_a = shift_and_add(frames[even], shifts[even], weights=weights[even], scale=scale, workers=workers, desc=f"{track} split A init")
     init_b = shift_and_add(frames[odd], shifts[odd], weights=weights[odd], scale=scale, workers=workers, desc=f"{track} split B init")
+    init_std = 0.5 * (float(np.std(init_a)) + float(np.std(init_b)))
     for lambda_tv in lambdas:
         recon_a, _ = run_map_tv_algorithm(
             frames[even],
@@ -245,6 +257,8 @@ def select_lambda(
             max_iter=max_iter,
             step_size=step_size,
             tol=tol,
+            tv_inner_iter=tv_inner_iter,
+            use_fista=use_fista,
             workers=workers,
             track=f"{track}_split_a",
         )
@@ -258,12 +272,16 @@ def select_lambda(
             max_iter=max_iter,
             step_size=step_size,
             tol=tol,
+            tv_inner_iter=tv_inner_iter,
+            use_fista=use_fista,
             workers=workers,
             track=f"{track}_split_b",
         )
         consistency = nrmse(recon_a, recon_b)
         artifacts = 0.5 * (artifact_score(recon_a) + artifact_score(recon_b))
         mean_grad = 0.5 * (float(np.mean(gradient_magnitude(recon_a))) + float(np.mean(gradient_magnitude(recon_b))))
+        mean_std = 0.5 * (float(np.std(recon_a)) + float(np.std(recon_b)))
+        std_excess = max(0.0, mean_std / max(init_std, 1e-12) - 1.0)
         rows.append(
             {
                 "track": track,
@@ -271,7 +289,14 @@ def select_lambda(
                 "split_half_nrmse": consistency,
                 "artifact_score": artifacts,
                 "mean_gradient": mean_grad,
-                "selection_proxy": float(consistency + 0.01 * artifacts),
+                "std": mean_std,
+                "init_saa_std": init_std,
+                "std_excess_vs_saa": std_excess,
+                "selection_proxy": float(
+                    consistency
+                    + selection_artifact_weight * artifacts
+                    + selection_std_weight * std_excess
+                ),
                 "n_split_a": int(even.sum()),
                 "n_split_b": int(odd.sum()),
             }
@@ -319,6 +344,8 @@ def run_synthetic_validation(args: argparse.Namespace, lambda_tv: float) -> dict
         max_iter=min(args.max_iter, 8),
         step_size=args.step_size,
         tol=args.tol,
+        tv_inner_iter=args.tv_inner_iter,
+        use_fista=not args.no_fista,
         workers=args.workers,
         track="synthetic",
     )
@@ -349,6 +376,10 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--lambda-grid", default="0.0003,0.001,0.003")
     parser.add_argument("--step-size", type=float, default=0.2)
     parser.add_argument("--tol", type=float, default=1e-4)
+    parser.add_argument("--tv-inner-iter", type=int, default=30)
+    parser.add_argument("--no-fista", action="store_true")
+    parser.add_argument("--selection-artifact-weight", type=float, default=0.05)
+    parser.add_argument("--selection-std-weight", type=float, default=0.08)
     parser.add_argument("--workers", type=int, default=default_workers())
     parser.add_argument("--synthetic-frames", type=int, default=32)
     parser.add_argument("--synthetic-noise", type=float, default=0.002)
@@ -359,6 +390,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    args.output_dir = args.output_dir.resolve()
     if args.scale != 2:
         raise ValueError("EP06 is a 2x contour-level POC; keep --scale 2.")
     start = time.perf_counter()
@@ -381,6 +413,10 @@ def main() -> None:
         max_iter=args.lambda_select_iter,
         step_size=args.step_size,
         tol=args.tol,
+        tv_inner_iter=args.tv_inner_iter,
+        use_fista=not args.no_fista,
+        selection_artifact_weight=args.selection_artifact_weight,
+        selection_std_weight=args.selection_std_weight,
         workers=args.workers,
         track="highpass",
     )
@@ -394,6 +430,10 @@ def main() -> None:
         max_iter=args.lambda_select_iter,
         step_size=args.step_size,
         tol=args.tol,
+        tv_inner_iter=args.tv_inner_iter,
+        use_fista=not args.no_fista,
+        selection_artifact_weight=args.selection_artifact_weight,
+        selection_std_weight=args.selection_std_weight,
         workers=args.workers,
         track="raw",
     )
@@ -414,6 +454,8 @@ def main() -> None:
         max_iter=args.max_iter,
         step_size=args.step_size,
         tol=args.tol,
+        tv_inner_iter=args.tv_inner_iter,
+        use_fista=not args.no_fista,
         workers=args.workers,
         track="highpass",
     )
@@ -427,6 +469,8 @@ def main() -> None:
         max_iter=args.max_iter,
         step_size=args.step_size,
         tol=args.tol,
+        tv_inner_iter=args.tv_inner_iter,
+        use_fista=not args.no_fista,
         workers=args.workers,
         track="raw",
     )
@@ -442,8 +486,13 @@ def main() -> None:
             "selected_lambda_highpass": float(lambda_highpass),
             "selected_lambda_raw": float(lambda_raw),
             "lambda_selection": "split-half consistency proxy with artifact penalty",
+            "lambda_selection_artifact_weight": float(args.selection_artifact_weight),
+            "lambda_selection_std_weight": float(args.selection_std_weight),
             "shift_convention": "EP05 LR-to-reference shifts passed directly; forward prediction applies inverse shift internally.",
             "max_iter_real": int(args.max_iter),
+            "step_size": float(args.step_size),
+            "psf_sigma": float(args.psf_sigma),
+            "use_fista": bool(not args.no_fista),
             "elapsed_sec": float(time.perf_counter() - start),
         }
     )

@@ -286,6 +286,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    args.output_dir = args.output_dir.resolve()
     if args.scale != 2:
         raise ValueError("EP06 is a 2x contour-level POC; keep --scale 2.")
     start = time.perf_counter()
@@ -353,6 +354,7 @@ def main() -> None:
             "alignment_method": args.alignment_method,
             "shift_convention": "EP05 LR-to-reference shifts passed directly; forward prediction applies inverse shift internally.",
             "max_iter_real": int(args.max_iter),
+            "psf_sigma": float(args.psf_sigma),
             "elapsed_sec": float(time.perf_counter() - start),
         }
     )

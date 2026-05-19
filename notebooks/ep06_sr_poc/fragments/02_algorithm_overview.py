@@ -10,7 +10,7 @@
 # | SAA-uniform | 多帧微扫描 baseline | 直接用 EP05 正向 alignment shift 回填到 2x 网格 |
 # | SAA-weighted | 质量门控 baseline | 用 EP05 NCC/held-out Chamfer proxy 加权 |
 # | IBP | forward-model baseline | 预测观测时由 forward model 对 reference HR 图施加反向位移 |
-# | MAP-TV | 正则化物理 baseline | 用 split-half consistency 选择 lambda |
+# | MAP-TV | 正则化物理候选 | 用 split-half consistency + artifact/std penalty 选择 lambda |
 #
 # 统一位移约定：
 #
@@ -22,6 +22,6 @@
 #
 # `IBP`: 迭代最小化观测残差，将 `y_i - H_i(x)` back-project 到 HR grid。
 #
-# `MAP-TV`: 最小化 `0.5/N * sum_i ||y_i - H_i(x)||^2 + lambda * TV(x)`，lambda 由 split-half consistency proxy 选择。
+# `MAP-TV`: 最小化 `0.5/N * sum_i ||y_i - H_i(x)||^2 + lambda * TV(x)`，lambda 由 split-half consistency proxy 选择，并加入 artifact 与 std 膨胀惩罚，避免把 alignment residual 当作高频结构。
 #
 # **边界声明**: 这里的 highpass SR 是结构图；raw-temperature track 是控制轨。输出 2x grid 只是重建网格，不声明 4x，也不声明 5 um 计量级实际分辨率。

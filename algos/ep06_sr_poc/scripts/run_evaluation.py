@@ -172,7 +172,7 @@ def summarize_method(
 
 def show_image(ax: plt.Axes, image: np.ndarray, title: str, *, cmap: str, vmin: float, vmax: float) -> None:
     ax.imshow(image, cmap=cmap, vmin=vmin, vmax=vmax, interpolation="nearest")
-    ax.set_title(title)
+    ax.set_title(title, fontsize=8.5, pad=2)
     ax.set_xticks([])
     ax.set_yticks([])
 
@@ -197,10 +197,11 @@ def save_fullview(output_dir: Path, high: dict[str, np.ndarray], *, zoom_factor:
     crops = [image[roi] for image in display_images.values()]
     vmin, vmax = robust_limits(crops, symmetric=True)
     setup_academic_style()
-    fig, axes = plt.subplots(1, 6, figsize=(11.0, 2.35), constrained_layout=True)
-    for ax, (key, label, _) in zip(axes, HIGH_METHODS, strict=True):
+    fig, axes = plt.subplots(2, 3, figsize=(7.1, 4.05), constrained_layout=False)
+    for ax, (key, label, _) in zip(axes.ravel(), HIGH_METHODS, strict=True):
         show_image(ax, display_images[key][roi], label, cmap=COLORMAPS["residual_diff"], vmin=vmin, vmax=vmax)
-    fig.suptitle(f"EP06 center highpass comparison, {zoom_factor:.1f}x visual zoom", fontsize=11, fontweight="bold")
+    fig.suptitle(f"EP06 center highpass comparison, {zoom_factor:.1f}x visual zoom", fontsize=10, fontweight="bold")
+    fig.subplots_adjust(left=0.02, right=0.99, bottom=0.03, top=0.86, wspace=0.04, hspace=0.20)
     savefig_academic(fig, output_dir / "comparison_fullview.png")
 
 
@@ -231,8 +232,8 @@ def save_roi_figures(output_dir: Path, high: dict[str, np.ndarray], *, roi_sizes
         if idx > 3:
             break
         roi = roi_slices(center, target_shape, int(size))
-        fig, axes = plt.subplots(1, 6, figsize=(11.0, 2.25), constrained_layout=True)
-        for ax, (key, label, _) in zip(axes, HIGH_METHODS, strict=True):
+        fig, axes = plt.subplots(2, 3, figsize=(7.1, 4.05), constrained_layout=False)
+        for ax, (key, label, _) in zip(axes.ravel(), HIGH_METHODS, strict=True):
             show_image(
                 ax,
                 display_images[key][roi],
@@ -241,7 +242,8 @@ def save_roi_figures(output_dir: Path, high: dict[str, np.ndarray], *, roi_sizes
                 vmin=vmin,
                 vmax=vmax,
             )
-        fig.suptitle(f"Center ROI {idx}: direct highpass comparison, {int(size)} HR px crop", fontsize=11, fontweight="bold")
+        fig.suptitle(f"Center ROI {idx}: direct highpass comparison, {int(size)} HR px crop", fontsize=10, fontweight="bold")
+        fig.subplots_adjust(left=0.02, right=0.99, bottom=0.03, top=0.86, wspace=0.04, hspace=0.20)
         savefig_academic(fig, output_dir / f"comparison_roi_{idx}.png")
 
 
@@ -262,11 +264,14 @@ def save_control_track(
     roi = center_zoom_roi(high["bicubic"].shape, zoom_factor=zoom_factor)
     values = [high[key][roi] for key, _ in columns] + [raw_struct[key][roi] for key, _ in columns]
     vmin, vmax = robust_limits(values, symmetric=True)
-    fig, axes = plt.subplots(2, 3, figsize=(8.0, 4.3), constrained_layout=True)
+    fig, axes = plt.subplots(2, 3, figsize=(7.1, 3.7), constrained_layout=False)
     for col, (key, label) in enumerate(columns):
-        show_image(axes[0, col], high[key][roi], f"{label}\nhighpass input", cmap=COLORMAPS["residual_diff"], vmin=vmin, vmax=vmax)
-        show_image(axes[1, col], raw_struct[key][roi], f"{label}\nraw control highpass", cmap=COLORMAPS["residual_diff"], vmin=vmin, vmax=vmax)
-    fig.suptitle(f"Center highpass main track vs raw-temperature control, {zoom_factor:.1f}x visual zoom", fontsize=11, fontweight="bold")
+        show_image(axes[0, col], high[key][roi], label, cmap=COLORMAPS["residual_diff"], vmin=vmin, vmax=vmax)
+        show_image(axes[1, col], raw_struct[key][roi], "", cmap=COLORMAPS["residual_diff"], vmin=vmin, vmax=vmax)
+    fig.text(0.025, 0.63, "Highpass\ninput", ha="center", va="center", rotation=90, fontsize=8)
+    fig.text(0.025, 0.25, "Raw\ncontrol", ha="center", va="center", rotation=90, fontsize=8)
+    fig.suptitle(f"Main track vs raw-temperature control, {zoom_factor:.1f}x visual zoom", fontsize=10, fontweight="bold")
+    fig.subplots_adjust(left=0.07, right=0.99, bottom=0.03, top=0.86, wspace=0.04, hspace=0.02)
     savefig_academic(fig, output_dir / "comparison_control_track.png")
 
 
@@ -304,9 +309,9 @@ def save_center_raw_temperature(
     roi = roi_slices((reference.shape[0] // 2, reference.shape[1] // 2), reference.shape, center_size)
     crops = [display_images[key][roi] for key, _ in columns]
     vmin, vmax = robust_limits(crops, symmetric=False)
-    fig, axes = plt.subplots(1, len(columns), figsize=(11.0, 2.6), constrained_layout=True)
+    fig, axes = plt.subplots(2, 3, figsize=(7.1, 4.35), constrained_layout=False)
     image_handle = None
-    for ax, (key, label), crop in zip(axes, columns, crops, strict=True):
+    for ax, (key, label), crop in zip(axes.ravel(), columns, crops, strict=True):
         image_handle = ax.imshow(
             crop,
             cmap=COLORMAPS["temperature"],
@@ -314,13 +319,15 @@ def save_center_raw_temperature(
             vmax=vmax,
             interpolation="nearest",
         )
-        ax.set_title(label)
+        ax.set_title(label, fontsize=8.5, pad=2)
         ax.set_xticks([])
         ax.set_yticks([])
     if image_handle is not None:
-        colorbar = fig.colorbar(image_handle, ax=axes, shrink=0.78, pad=0.02)
+        cax = fig.add_axes([0.92, 0.16, 0.018, 0.64])
+        colorbar = fig.colorbar(image_handle, cax=cax)
         colorbar.set_label("offset-corrected temperature (C)")
-    fig.suptitle("Center raw-temperature crop, ordinary visual check", fontsize=11, fontweight="bold")
+    fig.suptitle("Center raw-temperature crop, ordinary visual check", fontsize=10, fontweight="bold")
+    fig.subplots_adjust(left=0.02, right=0.90, bottom=0.03, top=0.84, wspace=0.04, hspace=0.22)
     savefig_academic(fig, output_dir / "comparison_center_raw_temperature.png")
 
 
@@ -391,15 +398,16 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--segment-summary-csv", type=Path, default=PROJECT_ROOT / "output" / "ep04_global_validation" / "segment_summary.csv")
     parser.add_argument("--scale", type=int, default=2)
     parser.add_argument("--edge-percentile", type=float, default=95.0)
-    parser.add_argument("--overview-zoom", type=float, default=3.0, help="Center crop zoom for main highpass/control figures")
-    parser.add_argument("--center-roi-sizes", default="384,256,160", help="Comma-separated center highpass ROI sizes in HR pixels")
-    parser.add_argument("--center-raw-size", type=int, default=256, help="Center raw-temperature crop size in HR pixels")
+    parser.add_argument("--overview-zoom", type=float, default=6.0, help="Center crop zoom for main highpass/control figures")
+    parser.add_argument("--center-roi-sizes", default="160,112,80", help="Comma-separated center highpass ROI sizes in HR pixels")
+    parser.add_argument("--center-raw-size", type=int, default=160, help="Center raw-temperature crop size in HR pixels")
     parser.add_argument("--raw-visual-sigma", type=float, default=10.0, help="Gaussian sigma on HR raw-control images before visual subtraction")
     return parser.parse_args()
 
 
 def main() -> None:
     args = parse_args()
+    args.output_dir = args.output_dir.resolve()
     if args.scale != 2:
         raise ValueError("EP06 is a 2x contour-level POC; keep --scale 2.")
     setup_academic_style()
@@ -445,6 +453,14 @@ def main() -> None:
             )
         )
     summary = pd.DataFrame(rows)
+    summary["std_ratio_to_lr"] = np.nan
+    for track, group in summary.groupby("track"):
+        lr_ref = group[group["method"].eq("lr_reference")]
+        if lr_ref.empty:
+            continue
+        ref_std = float(lr_ref["std"].iloc[0])
+        if ref_std > 0:
+            summary.loc[group.index, "std_ratio_to_lr"] = group["std"].astype(float) / ref_std
     summary["saa_uniform_synthetic_psnr_db"] = load_json_metric(args.output_dir / "saa_synthetic_validation.json", "uniform_psnr_db")
     summary["ibp_synthetic_psnr_db"] = load_json_metric(args.output_dir / "ibp_synthetic_validation.json", "ibp_psnr_db")
     summary["map_tv_synthetic_psnr_db"] = load_json_metric(args.output_dir / "map_tv_synthetic_validation.json", "map_tv_psnr_db")

@@ -382,6 +382,7 @@ def parse_args() -> argparse.Namespace:
 
 def main() -> None:
     args = parse_args()
+    args.output_dir = args.output_dir.resolve()
     if args.scale != 2:
         raise ValueError("EP06 is a 2x contour-level POC; keep --scale 2.")
     start = time.perf_counter()

@@ -12,6 +12,8 @@ if not evaluation_summary.empty:
                 "track",
                 "label",
                 "finite",
+                "std",
+                "std_ratio_to_lr",
                 "mean_gradient",
                 "p95_gradient",
                 "artifact_score",
@@ -22,14 +24,58 @@ if not evaluation_summary.empty:
         ].round(4)
     )
 
+# %%
+if not evaluation_summary.empty:
+    method_eval = evaluation_summary[
+        evaluation_summary["method"].isin(["saa_uniform", "saa_weighted", "ibp", "map_tv"])
+    ].copy()
+    method_eval["track_view"] = method_eval["track"].map(
+        {
+            "highpass": "highpass input",
+            "raw_control_highpass_visual": "raw control visual",
+        }
+    )
+    method_eval = method_eval[
+        [
+            "track_view",
+            "method",
+            "label",
+            "std",
+            "std_ratio_to_lr",
+            "mean_gradient",
+            "p95_gradient",
+            "artifact_score",
+            "contour_chamfer_lr_px",
+            "corr_to_bicubic",
+        ]
+    ]
+    display(method_eval.round(4))
+
+lambda_selection = read_csv_if_exists("map_tv_lambda_selection.csv")
+if not lambda_selection.empty:
+    display(
+        lambda_selection[
+            [
+                "track",
+                "lambda_tv",
+                "split_half_nrmse",
+                "artifact_score",
+                "mean_gradient",
+                "std_excess_vs_saa",
+                "selection_proxy",
+                "selected",
+            ]
+        ].round(4)
+    )
+
 # %% [markdown]
-# > **数据说明**: 这张表把每个 track 和方法的辅助指标汇总在一起。`mean_gradient` 和 `p95_gradient` 描述边缘/纹理响应强度，`artifact_score` 描述一阶伪影风险，`nrmse_to_bicubic` 和 `corr_to_bicubic` 描述相对 bicubic baseline 的接近程度，`contour_chamfer_lr_px` 是基于 EP04 segment points 的轮廓距离 proxy。
+# > **数据说明**: 这张表把每个 track 和方法的辅助指标汇总在一起。`std`/`std_ratio_to_lr` 描述输出动态范围是否膨胀，`mean_gradient` 和 `p95_gradient` 描述边缘/纹理响应强度，`artifact_score` 描述一阶伪影风险，`nrmse_to_bicubic` 和 `corr_to_bicubic` 描述相对 bicubic baseline 的接近程度，`contour_chamfer_lr_px` 是基于 EP04 segment points 的轮廓距离 proxy。
 # >
 # > **怎么看**: `p95_gradient` 越大通常表示较强边缘更多，但它不是“越大就绝对越好”；噪声、振铃和假边缘也会推高梯度。`artifact_score` 通常越小越好，因为它希望惩罚不自然的一阶结构；`contour_chamfer_lr_px` 通常越小越好，但它只是相对于 EP04 点集的 proxy，不是独立光学 ground truth。
 # >
-# > **正常/异常**: `finite=True` 是最基本的数值健康检查；如果某个方法梯度很高但 artifact score 同时变高，或 Chamfer 没有改善，就要把“更锐”解释为可疑而不是自动解释为更清楚。`nrmse_to_bicubic` 和 `corr_to_bicubic` 也不能单独排名，因为太接近 bicubic 可能意味着保守，太远又可能意味着引入了伪影。
+# > **正常/异常**: `finite=True` 是最基本的数值健康检查；如果某个方法梯度很高但 artifact score 或 std ratio 同时变高，或 Chamfer 没有改善，就要把“更锐”解释为可疑而不是自动解释为更清楚。`nrmse_to_bicubic` 和 `corr_to_bicubic` 也不能单独排名，因为太接近 bicubic 可能意味着保守，太远又可能意味着引入了伪影。第二张方法摘要中 raw-control 没有 `SAA uniform raw` 行时是脚本产物设计差异，不是缺数据错误；MAP-TV lambda 表中 `selected=True` 表示 split-half + artifact/std proxy 当前选中的正则强度。
 # >
-# > **核心发现**: 指标表的作用是约束视觉判断，而不是替代视觉判断。EP06 需要同时满足轮廓更清楚、split-half 稳定、artifact 不恶化、Chamfer proxy 不矛盾，才适合把某个方法作为 EP07 候选。
+# > **核心发现**: 当前评估应读成方法画像，而不是单项排名：SAA 是多帧相位覆盖 baseline，IBP 检查 forward model 迭代是否带来额外结构，MAP-TV 用 split-half proxy 选择正则强度。EP06 需要同时满足轮廓更清楚、split-half 稳定、artifact 不恶化、Chamfer proxy 不矛盾，才适合把某个方法作为 EP07 候选。
 
 # %%
 display(show_png("gradient_magnitude_comparison.png"))
