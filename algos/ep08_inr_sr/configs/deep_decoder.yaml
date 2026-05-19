@@ -1,0 +1,38 @@
+model:
+  name: deep_decoder
+  # Fixed latent z decoded by progressive 2x upsampling blocks:
+  # [Upsample2x -> Conv1x1 -> BatchNorm -> ReLU] x len(hidden_channels),
+  # followed by a final Conv1x1 to one signed highpass channel.
+  # hidden_channels therefore defines the per-stage channel reduction path.
+  latent_channels: 32
+  hidden_channels: [64, 64, 32]
+  latent_spatial: [8, 8]
+
+data:
+  scale: 2
+  default_n_frames: 32
+  default_patch_size_lr_px: 256
+
+forward:
+  # Forward-model optical blur in LR-pixel units.
+  # It is applied before sampling the HR field back to LR.
+  psf_sigma_lr_px: 1.0
+
+preprocess:
+  # Highpass background-estimation blur in LR-pixel units.
+  # This is intentionally separate from psf_sigma_lr_px.
+  highpass_sigma_bg_lr_px: 5.0
+
+train:
+  lr: 0.0005
+  max_iter: 10000
+  batch_k: 8
+  warmup_steps: 200
+  min_lr_factor: 0.05
+  grad_clip_norm: 1.0
+  val_interval: 100
+  early_stop_patience: 1000
+  early_stop_min_delta: 1.0e-6
+  early_stop_min_steps: 500
+  split_half_max_iter: 3000
+  split_half_enabled: true

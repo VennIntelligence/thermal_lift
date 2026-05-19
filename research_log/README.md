@@ -25,6 +25,8 @@
 | EP04 | Data-driven localization / alignment quality gate | ✅ EP04-A 完成；作为锚点和质控 | `ep04_global_validation/` |
 | EP05 | 2x SR capacity and alignment baseline | ✅ 完成；EP06 输入依据 | `ep05_sr_reassessment/` |
 | EP06 | 2x contour-level SR POC | ✅ 完成；classic SR 双轨对比 | `ep06_sr_poc/` |
+| EP07 | ThermalChipPhantom / TCForge synthetic data engine | ✅ P0 core/CLI/tests + EP07 demo 完成；P1 benchmark 物化仍 fail-fast | `ep07_thermal_chip_phantom/` |
+| EP08 | INR-based 2x contour SR | 🚧 P0 code/tests/smoke 完成；正式训练指标待生成 | `ep08_inr_sr/` |
 
 > 路线图随项目推进更新。新 Episode 创建时在此注册。
 

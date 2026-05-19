@@ -1,0 +1,43 @@
+{
+  "dataset": "ThermalChipPhantom",
+  "engine": "TCForge",
+  "version": "0.1.0",
+  "num_scenes": 5,
+  "scale": 2,
+  "lr_shape": [480, 640],
+  "hr_shape": [960, 1280],
+  "pixel_size_um": 10.0,
+  "spatial_resolution_um": 20.0,
+  "forward_mode": "exact_ep06_point",
+  "psf_sigma_lr_px": 0.5,
+  "noise_sigma_c": 0.0724,
+  "highpass_sigma_lr_px": 5.0,
+  "highpass_mode": "nearest",
+  "T_bg_c": 21.0,
+  "delta_T_c_by_difficulty": {
+    "easy": 2.5,
+    "medium": 1.5,
+    "hard": 1.0,
+    "stress": 0.7
+  },
+  "min_feature_um_by_difficulty": {
+    "easy": 40.0,
+    "medium": 20.0,
+    "hard": 15.0,
+    "stress": 10.0
+  },
+  "low_freq_amplitude_c": 0.2,
+  "shift_profile": "real_default_contour_refined",
+  "rotation_deg_center": 47.6,
+  "rotation_jitter_deg": 1.0,
+  "drift_model": "none",
+  "difficulties": ["easy", "easy", "medium", "medium", "hard"],
+  "seeds": [1001, 1002, 2001, 2002, 3001],
+  "split": "test",
+  "n_frames_per_scene": 255,
+  "storage": {
+    "save_raw_burst": true,
+    "save_highpass_burst": true,
+    "compress": false
+  }
+}

@@ -1,0 +1,6 @@
+01_setup.py
+02_forward_validation.py
+03_siren_results.py
+04_wire_results.py
+05_deep_decoder_results.py
+06_four_way_comparison.py

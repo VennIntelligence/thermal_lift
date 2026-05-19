@@ -10,6 +10,7 @@ build/
 # ===== UV / Venv =====
 .venv/
 algos/*/.venv/
+tcforge/.venv/
 
 # ===== macOS =====
 .DS_Store

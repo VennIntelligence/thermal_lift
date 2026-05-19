@@ -1,0 +1,36 @@
+model:
+  name: siren
+  hidden_features: 256
+  hidden_layers: 4
+  # Stage 1 starts conservatively at omega_0=10; omega_0=30 remains a later ablation.
+  first_omega_0: 10.0
+  hidden_omega_0: 10.0
+
+data:
+  scale: 2
+  default_n_frames: 32
+  default_patch_size_lr_px: 256
+
+forward:
+  # Optical blur in LR-pixel units. ForwardOperator converts this to HR units
+  # internally as sigma_hr = psf_sigma_lr_px * scale.
+  psf_sigma_lr_px: 1.0
+
+preprocess:
+  # Background-removal blur for LR highpass observations. This is not the PSF.
+  # It belongs to highpass_preprocess(..., sigma_bg=...) and remains in LR px.
+  highpass_sigma_bg_lr_px: 5.0
+
+train:
+  lr: 0.0005
+  max_iter: 10000
+  batch_k: 8
+  warmup_steps: 200
+  min_lr_factor: 0.05
+  grad_clip_norm: 1.0
+  val_interval: 100
+  early_stop_patience: 1000
+  early_stop_min_delta: 1.0e-6
+  early_stop_min_steps: 500
+  split_half_max_iter: 3000
+  split_half_enabled: true

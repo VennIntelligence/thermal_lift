@@ -1,0 +1,42 @@
+model:
+  name: deepinv_dip
+
+deepinv:
+  # deepinv 0.4.0 ConvDecoder uses one hidden/input channel count for z and
+  # internal convolution widths. channels=32 keeps the parameter count close to
+  # the EP08 Deep Decoder order while still using the mature DeepInverse DIP.
+  channels: 32
+  layers: 4
+  in_spatial: [32, 32]
+  verbose: true
+
+data:
+  scale: 2
+  default_n_frames: 32
+  default_patch_size_lr_px: 256
+  val_ratio: 0.2
+
+forward:
+  psf_sigma_lr_px: 1.0
+
+preprocess:
+  highpass_sigma_bg_lr_px: 5.0
+  highpass_mode: nearest
+
+train:
+  lr: 0.0005
+  max_iter: 10000
+  val_interval: 100
+  split_half_max_iter: 3000
+  split_half_enabled: true
+
+runtime:
+  data_mode: real
+  device: cuda:0
+  workers: 1
+  alignment_method: contour_refined
+  seed: 42
+  output_dir: output/ep08_inr_sr/deepinv_dip_stage2
+
+metrics:
+  noise_sigma: 0.0724

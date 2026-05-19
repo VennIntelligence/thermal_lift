@@ -1,0 +1,25 @@
+[project]
+name = "ep08-inr-sr"
+version = "0.1.0"
+description = "EP08 INR-based 2x contour-level super-resolution"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "pyyaml>=6.0",
+    "scipy>=1.12",
+    "torch>=2.2",
+    "tqdm>=4.66",
+    "pytest>=8.0",
+    "thermal-core",
+    "deepinv>=0.4.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+thermal-core = { path = "../../core", editable = true }
+
+[tool.pytest.ini_options]
+pythonpath = ["src"]

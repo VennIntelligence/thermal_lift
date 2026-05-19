@@ -1,0 +1,36 @@
+{
+  "source": {
+    "episode": "EP06",
+    "method": "MAP-TV",
+    "intended_input": "output/ep06_sr_poc/evaluation_summary.csv and related EP06 metric artifacts",
+    "status": "partial_fullframe_proxy_metrics_available",
+    "note": "MAP-TV proxy metrics are copied from the EP06 full-frame 255-frame highpass row. EP06 did not use the EP08 seed=42 train/val split, so holdout_residual and split_half_nrmse are unavailable and must remain null."
+  },
+  "map_tv": {
+    "holdout_residual": null,
+    "holdout_residual_status": "not_available_ep06_has_no_train_val_holdout_split",
+    "split_half_nrmse": null,
+    "split_half_nrmse_status": "not_available_ep06_full_recon_split_halves_not_saved_for_ep08_metric",
+    "artifact_score": 0.1437276154756546,
+    "raw_control_agreement": null,
+    "raw_control_agreement_status": "not_available_ep08_gradient_agreement_metric_not_computed_in_ep06",
+    "pin_region_no_false_lines": null,
+    "contour_chamfer_lr_px": 0.015713484026367724,
+    "mean_gradient": 0.13626612722873688,
+    "p95_gradient": 0.4323444962501526,
+    "nrmse_to_bicubic": 0.3542787432670593,
+    "corr_to_bicubic": 0.9352462291717529,
+    "metric_source_file": "output/ep06_sr_poc/evaluation_summary.csv",
+    "metric_source_row_filter": "track == 'highpass' and method == 'map_tv'",
+    "metric_source_shape": "960x1280",
+    "metric_source_protocol": "EP06 full-frame 255-frame MAP-TV highpass reconstruction"
+  },
+  "gate_thresholds": {
+    "holdout_residual_max_ratio_to_map_tv": null,
+    "split_half_nrmse_max_ratio_to_map_tv": null,
+    "artifact_score_max_ratio_to_map_tv": null,
+    "raw_control_agreement_rule": "not_available_for_ep06_proxy",
+    "pin_region_visual_rule": null,
+    "note": "Do not derive EP08 pass/fail thresholds from unavailable EP06 holdout or split-half metrics."
+  }
+}

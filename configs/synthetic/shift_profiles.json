@@ -1,0 +1,52 @@
+{
+  "schema_version": "0.1",
+  "units": "LR pixels",
+  "convention": "LR-to-reference alignment shift",
+  "profiles": {
+    "real_default_contour_refined": {
+      "kind": "csv_columns",
+      "source_path": "output/ep05_contour_alignment/contour_alignment_results.csv",
+      "columns": ["refined_align_dx_px", "refined_align_dy_px"],
+      "sort_by": ["acquisition_order", "frame_index"],
+      "filter_success_column": "success",
+      "description": "Primary EP05 contour-refined alignment profile."
+    },
+    "real_ncc_init": {
+      "kind": "csv_columns",
+      "source_path": "output/ep05_contour_alignment/contour_alignment_results.csv",
+      "columns": ["init_align_dx_px", "init_align_dy_px"],
+      "sort_by": ["acquisition_order", "frame_index"],
+      "filter_success_column": "success",
+      "description": "NCC initialization profile used as a phase-prior control."
+    },
+    "real_tuned_contour_refined": {
+      "kind": "csv_columns",
+      "source_path": "output/ep05_alignment_tuning/full_r360_e93_rad100_s0125/contour_alignment_results.csv",
+      "columns": ["refined_align_dx_px", "refined_align_dy_px"],
+      "sort_by": ["acquisition_order", "frame_index"],
+      "filter_success_column": "success",
+      "description": "Tuned contour-refined profile for alignment sensitivity checks."
+    },
+    "ideal_phase_grid": {
+      "kind": "phase_grid",
+      "dx_values": [0.0, 0.25, 0.5, 0.75],
+      "dy_values": [0.0, 0.25, 0.5, 0.75],
+      "description": "Theoretical phase coverage upper-bound profile."
+    },
+    "stage_prior_affine": {
+      "kind": "stage_coordinate_grid",
+      "theta_deg": 47.6,
+      "pixel_size_um": 10.0,
+      "x_um_values": [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40],
+      "y_um_values": [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40],
+      "description": "Stage-command prior/control. It is not alignment ground truth."
+    },
+    "jittered_real": {
+      "kind": "jittered_profile",
+      "base_profile": "real_default_contour_refined",
+      "jitter_sigma_px": 0.05,
+      "seed": 91001,
+      "description": "Robustness profile with small Gaussian perturbations on refined real shifts."
+    }
+  }
+}
