@@ -1,7 +1,7 @@
 # %% [markdown]
 # ## 4. Data-Driven Alignment vs Filename/Stage Prior
 #
-# EP02 的坐标 prior 需要和 data-driven alignment 分工：prior 提供覆盖、初始化和约束；alignment truth 应由图像数据中的 contour/NCC 一致性来判定。若 EP05 alignment score 已存在，本节直接读取；否则 core helper 会退回到轻量 EP02 NCC proxy。
+# EP02 的坐标 prior 需要和 data-driven alignment 分工：prior 提供覆盖、初始化和约束；alignment evidence / anchor / quality gate 由图像数据中的 contour/NCC 一致性支撑。若 EP05 alignment score 已存在，本节直接读取；否则 core helper 会退回到轻量 EP02 NCC proxy。
 #
 # 这一节回答“后续 SR 到底信谁”。stage prior 告诉我们应该从哪里开始找；data-driven alignment 则用热像帧中的边缘、梯度、轮廓或 NCC 证据检查这个位移是否真的让结构对齐。
 # 因此，prior 和 alignment 不是互相替代的两套结论，而是前后衔接的两层证据。
@@ -18,7 +18,7 @@ fig
 # > **怎么读图**: Chamfer 误差越低，表示 holdout 轮廓在对齐后越接近；gradient correlation 越高，表示局部边缘/梯度方向越一致。一个可靠对齐方法应同时降低轮廓误差、提高梯度一致性。
 # > **正常/异常理解**: 如果 data-driven 方法比 stage prior only 更好，说明图像证据确实修正了命令 prior。若某个 data-driven 方法只改善一个指标、恶化另一个指标，应谨慎看作局部过拟合或质量门控不足，而不是直接采纳。
 # > **数据分布**: 当前输出读取自 EP05 alignment score 时，data-driven contour refined 的 Chamfer 误差最低，且相对 stage prior only 有更高的梯度一致性。
-# > **核心发现**: filename/stage prior 更适合作初始化和覆盖模型；每帧 alignment truth 应由 data-driven contour/NCC 质量指标给出。
+# > **核心发现**: filename/stage prior 更适合作初始化和覆盖模型；每帧 alignment evidence、anchor 和 quality gate 应由 data-driven contour/NCC 质量指标支撑。
 
 # %%
 alignment_gain = alignment_improvement_summary(alignment_summary)

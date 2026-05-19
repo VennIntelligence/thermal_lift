@@ -40,6 +40,7 @@
 
 - [x] 统计 `(X,Y,R)` 分布
 - [x] 验证缺失坐标和重复坐标
+- [x] 输出清晰缺失坐标表，确认 (14,6)、(16,6)、(16,16) 是坐标级缺失
 - [x] 绘制全数据坐标覆盖 heatmap
 - [x] 绘制主 session vs 其他 session 坐标覆盖 heatmap
 
@@ -47,14 +48,19 @@
 
 - [x] 基于 `acquisition_order`/mtime 建立真实采集顺序
 - [x] 绘制文件名顺序 vs 采集顺序温度曲线对比图
+- [x] 绘制 acquisition-order raster/trajectory 诊断图，只证明采集命令时序，不作为 alignment truth
+- [x] 输出 R=0 raster row-order 表，验证行内 X 递增、行间 Y 递增、缺失坐标与配置一致
 - [x] 检测采集顺序下的 3 个温度段
+- [x] 输出 session boundary jump vs noise floor 表，记录 23×/57× 噪声底量级
 - [x] 标记 `session` 与 `is_main_session`
 - [x] 输出主 session 255 帧作为默认 SR 输入规则
 
 ### Phase 4: 文档与产物 ✅
 
 - [x] 更新 notebook fragments
-- [x] 构建并执行 EP01 notebook
+- [x] 增加 BMP/TXT pairing provenance 表；`rename_mapping.csv` 缺失时只记录 provenance gap，不臆造原始映射
+- [x] 增加 `frame_audit.csv` 下游 contract 表，固定关键列含义和使用边界
+- [ ] 重新构建并执行 EP01 notebook（本轮为遵守写入范围，未生成 `.ipynb`/`output/` 产物）
 - [x] 更新正式报告 `reports/ep01_data_processing/audit_report.md`
 - [x] 输出机器可读 CSV 到 `output/ep01_data_processing/`
 
@@ -73,8 +79,9 @@
 | 主 session 坐标覆盖 | 253/256 | 主 session 覆盖全部实际存在坐标 |
 | 文件名序 session | 13 个表观段 | 排序伪影，不用于后续 |
 | 采集顺序 session | 3 个温度段 | 用于帧选择与温度隔离 |
-| session 边界跳变 | 1.66°C / 4.16°C | 数十倍噪声底，跨 session 不混合 |
-| 主 session 均温跨度 | 0.62°C | 后续对齐和 SR 应在该温度带内完成 |
+| session 边界跳变 | 1.66°C / 4.16°C（23× / 57× noise floor） | 数十倍噪声底，跨 session 不混合 |
+| 主 session 均温跨度 | 0.62°C | 默认输入帧位于该温度带内 |
+| R=0 raster 顺序 | 16 行均匹配期望顺序 | 证明采集命令时序与 raster 事实一致，不是 alignment truth |
 
 ---
 
@@ -88,6 +95,8 @@
 | 2026-05-17 | 主 session=2 作为默认 SR 输入 | 该段包含 255 帧并覆盖全部实际存在坐标 |
 | 2026-05-18 | EP01 范围收敛到 SR 数据基础 | 旋转角、alignment anchor、SR 算法验证分别由后续 Episode 处理 |
 | 2026-05-18 | stage/文件名坐标只作为 prior | 对齐真值必须由图像数据与后续 EP04 localization 质量门控约束 |
+| 2026-05-18 | `frame_audit.csv` 字段 contract 固化 | 下游必须继承 `acquisition_order`、`session`、`is_main_session`，避免重新按文件名推断时序 |
+| 2026-05-18 | `rename_mapping.csv` 缺失只记录 provenance gap | 当前环境不能复原原始连写文件名映射，不能臆造 rename provenance |
 
 ---
 
@@ -104,6 +113,7 @@
   - `frame_temperature_statistics.png`
   - `robust_temperature_timeline.png`
   - `order_comparison.png`
+  - `acquisition_raster_trajectory.png`
   - `session_detection.png`
   - `session_coordinate_coverage.png`
 

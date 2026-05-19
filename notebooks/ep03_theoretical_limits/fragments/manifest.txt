@@ -2,5 +2,6 @@
 02_crb_analysis.py
 03_sample_geometry.py
 04_minimal_poc.py
+05_mtf_snr_recoverability.py
 05_inner_contour.py
 06_shift_diagnostic.py

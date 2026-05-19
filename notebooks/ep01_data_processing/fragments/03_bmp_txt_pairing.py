@@ -7,21 +7,32 @@
 pairing = check_bmp_txt_pairing(DATA_DIR)
 print(f"TXT: {pairing['n_txt']}  |  BMP: {pairing['n_bmp']}  |  配对: {pairing['n_paired']}")
 print(f"孤立 TXT: {len(pairing['only_txt'])}  |  孤立 BMP: {len(pairing['only_bmp'])}")
+pairing_detail = make_bmp_txt_pairing_table(
+    pairing,
+    rename_mapping=rename_mapping,
+    rename_mapping_path=rename_mapping_path,
+)
+display(pairing_detail)
 
 # %% [markdown]
 # > **数据说明**: 这里检查同名 TXT 温度矩阵和 BMP 预览图是否一一对应。
 # > TXT 是后续定量分析数据源，BMP 只作为人工核查和视觉参考；两者同名，说明它们描述同一次采集。
+# > 表格额外记录 `rename_mapping.csv` 的 provenance 状态：如果映射表缺失，只记录缺失事实，不倒推原始连写文件名。
 # >
 # > **怎么读**: `TXT` 和 `BMP` 是两类文件总数，`配对` 是同时存在同名 TXT/BMP 的数量。
 # > `孤立 TXT` 表示有温度矩阵但没有预览图；`孤立 BMP` 表示有图像预览但缺少可计算的温度矩阵。
+# > `Rename provenance` 行不是算法输入，只告诉我们当前 notebook 是否能追溯标准化前的原始文件名。
 # >
 # > **数据分布**: 263 个 TXT 和 263 个 BMP 全部配对，没有孤立 TXT 或孤立 BMP。
+# > 当前环境没有发现 `rename_mapping.csv`，因此原始连写文件名到标准名的逐项映射不能在本 notebook 中复现。
 # >
 # > **正常/异常理解**: 对本项目而言，正常情况是 TXT/BMP 数量相等且配对数等于总帧数。
 # > 少量孤立 BMP 不会直接影响 SR 输入，但会降低人工排查能力；孤立 TXT 可以计算，但需要确认不是命名错误。
+# > 缺少 rename provenance 不等于当前 `X_Y_R` 文件名错误；它只限制了我们对“重命名前原始名字”的可追溯性。
 # >
 # > **核心发现**: 原始文件重命名后没有破坏 TXT/BMP 对应关系；后续 SR 可使用 TXT 做数值重建，
-# > 同名 BMP 可作为定位和排查异常帧的辅助材料。
+# > 同名 BMP 可作为定位和排查异常帧的辅助材料。若需要审计原始连写命名，必须先补回真实 `rename_mapping.csv`，
+# > 不能在 EP01 里臆造 provenance。
 
 # %% [markdown]
 # ## 2.2b 重命名消歧核查
@@ -65,5 +76,6 @@ rename_special
 # > **正常/异常理解**: 正常表格应把前导 0、中文逗号和 `2400` 这类歧义名映射到唯一合法坐标。
 # > 如果同一个原始名能解释成多个坐标，或者标准化坐标不在允许集合内，就需要停止后续分析并修正命名规则。
 # >
-# > **核心发现**: 当前没有证据表明重命名把坐标大面积解错。
-# > 后续 SR 可以把 `X_Y_R` 坐标作为 stage command prior 的来源，但真实帧时序仍必须使用 `acquisition_order`。
+# > **核心发现**: 当前环境没有 `rename_mapping.csv` 时，EP01 只能记录 provenance gap，
+# > 不能从原始连写名反推出逐项重命名过程。
+# > 后续 SR 可以读取现有 `X_Y_R` 标准文件名作为 stage command prior 的来源，但真实帧时序仍必须使用 `acquisition_order`。

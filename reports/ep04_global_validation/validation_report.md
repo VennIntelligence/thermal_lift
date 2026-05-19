@@ -44,6 +44,25 @@ EP04 在这个链路中的定位是：
 
 外轮廓提供了更连续的 anchor coverage；内轮廓通过率明显更低，但通过段的 split-half 和 NCC 仍可接近外轮廓水平。这说明内轮廓不是“不可重建区域”，而是需要 EP06 使用形状先验、SR forward model 和更严格验证来处理的目标区域。
 
+经典 EP04 诊断图已纳入 Notebook 并重新解释为 alignment-anchor 证据：
+
+- `split_half_distribution.png`
+- `crb_ratio_scatter.png`
+- `phase_coverage_vs_precision.png`
+- `failure_taxonomy.png`
+- `cross_scanline_consistency.png`
+
+这些图只回答“哪些外轮廓段可稳定当锚点、哪些段/scanline 应降权或剔除”，不回答 LR/bicubic/SR 对照，也不输出形状重建。
+
+新增 `segment x scanline` heatmap 显示失败既有局部坏段，也有相对弱的 scanline：
+
+| contour | row pass rate | weakest scanline | weakest scanline pass rate | zero-pass scanlines | zero-pass segments |
+|---|---:|---:|---:|---:|---:|
+| outer | 54.3% | 24 µm | 44.0% | 0 | 16 |
+| inner | 24.2% | 14 µm | 22.3% | 0 | 190 |
+
+解释边界：zero-pass segment 表示该段在当前 localization gate 下不能作为强 alignment truth；它不是“没有结构”或“放弃 SR 目标”。weak scanline 表示 EP06 对齐时应考虑 holdout/低权重，而不是把单条线外推为 stage command 真值。
+
 ## 4. Anchor Coverage 和 EP06 角色
 
 EP04 将 segment 分为三类 EP06 角色：
@@ -63,6 +82,19 @@ EP04 将 segment 分为三类 EP06 角色：
 - `holdout_validation`: 不直接参与配准优化，用于验证 EP06 重建后轮廓一致性和 split-half 稳定性。
 - `sr_target_not_truth`: 不可直接当作 alignment truth 或 SR 真值；但这些段通常正是客户关心的内部结构形状区域，应保留为 EP06 视觉和结构一致性评估目标。
 
+EP06 role margin audit 用 alignment-input 数值门槛审计三类 role 距离阈值多近：pass rate ≥70%、split-half ≤0.06 px、CRB ratio ≤5×、phase coverage ≥0.15 px。正 margin 表示离 alignment 输入阈值有余量；负 margin 表示该项不能当强 anchor 条件。
+
+| contour | EP06 role | segment 数 | pass-rate margin | split margin | CRB margin | phase margin | P10 min margin | closest gate |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| outer | alignment_input | 26 | +30.0 pp | +0.0409 px | +3.72× | +1.838 px | +0.154 | pass rate |
+| outer | holdout_validation | 19 | +6.9 pp | +0.0337 px | +3.21× | +1.807 px | -0.121 | pass rate |
+| outer | sr_target_not_truth | 39 | -54.6 pp | +0.0076 px | +3.09× | +0.366 px | -1.227 | pass rate |
+| inner | alignment_input | 40 | +30.0 pp | +0.0408 px | +3.69× | +1.842 px | +0.209 | pass rate |
+| inner | holdout_validation | 43 | -0.8 pp | +0.0346 px | +3.21× | +1.680 px | -0.231 | pass rate |
+| inner | sr_target_not_truth | 303 | -70.0 pp | +0.0260 px | +2.61× | +0.937 px | -1.172 | pass rate |
+
+`sr_target_not_truth` 的负 margin 不表示放弃区域，而是表示不能把这些段当作 alignment truth 或 SR 真值。它们仍然应保留为 EP06 内部结构可见性目标。
+
 ## 5. 内轮廓失败模式
 
 段级主要失败原因如下：
@@ -79,6 +111,27 @@ EP04 将 segment 分为三类 EP06 角色：
 | `psf_sensitivity_high` | 0 | 3 |
 
 内轮廓的主要瓶颈不是 NCC peak 低，而是表观边缘模型不稳定、局部相位覆盖不足和 split-half 长尾。解释上应写成“这些区域不能直接作为配准真值”，而不是“这些区域不值得 SR”。EP06 应重点检查这些区域是否通过多帧 SR 呈现更稳定的形状轮廓。
+
+row-level 多标签失败诊断进一步支持这一点。内轮廓 3802 个失败 row 中：
+
+| reason | triggered rows | share of failed rows | strongest co-occurrence |
+|---|---:|---:|---|
+| `sigma_out_of_range` | 2040 | 53.7% | `split_half_high` |
+| `split_half_high` | 1300 | 34.2% | `sigma_out_of_range` |
+| `fit_error:ValueError` | 1055 | 27.7% | n/a |
+| `low_phase_coverage` | 278 | 7.3% | `sigma_out_of_range` |
+| `low_snr` | 224 | 5.9% | `sigma_out_of_range` |
+
+这些百分比是多标签比例，不可相加为 100%。同一行可能同时触发 sigma、split-half、phase 或 fit gate。
+
+NCC / ESF 诊断表明，失败行的 NCC peak 并未整体崩溃：
+
+| contour | failed rows | median failed NCC peak | P10 failed NCC peak | failed rows above NCC gate | NCC unreliable share | ESF/model/stability share |
+|---|---:|---:|---:|---:|---:|---:|
+| outer | 499 | 0.9845 | 0.9792 | 100.0% | 0.0% | 97.8% |
+| inner | 3802 | 0.9868 | 0.9825 | 100.0% | 3.1% | 99.3% |
+
+因此当前瓶颈应写成“ESF 表观宽度、拟合、split-half 和 phase coverage 的 localization gate 限制”，而不是“NCC peak 太低”。这保护了 EP06 的正确用法：inner fail 段不能当强锚点，但仍是 SR 目标。
 
 ## 6. 定位精度与形状重建的区别
 
@@ -106,11 +159,18 @@ EP04 的高精度定位成果是 EP06 的配准支撑，不是最终交付。通
 
 关键图：
 
+- `output/ep04_global_validation/split_half_distribution.png`
+- `output/ep04_global_validation/crb_ratio_scatter.png`
+- `output/ep04_global_validation/phase_coverage_vs_precision.png`
+- `output/ep04_global_validation/failure_taxonomy.png`
+- `output/ep04_global_validation/cross_scanline_consistency.png`
 - `output/ep04_global_validation/global_segment_quality_distribution.png`
 - `output/ep04_global_validation/anchor_coverage_map.png`
 - `output/ep04_global_validation/anchor_scanline_support.png`
+- `output/ep04_global_validation/segment_scanline_pass_heatmap.png`
 - `output/ep04_global_validation/inner_failure_reasons.png`
 - `output/ep04_global_validation/ep06_gate_recommendations.png`
+- `output/ep04_global_validation/normal_angle_coverage.png`
 
 ## 8. 结论
 

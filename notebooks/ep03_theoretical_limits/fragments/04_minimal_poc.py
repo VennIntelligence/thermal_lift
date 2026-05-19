@@ -28,7 +28,7 @@ print(f"Noise floor: {NOISE_SIGMA:.4f} C")
 # > **数据说明**: 第一张表按 outer/inner contour 汇总局部温差、SNR、法线投影和 anchor-candidate 比例；第二张表把噪声底、3x noise gate、0.3/0.7/1.0 C 参考温差和实测中位温差统一换算成 SNR。
 # > **怎么读**: `|Delta T|` 或类似温差列表示局部轮廓两侧的热对比；SNR 是温差除以 0.0724 C 噪声底；法线投影描述微扫描位移是否主要跨过边缘，而不是沿着边缘滑动；anchor-candidate 比例表示有多少局部段同时通过这些条件。
 # > **正常/异常理解**: 正常情况是有一部分 segment SNR 明显高于 3x noise gate，但不会每个 segment 都合格。如果所有 segment 都接近噪声底，后续 SR 应更保守；如果 SNR 高但法线投影弱，它仍可能不适合作为位移/边缘定位 anchor。
-# > **核心发现**: 噪声底不直接否定 2x contour-level POC；它要求 EP05 在局部结构上做质量门控，只让可观测、高置信度区域参与或主导 SR 评估。这些表不能替代真实数据 SR 输出的轮廓一致性检查。
+# > **核心发现**: 噪声底不直接否定 2x contour-level POC；它要求 EP05 建立局部质量门控，并让 EP06 SR POC 只让可观测、高置信度区域参与或主导 SR 评估。这些表不能替代真实数据 SR 输出的轮廓一致性检查。
 
 # %%
 fig = plot_noise_floor_snr(
@@ -57,7 +57,7 @@ save_fig(fig, "local_contour_candidate_map.png")
 # > **图表说明**: 这张图只展示空间位置证据：外轮廓、内轮廓和 anchor candidates 叠加到参考温度矩阵。它回答“哪些地方可能有可用结构”，不回答“SR 后是否更清楚”。
 # > **怎么读**: 先看背景温度矩阵中的芯片形状，再看轮廓线落在哪些边界上，最后看 anchor candidates 是否覆盖了内部结构和关键边缘。候选点越贴近真实轮廓、空间分布越均衡，越利于后续对齐门控。
 # > **正常/异常理解**: 正常情况是候选点只出现在部分局部结构上，而不是铺满全图。若候选点集中在孤立角落，说明后续 SR 评估不能代表整个芯片；若候选点落在明显非结构区域，需要检查轮廓检测或温差门控。
-# > **核心发现**: 这张图用于确认可用局部结构在哪里，不把 segment 统计散点混在同一画布里，避免暗示两类信息有一一对应关系。空间候选只能指导 EP05 选 anchor/ROI，不能代替最终 SR 可视化结论。
+# > **核心发现**: 这张图用于确认可用局部结构在哪里，不把 segment 统计散点混在同一画布里，避免暗示两类信息有一一对应关系。空间候选只能指导 EP05 alignment/phase baseline 和 EP06 SR POC 的 anchor/ROI 选择，不能代替最终 SR 可视化结论。
 
 # %%
 fig = plot_local_anchor_confidence(segments)
@@ -67,4 +67,4 @@ save_fig(fig, "local_anchor_confidence_scatter.png")
 # > **图表说明**: 这张图只展示 segment-level 门控统计：每个局部 segment 的 SNR 与 X 微扫描法线投影。一个点代表一个局部轮廓段，而不是一个像素或一整帧。
 # > **怎么读**: 横向或纵向位置反映该 segment 的温差可信度和位移几何是否合适。理想 anchor 位于高 SNR、较高法线投影区域；低 SNR 点不稳定，低法线投影点对跨边缘定位帮助有限。
 # > **正常/异常理解**: 可用 anchor 是局部性的：有些结构温差强但法线投影弱，有些内部轮廓提供了外轮廓没有的方向覆盖。若高 SNR 点与高投影点几乎不重叠，后续 alignment 需要更严格筛选。
-# > **核心发现**: 局部 ESF/CRB 应作为 alignment anchor 和 quality gate；它不是最终交付目标，也不能替代对芯片内部结构/形状的 SR 评估。EP05 仍需要用真实多帧重建结果证明 contour-level 增益。
+# > **核心发现**: 局部 ESF/CRB 应作为 alignment anchor 和 quality gate；它不是最终交付目标，也不能替代对芯片内部结构/形状的 SR 评估。EP06 SR POC 仍需要用真实多帧重建结果证明 contour-level 增益。

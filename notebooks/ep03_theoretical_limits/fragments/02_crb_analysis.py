@@ -13,7 +13,15 @@ sampling_resolution = build_sampling_resolution_table(
 )
 sampling_resolution.to_csv(OUTPUT_DIR / "sampling_resolution_distinction.csv", index=False)
 
+grid_nyquist = build_output_grid_nyquist_table(
+    detector_pitch_um=DETECTOR_PITCH_UM,
+    spatial_resolution_um=SPATIAL_RESOLUTION_UM,
+    grid_factors=(1, 2, 4),
+)
+grid_nyquist.to_csv(OUTPUT_DIR / "output_grid_nyquist_periods.csv", index=False)
+
 display(sampling_resolution)
+display(grid_nyquist)
 
 fig = plot_sampling_resolution_diagram(
     sampling_resolution,
@@ -24,10 +32,10 @@ fig = plot_sampling_resolution_diagram(
 save_fig(fig, "sampling_resolution_distinction.png")
 
 # %% [markdown]
-# > **图表说明**: 表格和示意图把 detector sample、当前 spatial resolution、2x grid 和 4x grid 放在同一条物理长度轴上。表格适合查具体数值，示意图适合看这些尺度之间的相对距离。
-# > **怎么读**: 先看 detector sample 的刻度间隔，它表示原始温度矩阵相邻像素中心间隔；再看 spatial resolution 的跨度，它表示光学系统已经把小于该尺度的结构混合到一起；最后看 2x/4x grid，它们只是候选输出网格密度。
-# > **正常/异常理解**: 正常结论是 20 um resolution 比 10 um pitch 更宽，因此单帧图像已经过采样了部分光学模糊。若只看到更密的输出网格、却没有对齐和结构证据，那是显示/插值，不是 SR 证据。
-# > **核心发现**: EP03 支持把 2x 作为 contour-level SR POC 的默认输出网格；它不支持把插值后的 5 um grid 直接写成 5 um 计量级空间分辨率。真实增益必须在 EP05 用主 session 数据验证。
+# > **图表说明**: 第一张表和示意图区分 detector sample、当前 spatial resolution、2x grid 和 4x grid；第二张表给出每个输出网格对应的 Nyquist period。
+# > **怎么读**: `output_sample_um` 是输出网格相邻样本距离；`nyquist_period_um=2*output_sample_um` 是该网格理论上能表示的最短正弦周期。2x grid 的输出样本是 5 um，但 Nyquist period 是 10 um，不是 5 um。
+# > **正常/异常理解**: 正常结论是 20 um resolution 比 10 um pitch 更宽，因此单帧图像已经过采样了部分光学模糊。若只看到更密的输出网格、却没有对齐、MTF/SNR 和结构证据，那是显示/插值，不是 SR 证据。
+# > **核心发现**: EP03 支持把 2x 作为 contour-level SR POC 的默认输出网格；它不支持把 5 um output sample 写成 5 um spatial resolution，也不支持把 2x grid 的 10 um Nyquist period 写成真实可分辨周期。真实 contour-level 增益必须在 EP06 SR POC 中用主 session 数据验证。
 
 # %%
 measurement_script = PROJECT_ROOT / "scripts" / "measure_pixel_size.py"

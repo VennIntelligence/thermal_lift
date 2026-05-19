@@ -20,7 +20,7 @@ fig
 # > **怎么读图**: dx/dy 是 detector-space displacement prior，单位是 pixel；点的位置来自 stage command 经 theta/pitch 换算，不来自 NCC。右图四个柱子对应 2x 网格的四类半像素相位覆盖。
 # > **正常/异常理解**: 正常的 prior 覆盖应形成二维云图，且四个 2x phase bin 都非空。若所有点挤在同一 phase bin，2x SR 的采样互补性会很弱；若云图方向明显错误，通常应先检查 theta 或坐标解析。
 # > **数据分布**: stage prior 覆盖形成旋转后的二维云图，四个 2x phase bin 都有样本。phase 计数来自命令坐标映射，不来自图像对齐估计。
-# > **核心发现**: 文件名坐标足以提供全局覆盖和 phase 覆盖先验；真实配准仍必须由轮廓、NCC 或后续 localization anchor 等 data-driven 证据确认或修正。
+# > **核心发现**: 文件名坐标足以提供全局覆盖和 phase 覆盖先验；实际配准证据仍需要由轮廓、NCC 或后续 localization anchor 等 data-driven 证据支撑。
 
 # %%
 prior_stats = stage_prior_summary(

@@ -52,6 +52,51 @@ display(summary_table)
 # > 跨 session 的温度跳变达到数十倍噪声底，不能为了增加帧数而直接混合到同一次重建中。
 
 # %%
+boundary_jump_table = make_boundary_jump_table(model.boundary_jumps, noise_floor_c)
+display(boundary_jump_table.round(3))
+
+# %% [markdown]
+# > **数据说明**: 这张表把每一个采集顺序 session 边界的逐帧均温跳变，与噪声底 `0.0724°C` 做同单位对比。
+# > `boundary_after_order` 是边界前一帧的采集序号，`to_order` 是边界后一帧。
+# >
+# > **怎么读**: `delta_mean_C` 保留跳变方向，`abs_delta_mean_C` 只看大小；
+# > `abs_delta_over_noise_floor` 表示该跳变相当于多少倍噪声底，数值越大，越说明它不是普通帧间噪声。
+# > `diagnostic` 是 EP01 的数据输入规则，不是 SR 成败判据。
+# >
+# > **数据分布**: 两个边界分别约为 1.66°C 和 4.16°C，对应约 23× 和 57× noise floor；
+# > 中位边界跳变约 2.91°C，约 40× noise floor。
+# >
+# > **正常/异常理解**: 跨 session 大跳变说明数据经历了不同热状态；
+# > 这不是坏帧结论，也不是位移/对齐结论，而是后续不能把这些温度段直接混成一次重建输入。
+# >
+# > **核心发现**: EP01 的 session gate 有明确温度量级依据。
+# > 默认 SR 输入应只取主 session 内 255 帧，跨 session 帧只能单独分析或作为背景/温漂诊断。
+
+# %%
+frame_audit_contract = make_frame_audit_contract_table(
+    include_source_file="source_file" in df_sorted.columns
+)
+display(frame_audit_contract)
+
+# %% [markdown]
+# > **数据说明**: 这张表定义 `frame_audit.csv` 给后续 Episode 的字段合同：
+# > 哪些列是排序、session、坐标、温度统计和主 session 过滤的权威来源。
+# >
+# > **怎么读**: `Column` 是 CSV 字段名，`Meaning` 解释字段物理或数据含义；
+# > `Downstream use` 说明后续应该怎样使用它，尤其是 `acquisition_order` 和 `is_main_session`；
+# > `Contract status` 标记该字段是否是默认下游流程的必需列。
+# >
+# > **数据分布**: 合同把 `file/X/Y/R`、`mtime/acquisition_order`、稳健温度统计、`session`、
+# > `session_source` 和 `is_main_session` 明确列为必需字段。
+# >
+# > **正常/异常理解**: `X/Y/R` 只能作为 stage command prior 和网格 bookkeeping；
+# > 真正的时间轴是 `acquisition_order`，默认帧选择是 `is_main_session=True`。
+# > 如果下游脚本缺失这些列，应回到 EP01 重新生成 `frame_audit.csv`，而不是按文件名重新推断。
+# >
+# > **核心发现**: EP01 的机器可读交付物不是一张普通清单，而是后续 SR POC 的输入 contract。
+# > 它固定主 session 255 帧、真实采集顺序和跨 session 隔离规则。
+
+# %%
 # Save machine-readable audit products for later episodes.
 df_sorted.to_csv(OUTPUT_DIR / "frame_audit.csv", index=False)
 print(f"审计数据: output/ep01_data_processing/frame_audit.csv ({len(df_sorted)} frames)")
@@ -73,9 +118,14 @@ missing_coords = sorted(
     set((x, y) for x in sorted(VALID_COORDS) for y in sorted(VALID_COORDS)) - all_coords
 )
 boundary_text = markdown_table(model.boundary_jumps.round(3)) if not model.boundary_jumps.empty else "No detected boundaries."
+boundary_jump_md = markdown_table(boundary_jump_table.round(3)) if not boundary_jump_table.empty else "No detected boundaries."
 summary_md = markdown_table(summary_table)
+pairing_detail_md = markdown_table(pairing_detail)
 coord_repeat_md = markdown_table(coord_repeat_summary)
 r_distribution_md = markdown_table(r_distribution)
+missing_coord_md = markdown_table(missing_coordinate_table)
+raster_row_md = markdown_table(raster_row_summary)
+contract_md = markdown_table(frame_audit_contract)
 
 report = f"""# EP01 — SR Data Basis and Main-Session Model
 
@@ -91,6 +141,10 @@ EP01 audits the raw LWIR TXT/BMP dataset and turns it into a reproducible input 
 
 All `{pairing['n_txt']}` TXT thermal matrices are readable `{frame_shape[0]} x {frame_shape[1]}` arrays with no NaN/Inf frames, and all have matching BMP companions. TXT remains the numerical input for SR; BMP is retained as same-name visual reference only.
 
+TXT/BMP pairing and rename provenance:
+
+{pairing_detail_md}
+
 Coordinate/repeat coverage:
 
 {coord_repeat_md}
@@ -100,6 +154,10 @@ Repeat-ID distribution:
 {r_distribution_md}
 
 The dataset contains `{len(all_coords)}/256` actual coordinates. Missing coordinates are `{missing_coords}`. These gaps are coordinate-level absences, not merely missing `R=0` repeats.
+
+Explicit missing-coordinate table:
+
+{missing_coord_md}
 
 ## Acquisition Order and Sessions
 
@@ -111,13 +169,25 @@ Boundary jumps in acquisition order:
 
 {boundary_text}
 
+Boundary jumps compared with the `{noise_floor_c:.4f}` deg C noise floor:
+
+{boundary_jump_md}
+
 The main session is session `{main_session}` with `{int(main_row['n_frames'])}` frames. It spans acquisition orders `{int(main_row['first_order'])}` to `{int(main_row['last_order'])}`, covers `{len(main_coords)}/256` coordinates, and has a mean-temperature span of `{main_mean_range:.3f}` deg C within the session.
+
+R=0 raster row-order diagnostic:
+
+{raster_row_md}
 
 ## SR Input Rule
 
 Downstream SR should inherit `frame_audit.csv` and use `acquisition_order`, `session`, and `is_main_session` as the frame-selection contract. The default 2x contour-level SR POC input is the `{len(main_df)}`-frame main session. Stage/filename coordinates are useful as command priors for initialization or regularization, but actual alignment must be constrained by image data and later EP04 localization quality gates.
 
 Cross-session frames should not be mixed into one reconstruction pass. The detected session-boundary jumps are `{model.boundary_jumps['abs_delta_mean_C'].median():.2f}` deg C median and `{model.boundary_jumps['abs_delta_mean_C'].max():.2f}` deg C max, which are about `{model.boundary_jumps['abs_delta_mean_C'].median() / noise_floor_c:.0f}x` and `{model.boundary_jumps['abs_delta_mean_C'].max() / noise_floor_c:.0f}x` the `{noise_floor_c:.4f}` deg C noise floor.
+
+`frame_audit.csv` downstream contract:
+
+{contract_md}
 
 ## Output Files
 
@@ -128,6 +198,7 @@ Cross-session frames should not be mixed into one reconstruction pass. The detec
 - `frame_temperature_statistics.png`
 - `robust_temperature_timeline.png`
 - `order_comparison.png`
+- `acquisition_raster_trajectory.png`
 - `session_detection.png`
 - `session_coordinate_coverage.png`
 """

@@ -1,6 +1,6 @@
 # EP02 — Raster Path, Stage Prior, and Data-Driven Alignment Evidence
 
-> **目标**: 重建 raster 采集路径，给出 detector-space stage prior 覆盖，并区分 stage prior、小步诊断和 data-driven alignment truth
+> **目标**: 重建 raster 采集路径，给出 detector-space stage prior 覆盖，并区分 stage prior、小步诊断和 data-driven alignment evidence / anchor / quality gate
 > **状态**: ✅ 已重写为“raster path / stage prior / data-driven alignment evidence”版本
 > **前置**: EP01（数据审计完成）
 
@@ -22,6 +22,29 @@
 - [x] 小步诊断图：保留 X 行内时间相邻方向/线性 smoke test，明确 Y-only 坐标相邻 pair 不能标定。
 - [x] Data-driven vs filename/stage 对齐比较：读取已有 EP05 alignment score，证明 data-driven contour/NCC 更适合作 alignment quality gate。
 - [x] 结论表：输出 stage prior、data-driven alignment、X 小步、Y 坐标相邻 pair、AVI 连续扫描的用途和禁止用途。
+- [x] Richer evidence 回填：把 time-adjacent 方法对照、Y-only 预处理失败、AVI theta、AVI-TXT 线匹配和旧 NCC 失败审计合并进当前主线 notebook/报告。
+
+## 2026-05-18 EP02 richer evidence consolidation
+
+### 关键结果
+
+| 证据 | 结果 | 当前用途 |
+|------|------|----------|
+| stage prior contract | 每帧可由 `X/Y` command 映射到 detector dx/dy 和 2x phase bin | prior / 初始化 / 正则，不是 truth |
+| time-adjacent X-step method comparison | raw/high-pass/gradient projection ratio 约 0.45-0.51，RMS 约 0.15-0.17 px；phase correlation 在细小位移上退化 | 局部方向和短时线性 smoke test |
+| row-transition method comparison | projection ratio 约 0.44-0.54，但 RMS 约 1.87-2.32 px | 同时包含 Y advance + X reset，不作 Y-only 标定 |
+| Y-only coordinate-neighbor table | raw/high-pass/gradient 的 4/2 visible ratio 均约 0.64，非预期的 2.0 | 跨预处理稳定失败，只作失败诊断 |
+| AVI theta | gradient combined theta = 47.14°，95% CI [46.36°, 47.92°] 覆盖 47.6° | 辅助方向验证，不替换配置 |
+| AVI-TXT line match | `xN.avi -> TXT fixed Y=N`，`yN.avi -> TXT fixed X=N` | 命名映射正确；Y-only TXT 失败主要来自 raster gap/热场演化 |
+| 历史 coordinate-adjacent NCC | y-up theta 34.05°，CI 不覆盖 47.6°；projection R²=0.0001；repeat valid 0/2 | 旧 pair 构造失败审计，不更新 theta、不裁判 SR |
+
+### 决策记录
+
+- `configs/stage_calibration.json` 仍保持 theta=47.6°；EP02 不写入也不建议覆盖该配置。
+- time-adjacent X 小步结果只说明本 ROI/预处理下有可见局部响应，不能把 stage command 升格为 alignment truth。
+- Y-only 坐标相邻 pair 的失败现在有两层解释：raster path 造成 acquisition gap 中位约 16 帧，AVI-TXT 线匹配又排除了大范围命名反转。
+- AVI 连续扫描支持方向合理性和 x/y 命名解释，但 AVI 是 8-bit 渲染视频，不进入 SR 输入、不替代 raw TXT 温度矩阵。
+- 旧 coordinate-adjacent NCC 结果保留为 hard lesson：它诊断 pair 构造失败，不恢复旧 theta 标定成功/失败叙事，也不恢复旧 no-go 结论。
 
 ## 📚 历史任务记录
 
@@ -277,7 +300,7 @@
 - 新叙事顺序：raster acquisition path → stage prior detector coverage and 2x phase bins → small-step smoke tests → data-driven vs filename/stage alignment comparison → evidence-use decision table。
 - 核心图包括：`ep02_raster_acquisition_path.png`、`ep02_stage_prior_coverage.png`、`ep02_small_step_smoke_tests.png`、`ep02_data_driven_alignment_comparison.png`。
 - 关键数值：主 session 255 帧、R=0 raster 248 帧、X 行内时间相邻转移 232 对、Y 坐标相邻 gap 中位数 16 帧；stage prior 四个 2x phase bin 均非空。
-- alignment 口径：已有 EP05 score 显示 data-driven contour refined 相对 stage-prior-only 的 holdout Chamfer 中位误差下降 44.2%，因此 stage/filename 坐标只作为 prior，alignment truth 由 data-driven contour/NCC 质量指标给出。
+- alignment 口径：已有 EP05 score 显示 data-driven contour refined 相对 stage-prior-only 的 holdout Chamfer 中位误差下降 44.2%，因此 stage/filename 坐标只作为 prior，alignment evidence / anchor / quality gate 由 data-driven contour/NCC 质量指标支撑。
 - 正式结论：EP02 不把 stage command 当成位移真值，也不从 2 um 小步外推多帧 SR 成败；EP06 应在主 session 上做 data-driven 对齐与质量门控后进入 2x contour-level SR。
 
 ### 产物

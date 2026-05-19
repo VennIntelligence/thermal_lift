@@ -11,7 +11,7 @@
 # # Kernel 选择: 项目 .venv 下的 Python 3
 # ```
 #
-# **目标**: 用 10 um/pixel detector pitch、20 um 当前空间分辨率、Gaussian PSF/MTF、0.0724 C 噪声底和局部 ESF/CRB，定义 2x contour-level SR POC 的物理边界与质量门控条件。EP03 不把 stage command 当作对齐真值，也不把局部 ESF/NCC 诊断外推成全局 SR 裁决。
+# **目标**: 用 10 um/pixel detector pitch、20 um 当前空间分辨率、Gaussian PSF/MTF、MTF x SNR recoverability、0.0724 C 噪声底和局部 ESF/CRB，定义 2x contour-level SR POC 的物理边界与质量门控条件。EP03 不把 stage command 当作对齐真值，也不把局部 ESF/NCC 诊断外推成全局 SR 裁决。
 #
 # **阅读方式**: 本 Notebook 是教程式报告，默认读者具备基础数学/信号处理背景，但不要求熟悉红外热像术语。可以把几个关键词先这样理解：
 #
@@ -21,7 +21,7 @@
 # - **SNR**: 局部温差信号相对于噪声底的倍数。SNR 高只说明局部结构更可观测，不自动说明 SR 成功。
 # - **ESF/CRB**: ESF 是边缘扩散函数；CRB 是在给定噪声和模型下，边缘位置估计能达到的理论下界。
 #
-# **边界声明**: EP03 只回答“理论上哪些结构更值得作为 2x contour-level SR 的候选证据，以及哪些声明风险过高”。最终是否真正改善芯片内部结构/形状，必须由后续主 session 真实数据 POC、对齐质量门控和 contour/shape evidence 共同验证。
+# **边界声明**: EP03 只回答“理论上哪些结构更值得作为 2x contour-level SR 的候选证据，以及哪些声明风险过高”。最终是否真正改善芯片内部结构/形状，必须由 EP05 alignment/phase baseline 与 EP06 主 session 真实 SR POC、对齐质量门控和 contour/shape evidence 共同验证。
 
 # %%
 %matplotlib inline
@@ -36,8 +36,12 @@ import pandas as pd
 from IPython.display import Image as NotebookImage, display
 
 from thermal_core.ep03 import (
+    build_crb_gate_summary_table,
     build_crb_localization_table,
+    build_crb_sensitivity_table,
     build_mtf_attenuation_table,
+    build_mtf_snr_recoverability_table,
+    build_output_grid_nyquist_table,
     build_sampling_resolution_table,
     build_snr_reference_table,
     load_frame_by_row,
@@ -45,7 +49,9 @@ from thermal_core.ep03 import (
     plot_local_anchor_confidence,
     plot_local_contour_candidate_map,
     plot_crb_esf_localization,
+    plot_crb_sensitivity_surface,
     plot_mtf_psf_curves,
+    plot_mtf_snr_recoverability_heatmap,
     plot_noise_floor_snr,
     plot_sampling_resolution_diagram,
     select_main_scan,
@@ -85,6 +91,10 @@ SPATIAL_RESOLUTION_UM = float(stage_config["current_spatial_resolution_um"])
 NOISE_SIGMA = float(noise_config["noise_floor_celsius"])
 TARGET_GRID_UM = 5.0
 PSF_SIGMAS = (0.2, 0.35, 0.5)
+CRB_SIGMAS = (0.2, 0.35, 0.5, 1.0)
+CRB_CONTRASTS = (0.3, 0.7, 1.0, 2.0)
+CRB_N_FRAMES = (1, 4, 16, 64, 255)
+CRB_PHASE_COVERAGE = (0.0, 0.5, 1.0)
 RNG_SEED = 7
 
 audit_df = pd.read_csv(EP01_OUTPUT_DIR / "frame_audit.csv")
@@ -103,4 +113,4 @@ print(f"Noise floor: {NOISE_SIGMA:.4f} C")
 # > **数据说明**: 本 Notebook 读取 EP01 的 `frame_audit.csv`，只使用 `session=2` 主扫描帧，并按 `acquisition_order` 选择中点帧作为局部可观测性参考帧。
 # > **读法**: `Main session frames` 是后续理论约束对应的数据范围；`Reference frame` 只是用于局部轮廓诊断的一帧代表样本；`Detector pitch`、`Current spatial resolution` 和 `Noise floor` 是固定物理输入，不是本 Notebook 拟合出来的新结论。
 # > **正常/异常理解**: 正常情况下，主 session 应为 255 帧，pitch 应保持 10 um/pixel，spatial resolution 应保持 20 um。若这些值变化，说明输入配置或 EP01 产物已改变，需要先重新审计数据来源，而不能直接比较本次图表。
-# > **核心发现**: EP03 的分析边界是“物理可恢复信息与局部 anchor 置信度”。它可以帮助设置 EP05 的实验门槛，但不能替代真实 SR POC，也不能单独裁决 EP05 成败。
+# > **核心发现**: EP03 的分析边界是“物理可恢复信息与局部 anchor 置信度”。它可以帮助设置 EP05 alignment/phase baseline 和 EP06 SR POC 的实验门槛，但不能替代真实 SR POC，也不能单独裁决 EP06 成败。

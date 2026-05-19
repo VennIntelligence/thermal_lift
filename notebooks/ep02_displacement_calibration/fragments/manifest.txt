@@ -3,4 +3,5 @@
 03_stage_prior_coverage.py
 04_small_step_diagnostics.py
 05_data_driven_alignment.py
-06_decision_table.py
+06_richer_evidence.py
+07_decision_table.py

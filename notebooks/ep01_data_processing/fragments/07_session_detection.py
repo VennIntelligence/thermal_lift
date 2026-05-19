@@ -65,6 +65,35 @@ plot_order_comparison(
 # > 文件名只提供坐标和 stage command prior，不能替代采集时序。
 
 # %%
+plot_acquisition_raster_trajectory(
+    df_sorted,
+    sorted(VALID_COORDS),
+    main_session,
+    coord_config.get("known_missing_r0", []),
+    save_path="acquisition_raster_trajectory.png",
+    save_fn=save_fig,
+)
+
+# %% [markdown]
+# > **图表说明**: 左图把 16×16 stage command 网格放在坐标平面中，
+# > 点的颜色表示真实 `acquisition_order`，灰线只连接同一 Y 行内的 R=0 采集顺序；
+# > 右图把同一批帧展开成时间线，显示 X 命令的锯齿形变化和 Y 命令的逐行阶梯变化。
+# >
+# > **怎么看**: 左图看空间覆盖和缺失坐标，右图看采集时序。
+# > 颜色从早到晚变化，说明这些坐标是按 mtime 还原的采集顺序，而不是文件名字母序。
+# > 灰色行内连线表示 step-and-shoot raster 的行内顺序，不表示真实图像位移，也不表示 alignment ground truth。
+# >
+# > **数据分布**: R=0 主网格呈现标准 raster 事实：同一 Y 行内 X 递增，随后切换到下一条 Y 行。
+# > 非主 session 只集中在开头少数 Y=0 坐标；主 session 继承主体二维扫描，并在开头/末尾包含少量重复坐标。
+# > 三个红色缺失点仍是 (14,6)、(16,6)、(16,16)。
+# >
+# > **正常/异常理解**: 这张图只能证明采集命令序列和文件时序一致，不能证明红外图像真的按这些坐标精确移动。
+# > 如果行内 X 不是递增，或 Y 顺序大面积回跳，才需要回到命名/mtime/采集脚本层面重新审计。
+# >
+# > **核心发现**: EP01 可以把数据定义为 acquisition-order raster 数据集；
+# > 但坐标仍只是 stage command prior，下游 alignment 必须由图像数据和后续 EP04 质量门控约束。
+
+# %%
 plot_sessions(
     df_sorted,
     session_ids,
@@ -117,37 +146,43 @@ plot_session_coverage_heatmaps(
 
 # %%
 valid_coord_list = sorted(VALID_COORDS)
-r0_acq = df_sorted[df_sorted["R"] == 0].sort_values("acquisition_order")
-missing_coords = {tuple(coord) for coord in coord_config.get("known_missing_r0", [])}
-expected_by_y = {
-    y: [x for x in valid_coord_list if (x, y) not in missing_coords]
-    for y in valid_coord_list
-}
-row_order_mismatches = []
-for y, group in r0_acq.groupby("Y", sort=True):
-    xs = group.sort_values("acquisition_order")["X"].astype(int).tolist()
-    if xs != expected_by_y[int(y)]:
-        row_order_mismatches.append({"Y": int(y), "observed_X": xs, "expected_X": expected_by_y[int(y)]})
-
-audit_cols = ["file", "X", "Y", "R", "T_mean", "mtime", "acquisition_order", "session"]
-if "source_file" in r0_acq.columns:
-    audit_cols.insert(1, "source_file")
-acquisition_order_audit = r0_acq[audit_cols].copy()
+raster_row_summary = make_raster_row_table(
+    df_sorted,
+    valid_coord_list,
+    coord_config.get("known_missing_r0", []),
+    r_value=0,
+)
+raster_row_mismatches = raster_row_summary[
+    ~raster_row_summary["matches_expected_after_known_missing"]
+].copy()
+acquisition_order_audit = make_acquisition_order_audit_table(df_sorted)
 acquisition_order_audit.to_csv(OUTPUT_DIR / "acquisition_order_audit.csv", index=False)
+r0_acq = df_sorted[df_sorted["R"] == 0].sort_values("acquisition_order")
+r0_y_order = (
+    r0_acq.groupby("Y")["acquisition_order"].min().sort_values().index.astype(int).tolist()
+)
 
-print(f"R=0 采集 Y 顺序: {r0_acq.groupby('Y')['acquisition_order'].min().sort_values().index.astype(int).tolist()}")
-print(f"R=0 行内 X 顺序不匹配行数: {len(row_order_mismatches)}")
+print(f"R=0 采集 Y 顺序: {r0_y_order}")
+print(f"R=0 行内 X 顺序不匹配行数: {len(raster_row_mismatches)}")
 print("Saved: output/ep01_data_processing/acquisition_order_audit.csv")
+display(raster_row_summary)
+if not raster_row_mismatches.empty:
+    display(raster_row_mismatches)
 
 # %% [markdown]
 # > **数据说明**: 这一段专门核查 R=0 主网格在真实采集顺序下的扫描结构。
 # > 期望结构是 Y 从 0 到 40 递增，每条 Y 扫描线内 X 从 0 到 40 递增，跳过已知缺失坐标。
+# > 同时输出 `acquisition_order_audit.csv`，用于后续按帧追查文件、坐标、均温、mtime、采集序号和 session。
 # >
 # > **怎么读**: `R=0 采集 Y 顺序` 应该是一串从 0 到 40 的递增 Y 坐标；
 # > `行内 X 顺序不匹配行数` 越接近 0，说明真实采集顺序越符合 raster 扫描假设。
+# > `raster_row_summary` 中第一行 `gap_from_previous_row=start`，后续 `gap_from_previous_row=1`
+# > 表示上一行最后一帧后紧接着进入下一行；
+# > `missing_X_um` 只反映该行缺失的命令坐标，不是图像对齐失败。
 # > 生成的 `acquisition_order_audit.csv` 可用于逐帧追查具体文件。
 # >
 # > **数据分布**: R=0 的 Y 顺序为 `[0, 2, 4, ..., 40]`，行内 X 顺序不匹配数为 0。
+# > Y=6 行缺失 X=14 和 X=16，Y=16 行缺失 X=16；这些与前面的缺失坐标表完全一致。
 # > 这说明重命名后的 `(X,Y)` 与真实采集顺序互相一致。
 # >
 # > **正常/异常理解**: 正常 raster 扫描应表现为行内 X 递增、行间 Y 递增。

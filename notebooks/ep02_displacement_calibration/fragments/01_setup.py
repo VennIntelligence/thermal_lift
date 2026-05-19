@@ -3,7 +3,8 @@
 #
 # **目标**: 重建主 session 的 raster 采集路径，展示 stage/filename 坐标给出的 detector-space prior 覆盖，并把局部小步 NCC 放回“方向/线性 smoke test”的位置。
 #
-# EP02 不把 stage command 当作对齐真值，也不从相邻 2 um 小步外推多帧 SR 成败。后续 2x contour-level SR 应先使用 EP04/EP05 的 data-driven alignment anchor 与质量门控，再进入重建。
+# EP02 不把 stage command 当作对齐真值，也不从相邻 2 um 小步外推多帧 SR 成败。
+# 后续 2x contour-level SR 应先使用 EP04/EP05 的 data-driven alignment anchor 与质量门控，再进入重建。
 #
 # 读这份 notebook 时，可以把 EP02 理解成“坐标和位移证据的说明书”。我们有两类信息：
 # 一类来自电动台命令和文件名坐标，它告诉我们采集时**想要移动到哪里**；另一类来自热像帧本身的图像相似性和轮廓一致性，它告诉我们画面里**实际能可靠对齐到哪里**。
@@ -40,7 +41,10 @@ import pandas as pd
 
 from thermal_core.ep02 import (
     alignment_improvement_summary,
+    avi_theta_compact_table,
+    avi_txt_line_match_table,
     ep02_output_dir,
+    historical_ncc_failure_audit,
     load_frame_audit,
     load_stage_config,
     plot_alignment_comparison,
@@ -49,7 +53,10 @@ from thermal_core.ep02 import (
     plot_stage_prior_coverage,
     raster_summary,
     small_step_metrics,
+    stage_prior_contract_table,
     stage_prior_summary,
+    time_adjacent_method_comparison,
+    y_coordinate_failure_table,
 )
 from thermal_core.plotting import setup_academic_style
 
@@ -83,4 +90,4 @@ print(f"Stage prior: theta={REFERENCE_THETA_DEG:.1f} deg, pitch={PIXEL_SIZE_UM:.
 # > **数值说明**: 这里打印的是 notebook 的项目根目录、EP02 输出目录，以及从 `configs/stage_calibration.json` 读取的 theta 和 pixel pitch。
 # > **怎么读**: theta 是电动台坐标轴相对 detector 图像坐标轴的旋转角；pitch=10 um/pixel 是 TXT 温度矩阵的采样间距。二者一起把 stage command 换算成 detector-space displacement prior。
 # > **正常/异常理解**: 正常情况下 theta 应保持为项目确认的 47.6 deg，pitch 应为 10.0 um/pixel。如果这里变成别的值，后续 prior 覆盖图和 phase 统计都会改变，需要先检查配置而不是解释算法结果。
-# > **对本 Episode 的意义**: 这些数值只定义坐标 prior 的换算规则。EP02 后面会反复强调：它们不能替代从图像数据估计到的 alignment truth。
+# > **对本 Episode 的意义**: 这些数值只定义坐标 prior 的换算规则。EP02 后面会反复强调：它们不能替代由图像数据支撑的 alignment evidence、anchor 和 quality gate。
