@@ -1,0 +1,46 @@
+\section{Alignment Evidence}
+
+\begin{frame}{Stage/Filename Prior Is Not Ground Truth}
+  \begin{columns}[c]
+    \begin{column}{0.45\textwidth}
+      \begin{itemize}
+        \item Stage command gives a useful physical prior.
+        \item Data-driven alignment gives the measurement used for SR.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.55\textwidth}
+      \centering
+      \fitfig{../figures/ep02_data_driven_alignment.png}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{EP05 Alignment Method Comparison}
+  \begin{columns}[c]
+    \begin{column}{0.45\textwidth}
+      \begin{itemize}
+        \item Filename affine is a strong control, not a final truth source.
+        \item Contour refined alignment lowers held-out contour error.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.55\textwidth}
+      \centering
+      \fitfig{../figures/ep05_alignment_methods.png}
+    \end{column}
+  \end{columns}
+\end{frame}
+
+\begin{frame}{Tuning Matters, But Does Not Decide Alone}
+  \begin{columns}[c]
+    \begin{column}{0.45\textwidth}
+      \begin{itemize}
+        \item Tuned refined improves EP05 Chamfer.
+        \item EP06 split-half and artifact gates still decide whether it becomes the main shift.
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.55\textwidth}
+      \centering
+      \fitfig{../figures/ep05_alignment_tuning_heatmap.png}
+    \end{column}
+  \end{columns}
+\end{frame}

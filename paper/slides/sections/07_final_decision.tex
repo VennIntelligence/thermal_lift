@@ -1,0 +1,29 @@
+\section{Decision}
+
+\begin{frame}{Current Technical Decision}
+  \begin{itemize}
+    \item Use default contour refined alignment as the EP06 main alignment.
+    \item Keep tuned refined as an alignment sensitivity candidate.
+    \item Keep NCC init as a phase-prior control.
+    \item Present SAA as the stable baseline, IBP as a forward-model stress test, and MAP-TV as a conservative regularized diagnostic.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{What Changed After Data-Driven Alignment}
+  \begin{itemize}
+    \item Filename/stage alignment assumptions were weakened.
+    \item Alignment residuals became a first-order risk for MAP-TV and IBP.
+    \item The previous ``sharpest is best'' interpretation was rejected.
+    \item The claim became narrower but more defensible.
+  \end{itemize}
+\end{frame}
+
+\begin{frame}{Next Work}
+  \begin{itemize}
+    \item Add cross-ROI stability analysis.
+    \item Add edge-transfer or MTF-style validation.
+    \item Build customer-facing examples from the best stable contour views.
+    \item Keep detector pitch, calibrated spatial resolution, and output-grid sampling separate.
+  \end{itemize}
+\end{frame}
+

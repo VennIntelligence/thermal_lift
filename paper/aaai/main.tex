@@ -1,0 +1,52 @@
+\documentclass[letterpaper]{article}
+\usepackage[submission]{aaai2026}
+\usepackage{times}
+\usepackage{helvet}
+\usepackage{courier}
+\usepackage[hyphens]{url}
+\usepackage{graphicx}
+\urlstyle{rm}
+\def\UrlFont{\rm}
+\usepackage{natbib}
+\usepackage{caption}
+\usepackage{amsmath}
+
+\pdfinfo{
+/TemplateVersion (2026.1)
+}
+
+\setcounter{secnumdepth}{2}
+
+\title{Data-Driven Micro-Scan Alignment for Contour-Level Thermal Super-Resolution}
+\author{Anonymous Submission}
+\affiliations{Anonymous Institution}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Long-wave infrared chip inspection is limited by optical resolution, thermal
+noise, and imperfect micro-scan motion. This paper skeleton organizes the
+current Thermal Lift evidence into a reproducible 2x contour-level
+super-resolution proof of concept. The central finding is that filename or
+stage-command motion is only a prior: data-driven contour alignment gives more
+accurate frame registration and changes the interpretation of forward-model
+methods. On the 255-frame main session, shift-and-add provides the most stable
+baseline, iterative back-projection is useful as a forward-model stress test,
+and MAP-TV becomes a conservative regularized diagnostic rather than the
+sharpest or best method. The result is a bounded contour-visibility claim, not
+a 4x or 5 um metrology claim.
+\end{abstract}
+
+\input{sections/01_introduction}
+\input{sections/02_data}
+\input{sections/03_alignment}
+\input{sections/04_methods}
+\input{sections/05_experiments}
+\input{sections/06_discussion}
+
+\nocite{thermal-lift-log,aaai2026authorkit}
+\bibliography{refs}
+
+\end{document}

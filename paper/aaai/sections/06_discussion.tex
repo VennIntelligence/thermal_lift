@@ -1,0 +1,17 @@
+\section{Discussion and Limitations}
+
+The experiments support a bounded claim: the main session contains enough
+micro-scan information to build a 2x contour-level POC, but the conclusion is
+sensitive to alignment quality and forward-model residual interpretation.
+
+Three negative results are central to the current paper draft. First, filename
+or stage-command alignment is not accurate enough to serve as truth. Second,
+tuned contour alignment improves EP05 Chamfer but does not automatically
+improve EP06 SR stability. Third, MAP-TV is not the best or sharpest method in
+the current data-driven sweep; it is a conservative candidate that suppresses
+unstable high-frequency structure.
+
+Future work should add MTF/edge-transfer validation, cross-ROI stability, and a
+customer-facing evaluation set. The final report should continue to separate
+detector pitch, calibrated spatial resolution, and output-grid sampling.
+

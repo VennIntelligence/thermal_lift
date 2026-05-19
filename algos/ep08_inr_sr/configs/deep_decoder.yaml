@@ -5,8 +5,8 @@ model:
   # followed by a final Conv1x1 to one signed highpass channel.
   # hidden_channels therefore defines the per-stage channel reduction path.
   latent_channels: 32
-  hidden_channels: [64, 64, 32]
-  latent_spatial: [8, 8]
+  hidden_channels: [64, 64, 32, 32]
+  latent_spatial: [32, 32]
 
 data:
   scale: 2

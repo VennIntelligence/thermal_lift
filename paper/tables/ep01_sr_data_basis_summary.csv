@@ -1,0 +1,8 @@
+Metric,Value,SR use
+Raw TXT/BMP files,"263 TXT, 263 BMP, 263 paired",Use TXT as SR input; BMP is visual reference.
+Matrix size,480 x 640,All frames share one detector grid.
+Total frames,263,Full audit population before session gating.
+Main session frames,session 2: 255,Default input set for micro-scan SR.
+Session temperature jump scale,"2.91 deg C median, 4.16 deg C max (40x / 57x noise floor)",Cross-session frames should not be mixed.
+Main-session drift span,0.62 deg C,Default input frames stay within this temperature band.
+Coordinate coverage,253/256 total; 253/256 in main session,Main session covers the full usable coordinate grid.

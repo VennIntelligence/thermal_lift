@@ -1,0 +1,25 @@
+\section{Reconstruction Methods}
+
+All reconstruction methods receive shifts in the same convention: each shift
+moves an observed LR frame into the reference coordinate system.
+
+\paragraph{Shift-and-add.}
+SAA is the main multi-frame baseline. Uniform SAA tests whether phase coverage
+alone helps; weighted SAA uses alignment-quality weights.
+
+\paragraph{Iterative back-projection.}
+IBP uses the same shifts in a forward model, predicts each LR observation from
+the current HR estimate, and back-projects residuals. If alignment is wrong,
+residuals can be interpreted as high-frequency structure.
+
+\paragraph{MAP-TV.}
+MAP-TV adds total-variation regularization. The current selection rule uses
+split-half consistency plus penalties for artifact score and standard-deviation
+inflation. This makes MAP-TV a conservative regularization diagnostic rather
+than a sharpness winner.
+
+The highpass track reconstructs structure maps. The raw-temperature track
+performs offset correction before reconstruction and applies highpass only for
+visual comparison. Agreement between the two tracks is required before a
+highpass edge is treated as data-supported structure.
+

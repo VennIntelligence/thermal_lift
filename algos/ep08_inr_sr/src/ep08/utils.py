@@ -37,11 +37,40 @@ def coordinate_grid(
     device: str | torch.device = "cpu",
     dtype: torch.dtype = torch.float32,
     flatten: bool = True,
+    aspect_mode: str = "preserve",
 ) -> torch.Tensor:
-    """Create an x/y coordinate grid in [-1, 1]."""
+    """Create an x/y coordinate grid for coordinate-INR models.
 
-    y = torch.linspace(-1.0, 1.0, height, device=device, dtype=dtype)
-    x = torch.linspace(-1.0, 1.0, width, device=device, dtype=dtype)
+    ``stretch`` preserves the Stage 1/2 legacy behavior: both axes span
+    ``[-1, 1]`` regardless of image aspect ratio. ``preserve`` keeps square
+    images unchanged and scales the shorter rectangular axis by
+    ``axis_length / max(height, width)``.
+    """
+
+    height = int(height)
+    width = int(width)
+    if height <= 0 or width <= 0:
+        raise ValueError(f"height and width must be positive, got {(height, width)}")
+
+    normalized = str(aspect_mode).strip().lower()
+    if normalized in {"legacy", "stretched"}:
+        normalized = "stretch"
+    if normalized not in {"preserve", "stretch"}:
+        raise ValueError(
+            "aspect_mode must be one of {'preserve', 'stretch'} "
+            f"(got {aspect_mode!r})"
+        )
+
+    if normalized == "preserve":
+        max_dim = float(max(height, width))
+        y_extent = float(height) / max_dim
+        x_extent = float(width) / max_dim
+    else:
+        y_extent = 1.0
+        x_extent = 1.0
+
+    y = torch.linspace(-y_extent, y_extent, height, device=device, dtype=dtype)
+    x = torch.linspace(-x_extent, x_extent, width, device=device, dtype=dtype)
     yy, xx = torch.meshgrid(y, x, indexing="ij")
     grid = torch.stack((xx, yy), dim=-1)
     return grid.reshape(-1, 2) if flatten else grid

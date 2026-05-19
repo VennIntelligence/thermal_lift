@@ -14,7 +14,14 @@ if not siren_metrics.empty:
 
 siren_history = read_csv_if_exists(siren_dir / "training_history.csv")
 if not siren_history.empty:
-    display(siren_history.tail(10).round(8))
+    siren_validation_history = (
+        siren_history.dropna(subset=["holdout_loss"])
+        if "holdout_loss" in siren_history.columns
+        else siren_history.iloc[0:0]
+    )
+    if siren_validation_history.empty:
+        siren_validation_history = siren_history.tail(5)
+    display(siren_validation_history.round(8))
 
 # %% [markdown]
 # > **数据说明**: 状态表检查 SIREN Stage 1 的正式产物，包括指标、训练历史、收敛曲线、HR highpass、raw-control 参照、split-half 差异图、split 记录、配置和 checkpoint。

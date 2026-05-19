@@ -1,0 +1,42 @@
+model:
+  name: deepinv_dip
+
+deepinv:
+  channels: 32
+  layers: 4
+  in_spatial: [30, 40]
+  verbose: true
+
+data:
+  scale: 2
+  default_n_frames: 64
+  patch_shape: full
+  val_ratio: 0.2
+
+forward:
+  psf_sigma_lr_px: 1.0
+
+preprocess:
+  highpass_sigma_bg_lr_px: 8.0
+  highpass_mode: nearest
+
+train:
+  lr: 0.0005
+  max_iter: 15000
+  batch_k: 8
+  val_interval: 250
+  early_stop_patience: 2000
+  early_stop_min_delta: 1.0e-6
+  split_half_max_iter: 600
+  split_half_enabled: true
+
+runtime:
+  data_mode: real
+  device: cuda:0
+  workers: 1
+  alignment_method: contour_refined
+  seed: 42
+  output_dir: output/ep08_inr_sr/stage3/deepinv_dip_064_full_preserve
+
+metrics:
+  noise_sigma: 0.0724

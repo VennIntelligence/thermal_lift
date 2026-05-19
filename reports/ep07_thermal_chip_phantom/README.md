@@ -2,7 +2,7 @@
 
 ## Summary
 
-EP07 documents the implemented P0 architecture and smoke-demo workflow for TCForge, an isolated synthetic data generator for ThermalChipPhantom experiments. The notebook is report-oriented and uses a small demo dataset to validate the data contract before any full-scale benchmark is generated.
+EP07 documents the implemented P0 architecture and smoke-demo workflow for TCForge, an isolated synthetic data generator for ThermalChipPhantom experiments. The notebook is report-oriented and uses a small demo dataset to validate the data contract before any full-scale benchmark is generated. The presentation layer now explicitly shows the data-generation graph, artifact usage, smoke checks, evaluate metrics and CVPR-style figures rather than hiding those steps behind scripts.
 
 The independent review follow-up has been applied: TCForge now has a scene-level evaluation API, smoke/evaluate highpass validation uses an independent scipy reference instead of reusing the generator helper, and the `_edge_map()` fallback path no longer contains unreachable code.
 
@@ -14,11 +14,13 @@ The independent review follow-up has been applied: TCForge now has a scene-level
 
 ## Evidence Included After Execution
 
-- TCForge architecture contract table.
-- HR mask / HR temperature / HR edge proxy visualization.
-- LR raw and highpass frame comparison.
-- Manifest and smoke acceptance table.
-- Disk-based demo overview with phase coverage.
+- TCForge Mermaid architecture graph plus module contract table.
+- Generation recipe and artifact catalog explaining every required `.npy`/metadata output.
+- HR mask / HR temperature / HR edge proxy visualization in CVPR-style figure format.
+- LR raw, highpass, phase coverage and forward-mode comparison visualization.
+- Manifest, detailed smoke acceptance table and independent highpass reference check.
+- Disk-based demo overview, profile plot and scene-level evaluate summary.
+- Optional CLI regression smoke/evaluate summary when ignored output artifacts exist locally.
 - Integration handoff table listing remaining P1 benchmark materialization work.
 - Full P0 smoke was executed locally on 2026-05-19 under ignored `data/synthetic/thermal_chip_phantom_p0_smoke_tmp/`: 5 full-frame scenes, 255 frames each; smoke and evaluate CLIs passed.
 

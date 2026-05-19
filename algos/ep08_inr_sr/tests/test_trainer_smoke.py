@@ -49,7 +49,7 @@ def test_trainer_smoke_loss_backward() -> None:
 def test_trainer_supports_deep_decoder_smoke() -> None:
     observations = torch.zeros(3, 8, 8)
     shifts = torch.zeros(3, 2)
-    model = DeepDecoder(latent_channels=4, hidden_channels=(8,), latent_spatial=(4, 4))
+    model = DeepDecoder(latent_channels=4, hidden_channels=(8,), latent_spatial=(8, 8))
     trainer = INRTrainer(
         model,
         observations,

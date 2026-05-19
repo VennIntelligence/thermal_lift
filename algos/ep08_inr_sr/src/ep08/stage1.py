@@ -28,6 +28,9 @@ from thermal_core.plotting import savefig_academic, setup_academic_style
 EP08_ROOT = Path(__file__).resolve().parents[2]
 PROJECT_ROOT = EP08_ROOT.parent.parent
 PROJECT_OUTPUT = PROJECT_ROOT / "output" / "ep08_inr_sr"
+_MISSING = object()
+
+PatchShape = int | tuple[int, int] | None
 
 
 class SyntheticForwardOperator(nn.Module):
@@ -43,6 +46,42 @@ def default_config_path(model_name: str) -> Path:
 def default_output_dir(model_name: str) -> Path:
     suffix = "deep_decoder_stage1" if model_name == "deep_decoder" else f"{model_name}_stage1"
     return PROJECT_OUTPUT / suffix
+
+
+def parse_patch_shape(value: Any) -> PatchShape:
+    if value is None:
+        return None
+    if isinstance(value, str):
+        normalized = value.strip().lower()
+        if normalized in {"none", "null", "full"}:
+            return None
+        if "," in normalized:
+            parts = [part.strip() for part in normalized.split(",") if part.strip()]
+            if len(parts) != 2:
+                raise ValueError("patch shape must be H,W when comma-separated")
+            patch = (int(parts[0]), int(parts[1]))
+        else:
+            patch = int(normalized)
+    elif isinstance(value, (list, tuple)):
+        if len(value) != 2:
+            raise ValueError("patch shape list/tuple must be [height, width]")
+        patch = (int(value[0]), int(value[1]))
+    else:
+        patch = int(value)
+
+    if isinstance(patch, tuple):
+        if patch[0] <= 0 or patch[1] <= 0:
+            raise ValueError("patch shape dimensions must be positive")
+    elif patch <= 0:
+        raise ValueError("patch shape must be positive")
+    return patch
+
+
+def _resolve_patch_shape(data_cfg: dict[str, Any]) -> PatchShape:
+    patch_value = data_cfg.get("patch_shape", _MISSING)
+    if patch_value is _MISSING:
+        patch_value = data_cfg.get("default_patch_size_lr_px")
+    return parse_patch_shape(patch_value)
 
 
 def _base_defaults(model_name: str) -> dict[str, Any]:
@@ -74,6 +113,7 @@ def _base_defaults(model_name: str) -> dict[str, Any]:
             "default_patch_size_lr_px": 256,
             "val_ratio": 0.2,
         },
+        "coordinates": {"aspect_mode": "preserve"},
         "forward": {"psf_sigma_lr_px": 1.0},
         "preprocess": {
             "highpass_sigma_bg_lr_px": 5.0,
@@ -163,7 +203,9 @@ def _add_common_args(parser: argparse.ArgumentParser, model_name: str) -> None:
     parser.add_argument("--device", default=None, help="cuda:0, cuda:1, or cpu")
     parser.add_argument("--max-iter", type=int, default=None)
     parser.add_argument("--n-frames", type=int, default=None)
-    parser.add_argument("--patch-size", type=int, default=None, help="LR patch size in pixels")
+    parser.add_argument("--patch-shape", type=parse_patch_shape, default=argparse.SUPPRESS, help="LR patch shape: H,W, a single int, or full/None")
+    parser.add_argument("--patch-size", type=int, default=None, help="Backward-compatible square LR patch size in pixels")
+    parser.add_argument("--coord-aspect-mode", "--coordinate-aspect-mode", choices=["preserve", "stretch"], default=None)
     parser.add_argument("--batch-k", type=int, default=None)
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--warmup-steps", type=int, default=None)
@@ -222,6 +264,7 @@ def apply_cli_overrides(cfg: dict[str, Any], args: argparse.Namespace) -> dict[s
         ("early_stop_min_steps", "train", "early_stop_min_steps"),
         ("split_half_max_iter", "train", "split_half_max_iter"),
         ("val_ratio", "data", "val_ratio"),
+        ("coord_aspect_mode", "coordinates", "aspect_mode"),
         ("hidden_features", "model", "hidden_features"),
         ("hidden_layers", "model", "hidden_layers"),
         ("first_omega_0", "model", "first_omega_0"),
@@ -238,6 +281,10 @@ def apply_cli_overrides(cfg: dict[str, Any], args: argparse.Namespace) -> dict[s
         cfg.setdefault("data", {})["default_n_frames"] = int(args.n_frames)
     if args.patch_size is not None:
         cfg.setdefault("data", {})["default_patch_size_lr_px"] = int(args.patch_size)
+        if not hasattr(args, "patch_shape"):
+            cfg.setdefault("data", {})["patch_shape"] = int(args.patch_size)
+    if hasattr(args, "patch_shape"):
+        cfg.setdefault("data", {})["patch_shape"] = args.patch_shape
     if args.frame_audit_path is not None:
         cfg.setdefault("runtime", {})["frame_audit_path"] = args.frame_audit_path
     if args.data_dir is not None:
@@ -263,12 +310,20 @@ def apply_cli_overrides(cfg: dict[str, Any], args: argparse.Namespace) -> dict[s
 def build_synthetic_observations(
     model_name: str,
     n_frames: int,
-    patch_size: int,
+    patch_shape: int | tuple[int, int],
     device: torch.device,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    hr_size = patch_size * 2
-    coords = torch.linspace(-1.0, 1.0, hr_size, device=device)
-    yy, xx = torch.meshgrid(coords, coords, indexing="ij")
+    patch = parse_patch_shape(patch_shape)
+    if patch is None:
+        raise ValueError("synthetic data requires a finite patch shape; full-frame synthetic data has no source frame size")
+    if isinstance(patch, tuple):
+        patch_h, patch_w = patch
+    else:
+        patch_h = patch_w = patch
+    hr_h, hr_w = patch_h * 2, patch_w * 2
+    y_coords = torch.linspace(-1.0, 1.0, hr_h, device=device)
+    x_coords = torch.linspace(-1.0, 1.0, hr_w, device=device)
+    yy, xx = torch.meshgrid(y_coords, x_coords, indexing="ij")
     if model_name == "wire":
         hr = torch.sin(10.0 * xx + 2.0 * yy) * torch.exp(-10.0 * (yy + 0.1).square())
         hr = hr + 0.4 * ((xx > 0.0) & (yy < 0.35)).float()
@@ -340,11 +395,13 @@ def load_dataset_for_config(
     runtime = cfg["runtime"]
     preprocess = cfg["preprocess"]
     n_frames = int(data_cfg["default_n_frames"])
-    patch_size = int(data_cfg["default_patch_size_lr_px"])
+    patch_shape = _resolve_patch_shape(data_cfg)
     data_mode = str(runtime["data_mode"])
 
     if data_mode == "synthetic":
-        observations, shifts, raw_control = build_synthetic_observations(model_name, n_frames, patch_size, device)
+        if patch_shape is None:
+            raise ValueError("synthetic data_mode requires data.patch_shape or data.default_patch_size_lr_px; full-frame synthetic data is undefined")
+        observations, shifts, raw_control = build_synthetic_observations(model_name, n_frames, patch_shape, device)
         forward_operator: ForwardOperator | SyntheticForwardOperator = SyntheticForwardOperator()
         metadata = {
             "data_mode": "synthetic",
@@ -355,7 +412,7 @@ def load_dataset_for_config(
     elif data_mode == "real":
         bundle: RealDataBundle = load_real_dataset(
             n_frames=n_frames,
-            patch_size=patch_size,
+            patch_size=patch_shape,
             workers=int(runtime.get("workers", 1)),
             alignment_method=str(runtime.get("alignment_method", "contour_refined")),
             data_dir=runtime.get("data_dir"),
@@ -424,6 +481,7 @@ def _train_once(
         config=make_train_config(cfg, max_iter=max_iter, seed=seed),
         train_indices=train_indices,
         val_indices=val_indices,
+        coord_aspect_mode=str(cfg.get("coordinates", {}).get("aspect_mode", "preserve")),
     )
     result = trainer.fit()
     return model, result
@@ -713,4 +771,4 @@ def run_stage1_training(model_name: str, args: argparse.Namespace) -> None:
     print(f"saved Stage 1 outputs to {out_dir}")
 
 
-__all__ = ["parse_training_args", "run_stage1_training"]
+__all__ = ["parse_patch_shape", "parse_training_args", "run_stage1_training"]

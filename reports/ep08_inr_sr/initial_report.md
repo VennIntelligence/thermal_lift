@@ -20,11 +20,12 @@ The goal is not to claim 5 um metrology or treat display magnification as SR evi
 | Forward equivalence | PyTorch forward matches EP06 NumPy ObservationOperator | Unit tests passed |
 | Highpass equivalence | PyTorch highpass matches EP06 `sigma_bg=5.0`, `mode="nearest"` | Unit tests passed |
 | Real-data input | Main session frames + EP05 shifts, no stage command truth use | CPU smoke passed |
-| EP06 baseline provenance | MAP-TV metrics source recorded without fabricating values | Placeholder created |
+| EP06 baseline provenance | MAP-TV metrics source recorded without fabricating values | Partial proxy metrics recorded; hold-out/split-half marked unavailable |
 | SIREN training/eval | highpass + raw-control + metrics | Stage 1 complete, five metrics generated |
 | WIRE training/eval | highpass + raw-control + metrics | Stage 1 complete with dual-projection Gabor; artifact risk higher than SIREN |
-| Deep Decoder training/eval | highpass + raw-control + metrics | Script/GPU smoke passed; formal metrics not complete |
-| Stage 1 comparison | same ROI, same scales, same split | SIREN/WIRE comparison complete; EP06 and Deep Decoder still pending |
+| Deep Decoder training/eval | highpass + raw-control + metrics | Stage 2 complete |
+| DeepInverse-DIP training/eval | DeepInverse ConvDecoder-DIP with EP08 custom Physics | Stage 2 complete |
+| Stage 2 comparison | same ROI, same scales, same split where applicable | Five-way comparison complete; EP06 proxy fields marked by protocol |
 
 Current verification snapshot: `cd algos/ep08_inr_sr && uv run pytest -q` returns 32 passed, and `uv run python scripts/validate_p0.py` writes passed forward/highpass/split validation artifacts under `output/ep08_inr_sr/`. Smoke outputs under `output/ep08_inr_sr/` are generated artifacts and are not report conclusions.
 
@@ -55,6 +56,36 @@ Each method directory contains `checkpoint.pt`, `hr_image.npy`, `metrics.json`, 
 - Highpass output is a signed structure map. It must be paired with raw-control views before claiming contour improvement.
 - Gradient/Tenengrad-style metrics are auxiliary sharpness proxies; they cannot independently prove SR success.
 
-## Next Report Update
+## Stage 2 Results
 
-The next report revision should add Deep Decoder Stage 2 results and later replace EP06 baseline null placeholders with computed MAP-TV metrics. Until then, Stage 1 is only an INR feasibility and SIREN/WIRE ablation result.
+TCForge benchmark used a synthetic scene with HR ground truth (`lr_shape=(256,256)`, `n_frames=32`, `scale=2`). All four methods are evaluated in the HR highpass domain:
+
+| Method | Highpass PSNR (dB) | Global SSIM proxy |
+|---|---:|---:|
+| SIREN | 24.6634 | 0.7520 |
+| WIRE | 24.4126 | 0.7325 |
+| Deep Decoder | 19.8896 | 0.2068 |
+| DeepInverse-DIP | 18.4729 | 0.4447 |
+
+Five-way Stage 2 comparison:
+
+| Method | Hold-out residual | Split-half NRMSE | Artifact score | Raw-control agreement | P95 gradient | Best step | Interpretation |
+|---|---:|---:|---:|---:|---:|---:|---|
+| SIREN | 3.6729 | 0.2916 | 0.2178 | 0.2085 | 0.9289 | 1630 | Most balanced |
+| WIRE | 2.9665 | 0.4899 | 2.2434 | 0.0868 | 1.6098 | 2989 | Sharper but artifact-prone |
+| Deep Decoder | 3.6258 | 0.4406 | 0.0355 | 0.3227 | 0.4885 | 6685 | Low-artifact decoder control |
+| DeepInverse-DIP | 2.3051 | 0.4562 | 3.0867 | 0.0608 | 1.2143 | 9900 | Strong fit, artifact-prone |
+| EP06 MAP-TV | 2.2439 | 0.1743 | 0.3978 | 0.3102 | 0.8667 | 100 | Same-protocol classic baseline |
+
+EP06 MAP-TV now has a patch-level same-protocol row generated at `output/ep08_inr_sr/ep06_patch_baseline/metrics.json`. The older full-frame proxy remains useful only as a historical artifact reference.
+
+Stage 2 interpretation:
+
+- DeepInverse-DIP confirms that a mature ConvDecoder backbone can fit held-out LR frames strongly, but its artifact score remains the worst in the table.
+- Deep Decoder is the lowest-artifact learned result after the native 512x512 fix, but it still does not dominate SIREN on stability or forward consistency.
+- WIRE increases high-frequency response, but Stage 1/2 evidence still shows higher artifact and lower stability than SIREN.
+- SIREN is the best Stage 3 candidate because it is the most balanced across forward consistency, stability, artifact control, and visual structure.
+
+## Stage 3 Recommendation
+
+Proceed to Stage 3 with SIREN as the primary expansion method. Keep Deep Decoder as a low-artifact conservative control. Do not promote DeepInverse-DIP or WIRE to full-frame expansion unless a later ablation adds holdout-driven early stopping or stronger artifact control.

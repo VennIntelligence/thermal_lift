@@ -35,11 +35,11 @@ Because notebook execution starts at the project root, `01_setup.py` temporarily
 | Fragment | Purpose |
 |---|---|
 | `01_setup.py` | Environment declaration, paths, TCForge import probe, small demo config |
-| `02_architecture_principles.py` | TCForge module contracts as a Markdown table |
-| `03_synthetic_scene.py` | Small HR scene demo and geometry/temperature visualization |
-| `04_forward_highpass.py` | LR forward burst, EP06-like highpass and interpretation |
-| `05_manifest_smoke.py` | metadata, manifest and smoke acceptance table |
-| `06_demo_visualization.py` | Disk-based demo dataset overview |
+| `02_architecture_principles.py` | Mermaid data-generation graph plus TCForge module contracts |
+| `03_synthetic_scene.py` | Generation recipe, HR scene arrays and geometry/temperature/edge visualization |
+| `04_forward_highpass.py` | LR forward burst, forward-mode comparison, EP06-like highpass and interpretation |
+| `05_manifest_smoke.py` | Artifact catalog, metadata, manifest and detailed smoke acceptance table |
+| `06_demo_visualization.py` | Disk-based demo overview, profile plot, evaluate summary and optional CLI regression summary |
 | `07_conclusions.py` | Integration handoff and limitations |
 
 ## Current Status
@@ -50,6 +50,7 @@ Because notebook execution starts at the project root, `01_setup.py` temporarily
 - Added TCForge unit tests covering geometry, physics, highpass parity, forward conventions, shifts, drift and manifest helpers.
 - Applied independent review follow-up: scene-level evaluation API, independent highpass verification in smoke/evaluate, portable real-shift CSV lookup, `_edge_map()` dead-code cleanup, shared worker utility and visualization tests.
 - EP07 notebook uses `lr_shape=(64, 96)` and `n_frames=16` to demonstrate the architecture without generating full-frame GiB-scale output.
+- Presentation follow-up applied: the notebook now exposes the Mermaid architecture graph, generation recipe, artifact catalog, detailed smoke checks, evaluate metrics and CVPR-style figures for HR truth, LR observations, highpass response, phase coverage and profile diagnostics.
 - Executed the full P0 smoke path locally on 2026-05-19: 5 full-frame scenes, 255 frames each, output under ignored `data/synthetic/thermal_chip_phantom_p0_smoke_tmp/`; smoke and evaluate CLIs passed.
 - Benchmark/P1 config keys that are not yet materialized by the CLI (`drift_tracks`, split objects, crop ROI) fail fast instead of silently generating partial data.
 

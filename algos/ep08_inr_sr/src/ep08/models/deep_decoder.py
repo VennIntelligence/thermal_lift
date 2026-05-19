@@ -82,6 +82,17 @@ class DeepDecoder(nn.Module):
             left = (current_w - target_w) // 2
             return x[..., top : top + target_h, left : left + target_w]
 
+        scale_h = target_h / current_h
+        scale_w = target_w / current_w
+        gap_h = target_h - current_h
+        gap_w = target_w - current_w
+        if max(scale_h, scale_w) > 2.0 or max(gap_h, gap_w) > 4:
+            raise ValueError(
+                "DeepDecoder native output shape "
+                f"{(current_h, current_w)} is too small for requested output_shape "
+                f"{output_shape}; refusing broad interpolation."
+            )
+
         return F.interpolate(
             x,
             size=output_shape,

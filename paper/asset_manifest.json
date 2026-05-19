@@ -1,0 +1,148 @@
+{
+  "figures": [
+    {
+      "target": "figures/ep01_session_detection.png",
+      "source": "output/ep01_data_processing/session_detection.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep01_raster_trajectory.png",
+      "source": "output/ep01_data_processing/acquisition_raster_trajectory.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep02_data_driven_alignment.png",
+      "source": "output/ep02_displacement_calibration/ep02_data_driven_alignment_comparison.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep03_mtf_snr_recoverability.png",
+      "source": "output/ep03_theoretical_limits/mtf_snr_recoverability_heatmap.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep04_gate_recommendations.png",
+      "source": "output/ep04_global_validation/ep06_gate_recommendations.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep05_alignment_methods.png",
+      "source": "output/ep05_alignment_sr_capacity/alignment_method_comparison.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep05_alignment_tuning_heatmap.png",
+      "source": "output/ep05_alignment_tuning_study/tuning_heatmap_heldout_chamfer.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep05_tuned_alignment_comparison.png",
+      "source": "output/ep05_alignment_tuning_study/candidate_alignment_comparison.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep06_main_comparison.png",
+      "source": "output/ep06_sr_poc/comparison_fullview.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep06_raw_control.png",
+      "source": "output/ep06_sr_poc/comparison_control_track.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep06_center_raw_temperature.png",
+      "source": "output/ep06_sr_poc/comparison_center_raw_temperature.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep06_alignment_ablation.png",
+      "source": "output/ep06_alignment_ablation/strategy_split_half_nrmse.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep06_alignment_artifact.png",
+      "source": "output/ep06_alignment_ablation/strategy_gradient_artifact.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep06_sweep_metrics.png",
+      "source": "output/ep06_sr_poc_data_driven_align_sweep/summary/sweep_metric_bars.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep06_sweep_lambda.png",
+      "source": "output/ep06_sr_poc_data_driven_align_sweep/summary/sweep_map_tv_lambda_selection.png",
+      "status": "copied"
+    },
+    {
+      "target": "figures/ep06_sweep_delta.png",
+      "source": "output/ep06_sr_poc_data_driven_align_sweep/summary/sweep_delta_vs_baseline.png",
+      "status": "copied"
+    }
+  ],
+  "tables": [
+    {
+      "target": "tables/ep01_sr_data_basis_summary.csv",
+      "source": "output/ep01_data_processing/sr_data_basis_summary.csv",
+      "status": "copied"
+    },
+    {
+      "target": "tables/ep02_alignment_evidence_decision_table.csv",
+      "source": "output/ep02_displacement_calibration/ep02_alignment_evidence_decision_table.csv",
+      "status": "copied"
+    },
+    {
+      "target": "tables/ep03_mtf_snr_recoverability_gate_summary.csv",
+      "source": "output/ep03_theoretical_limits/mtf_snr_recoverability_gate_summary.csv",
+      "status": "copied"
+    },
+    {
+      "target": "tables/ep04_ep06_gate_recommendation_summary.csv",
+      "source": "output/ep04_global_validation/ep06_gate_recommendation_summary.csv",
+      "status": "copied"
+    },
+    {
+      "target": "tables/ep05_alignment_method_summary.csv",
+      "source": "output/ep05_alignment_sr_capacity/alignment_method_summary.csv",
+      "status": "copied"
+    },
+    {
+      "target": "tables/ep05_tuning_summary.csv",
+      "source": "output/ep05_alignment_tuning_study/tuning_summary.csv",
+      "status": "copied"
+    },
+    {
+      "target": "tables/ep05_full_candidate_eval93_summary.csv",
+      "source": "output/ep05_alignment_tuning/full_candidate_eval93_summary.csv",
+      "status": "copied"
+    },
+    {
+      "target": "tables/ep06_evaluation_summary.csv",
+      "source": "output/ep06_sr_poc/evaluation_summary.csv",
+      "status": "copied"
+    },
+    {
+      "target": "tables/ep06_alignment_strategy_metrics.csv",
+      "source": "output/ep06_alignment_ablation/strategy_metrics.csv",
+      "status": "copied"
+    },
+    {
+      "target": "tables/ep06_sweep_method_metrics.csv",
+      "source": "output/ep06_sr_poc_data_driven_align_sweep/summary/sweep_method_metrics.csv",
+      "status": "copied"
+    },
+    {
+      "target": "tables/ep06_sweep_map_tv_lambda.csv",
+      "source": "output/ep06_sr_poc_data_driven_align_sweep/summary/sweep_map_tv_lambda.csv",
+      "status": "copied"
+    },
+    {
+      "target": "tables/ep06_sweep_delta_vs_baseline.csv",
+      "source": "output/ep06_sr_poc_data_driven_align_sweep/summary/sweep_delta_vs_baseline.csv",
+      "status": "copied"
+    }
+  ],
+  "n_figures_copied": 16,
+  "n_tables_copied": 12
+}

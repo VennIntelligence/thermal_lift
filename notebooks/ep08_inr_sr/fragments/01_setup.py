@@ -87,7 +87,8 @@ def method_output_dir(method: str) -> Path:
     aliases = {
         "siren": "siren_stage1",
         "wire": "wire_stage1",
-        "deep_decoder": "deep_decoder_stage1",
+        "deep_decoder": "deep_decoder_stage2",
+        "deepinv_dip": "deepinv_dip_stage2",
     }
     return OUTPUT_DIR / aliases.get(method, method)
 
@@ -123,10 +124,10 @@ print(f"Project root: {PROJECT_ROOT}")
 print(f"Baseline placeholder keys: {sorted(baseline_config.keys()) if baseline_config else []}")
 
 # %% [markdown]
-# > **数据说明**: 表格只检查 EP08 notebook 需要读取的目录和 baseline placeholder 是否存在，不代表算法结果已经生成。
+# > **数据说明**: 表格检查 EP08 notebook 需要读取的目录和 baseline placeholder 是否存在；Stage 2 的四个方法输出已按约定落在 `output/ep08_inr_sr/` 的方法子目录中。
 # >
-# > **怎么看**: `exists=True` 表示路径可访问；算法输出目录存在只是 notebook 的落盘目标，不能被解读为训练完成。
+# > **怎么看**: `exists=True` 表示路径可访问；SIREN/WIRE 位于 `siren_stage1/` 和 `wire_stage1/`，Deep Decoder/DeepInverse-DIP 位于 `deep_decoder_stage2/` 和 `deepinv_dip_stage2/`。
 # >
-# > **正常/异常**: 当前阶段 SIREN / WIRE / Deep Decoder 结果缺失是正常的门控前状态。若 `EP06 baseline placeholder` 缺失，则四方对比无法记录 EP06 指标来源。
+# > **正常/异常**: 若任一 Stage 2 方法目录或 `EP06 baseline placeholder` 缺失，则四方对比无法完整复现；EP06 placeholder 记录 classic baseline 的可用 proxy 指标和不可用同协议指标边界。
 # >
-# > **核心发现**: EP08 报告层已经建立读取约定，但后续结论必须等待 forward/highpass 等价性和单方法训练门控通过。
+# > **核心发现**: EP08 报告层已经建立读取约定，Stage 2 四方输出可从统一目录加载并与 EP06 MAP-TV proxy 进行受限对比。

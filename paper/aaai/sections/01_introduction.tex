@@ -1,0 +1,29 @@
+\section{Introduction}
+
+Thermal inspection of packaged or partially exposed chips often needs clearer
+internal contour visibility than a single long-wave infrared frame can provide.
+The current detector samples the scene at 10 um per pixel, but the calibrated
+spatial resolution is about 20 um and the LWIR optical transfer function
+attenuates fine thermal structure. The practical question is therefore not
+whether a 5 um temperature metrology image can be recovered, but whether a
+2x reconstruction grid can make chip contours more stable and interpretable.
+
+This project studies a step-and-shoot micro-scan session with 255 usable TXT
+temperature frames. The contribution is an experimental pipeline for bounded
+thermal super-resolution:
+
+\begin{itemize}
+\item session-aware data selection that avoids cross-temperature mixing;
+\item data-driven micro-scan alignment that treats stage commands and filenames
+as priors rather than ground truth;
+\item a 2x contour-level reconstruction comparison across SAA, IBP, and MAP-TV;
+\item alignment and regularization ablations that expose when sharper images
+are caused by alignment residuals rather than supported structure.
+\end{itemize}
+
+The headline result is deliberately conservative. Data-driven alignment is
+essential, but a better held-out contour score does not automatically make a
+forward-model SR algorithm reliable. In the current evidence, default contour
+refined alignment remains the main EP06 choice, while tuned alignment and NCC
+initialization are sensitivity controls.
+

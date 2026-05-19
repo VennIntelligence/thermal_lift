@@ -14,7 +14,14 @@ if not wire_metrics.empty:
 
 wire_history = read_csv_if_exists(wire_dir / "training_history.csv")
 if not wire_history.empty:
-    display(wire_history.tail(10).round(8))
+    wire_validation_history = (
+        wire_history.dropna(subset=["holdout_loss"])
+        if "holdout_loss" in wire_history.columns
+        else wire_history.iloc[0:0]
+    )
+    if wire_validation_history.empty:
+        wire_validation_history = wire_history.tail(5)
+    display(wire_validation_history.round(8))
 
 # %% [markdown]
 # > **数据说明**: 状态表检查 WIRE Stage 1 的正式产物，包括训练历史和收敛图；指标表只读取已有 `metrics.csv`，不会在 notebook 内补算或伪造缺失数值。

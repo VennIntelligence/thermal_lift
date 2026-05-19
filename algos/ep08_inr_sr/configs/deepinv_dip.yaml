@@ -27,7 +27,11 @@ train:
   lr: 0.0005
   max_iter: 10000
   val_interval: 100
-  split_half_max_iter: 3000
+  early_stop_patience: 1000
+  early_stop_min_delta: 1.0e-6
+  # DIP split-half is a data-stability check, not a random-initialization
+  # robustness test. Longer split-half DIP runs refit noise and diverge.
+  split_half_max_iter: 300
   split_half_enabled: true
 
 runtime:

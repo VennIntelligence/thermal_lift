@@ -60,6 +60,7 @@ class INRTrainer:
         observations_are_highpass: bool = True,
         train_indices: torch.Tensor | np.ndarray | list[int] | None = None,
         val_indices: torch.Tensor | np.ndarray | list[int] | None = None,
+        coord_aspect_mode: str = "preserve",
     ) -> None:
         self.device = resolve_device(device)
         self.config = config or TrainConfig()
@@ -82,12 +83,18 @@ class INRTrainer:
         self.psf_sigma_lr_px = psf_sigma_lr_px
         self.highpass_sigma_bg_lr_px = highpass_sigma_bg_lr_px
         self.scale = scale
+        self.coord_aspect_mode = str(coord_aspect_mode)
         self.forward_operator = forward_operator or self._build_forward_operator()
         self.forward_operator = self.forward_operator.to(self.device)
         self.train_indices = self._normalize_indices(train_indices, default_all=True)
         self.val_indices = self._normalize_indices(val_indices, default_all=False)
         if bool(getattr(self.model, "expects_coords", True)):
-            self._coords_grid = coordinate_grid(*self.hr_shape, device=self.device, flatten=True)
+            self._coords_grid = coordinate_grid(
+                *self.hr_shape,
+                device=self.device,
+                flatten=True,
+                aspect_mode=self.coord_aspect_mode,
+            )
         else:
             self._coords_grid = None
 

@@ -1,6 +1,12 @@
 01_setup.py
 02_forward_validation.py
+02b_tcforge_benchmark.py
 03_siren_results.py
 04_wire_results.py
 05_deep_decoder_results.py
-06_four_way_comparison.py
+06_deepinv_dip_results.py
+07_stage2_comparison.py
+08_stage3_overview.py
+09_stage3_progressive.py
+10_stage3_visual_comparison.py
+11_stage3_aspect_ablation.py

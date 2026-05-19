@@ -1,0 +1,6 @@
+evidence,use_for,do_not_use_for,reason
+Stage/filename coordinate prior,"coverage planning, initialization, regularization",alignment truth or success metric,commanded X/Y is metadata; real frame alignment must be checked in the image data
+Data-driven contour/NCC alignment,alignment anchor and quality gate before 2x contour-level SR,replacing the physical coordinate system,holdout contour and gradient scores directly test image agreement
+X time-adjacent small steps,local direction and short-time linearity smoke test,global SR feasibility claim or absolute stage-amplitude truth,these pairs are acquisition-adjacent but only probe a local response under one ROI/preprocess choice
+Y coordinate-adjacent pairs,raster-path failure diagnosis and coordinate metadata,Y displacement calibration,"fixed-X Y neighbors are separated by about one raster row, so thermal evolution contaminates NCC"
+AVI continuous scans,auxiliary direction and naming sanity check,SR input or high-precision theta replacement,"AVI is rendered 8-bit video with many duplicate frames, not raw temperature matrices"
