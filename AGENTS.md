@@ -220,6 +220,8 @@ thermal_lift/
 | `reports/` | ✅ track | 正式 .md 分析报告 |
 | `research_log/` | ✅ track | 研究日志和 Episode 进度 |
 
+**分批提交规则**: 提交最近成果时必须先用 `git status --ignored` 或等价命令检查工作树，分批只 stage 可复现源码、Notebook `fragments/`、构建脚本、配置、正式 Markdown 报告和研究日志；不得提交 `.ipynb` 构建产物、`output/` 下生成的图片/CSV/NPY 等数据、`data/` 原始或处理数据、缓存目录、虚拟环境，或任何只可由脚本重建的中间产物/交付产物。
+
 ### 🚀 新机器部署（Git 迁移）
 
 **前提**: 已安装 [uv](https://docs.astral.sh/uv/)，已获取原始数据文件。
