@@ -100,6 +100,7 @@ def _scatter_lr_to_reference(
     *,
     hr_shape: tuple[int, int],
     scale: int,
+    splat_sigma: float | None = None,
 ) -> np.ndarray:
     lr = np.asarray(image_lr, dtype=np.float64)
     if lr.ndim != 2:
@@ -113,13 +114,42 @@ def _scatter_lr_to_reference(
     x = scale * (np.arange(w_lr, dtype=np.float64)[np.newaxis, :] + dx)
     y0 = np.floor(y).astype(np.int64)
     x0 = np.floor(x).astype(np.int64)
-    fy = y - y0
-    fx = x - x0
 
     out = np.zeros(hr_shape, dtype=np.float64)
     out_flat = out.ravel()
     finite = np.isfinite(lr)
     clean = np.where(finite, lr, 0.0)
+    use_gaussian = splat_sigma is not None and float(splat_sigma) > 0.0
+    if use_gaussian:
+        sigma = float(splat_sigma)
+        radius = int(np.ceil(3.0 * sigma))
+        for oy in range(-radius, radius + 1):
+            yy = (y0 + oy)[:, 0]
+            valid_y = (yy >= 0) & (yy < h_hr)
+            if not np.any(valid_y):
+                continue
+            dy_frac = yy[:, np.newaxis] - y
+            wy = np.exp(-0.5 * (dy_frac[:, 0] * dy_frac[:, 0]) / (sigma * sigma))
+            for ox in range(-radius, radius + 1):
+                xx = (x0 + ox)[0, :]
+                valid_x = (xx >= 0) & (xx < w_hr)
+                if not np.any(valid_x):
+                    continue
+                dx_frac = xx[np.newaxis, :] - x
+                wx = np.exp(-0.5 * (dx_frac[0, :] * dx_frac[0, :]) / (sigma * sigma))
+
+                rows = yy[valid_y]
+                cols = xx[valid_x]
+                finite_block = finite[np.ix_(valid_y, valid_x)]
+                if not np.any(finite_block):
+                    continue
+                clean_block = clean[np.ix_(valid_y, valid_x)]
+                weight = wy[valid_y, np.newaxis] * wx[np.newaxis, valid_x]
+                out[np.ix_(rows, cols)] += np.where(finite_block, clean_block * weight, 0.0)
+        return out
+
+    fy = y - y0
+    fx = x - x0
 
     for oy in (0, 1):
         yy = y0 + oy
@@ -154,10 +184,10 @@ def forward(
     """
 
     if _common_forward is not None:
-        return np.asarray(_common_forward(x_hr, shift, psf_sigma=psf_sigma), dtype=np.float64)
+        return np.asarray(_common_forward(x_hr, shift, psf_sigma=psf_sigma, scale=scale), dtype=np.float64)
 
-    if scale != 2:
-        raise ValueError("EP06 forward model is defined for scale=2 only")
+    if scale not in (2, 4):
+        raise ValueError("EP06 forward model is defined for scale=2 or 4 only")
     x = np.asarray(x_hr, dtype=np.float64)
     if x.ndim != 2:
         raise ValueError("x_hr must be a 2D array")
@@ -178,24 +208,42 @@ def adjoint(
     *,
     hr_shape: tuple[int, int] | None = None,
     scale: int = 2,
+    splat_sigma: float | None = None,
 ) -> np.ndarray:
-    """Back-project one LR residual into the reference HR grid."""
+    """Back-project one LR residual into the reference HR grid.
+
+    ``splat_sigma`` optionally uses a wider Gaussian splat in HR pixels;
+    ``None`` preserves the original bilinear adjoint.
+    """
 
     if _common_adjoint is not None:
         return np.asarray(
-            _common_adjoint(y_residual, shift, psf_sigma=psf_sigma, hr_shape=hr_shape),
+            _common_adjoint(
+                y_residual,
+                shift,
+                psf_sigma=psf_sigma,
+                hr_shape=hr_shape,
+                scale=scale,
+                splat_sigma=splat_sigma,
+            ),
             dtype=np.float64,
         )
 
-    if scale != 2:
-        raise ValueError("EP06 adjoint model is defined for scale=2 only")
+    if scale not in (2, 4):
+        raise ValueError("EP06 adjoint model is defined for scale=2 or 4 only")
     residual = np.asarray(y_residual, dtype=np.float64)
     if residual.ndim != 2:
         raise ValueError("y_residual must be a 2D array")
     if hr_shape is None:
         hr_shape = (residual.shape[0] * scale, residual.shape[1] * scale)
 
-    scattered = _scatter_lr_to_reference(residual, shift, hr_shape=hr_shape, scale=scale)
+    scattered = _scatter_lr_to_reference(
+        residual,
+        shift,
+        hr_shape=hr_shape,
+        scale=scale,
+        splat_sigma=splat_sigma,
+    )
     sigma_hr = _psf_sigma_hr(psf_sigma, scale)
     if sigma_hr <= 0:
         return scattered
@@ -214,11 +262,12 @@ def _initial_image(
     *,
     scale: int,
     workers: int,
+    splat_sigma: float | None = None,
 ) -> np.ndarray:
     if isinstance(initial, str):
         key = initial.lower()
         if key == "saa":
-            return reconstruct_saa(frames, shifts, scale=scale, workers=workers)
+            return reconstruct_saa(frames, shifts, scale=scale, workers=workers, splat_sigma=splat_sigma)
         if key in {"bicubic", "cubic"}:
             return _bicubic_initial(frames, scale)
         raise ValueError("initial must be 'saa', 'bicubic', or an HR ndarray")
@@ -244,6 +293,7 @@ def _ibp_chunk(
     *,
     psf_sigma: float,
     scale: int,
+    splat_sigma: float | None = None,
 ) -> tuple[np.ndarray, float]:
     correction = np.zeros_like(x_hr, dtype=np.float64)
     sse = 0.0
@@ -256,6 +306,7 @@ def _ibp_chunk(
             psf_sigma=psf_sigma,
             hr_shape=x_hr.shape,
             scale=scale,
+            splat_sigma=splat_sigma,
         )
         sse += float(np.sum(residual * residual))
     return correction, sse
@@ -269,6 +320,7 @@ def _residual_backprojection(
     psf_sigma: float,
     scale: int,
     workers: int,
+    splat_sigma: float | None = None,
 ) -> tuple[np.ndarray, float]:
     workers = min(max(1, workers), frames.shape[0])
     if workers == 1:
@@ -278,6 +330,7 @@ def _residual_backprojection(
             shifts,
             psf_sigma=psf_sigma,
             scale=scale,
+            splat_sigma=splat_sigma,
         )
     else:
         correction = np.zeros_like(x_hr, dtype=np.float64)
@@ -291,6 +344,7 @@ def _residual_backprojection(
                     shifts[start:stop],
                     psf_sigma=psf_sigma,
                     scale=scale,
+                    splat_sigma=splat_sigma,
                 )
                 for start, stop in _ranges(frames.shape[0], workers)
             ]
@@ -314,6 +368,7 @@ def reconstruct_ibp(
     tol: float = 1e-4,
     psf_sigma: float = 1.0,
     scale: int = 2,
+    splat_sigma: float | None = None,
     workers: int | None = None,
     n_jobs: int | None = None,
     return_records: bool = False,
@@ -322,14 +377,23 @@ def reconstruct_ibp(
 
     Returns ``(image, convergence)``. By default convergence is a pandas
     ``DataFrame``; set ``return_records=True`` for a list of dictionaries.
+    ``splat_sigma`` optionally widens the SAA initialization and adjoint splat
+    in HR pixels; ``None`` preserves the original bilinear path.
     """
 
-    if scale != 2:
-        raise ValueError("EP06 IBP is defined for scale=2 only")
+    if scale not in (2, 4):
+        raise ValueError("EP06 IBP is defined for scale=2 or 4 only")
     frames_arr = _as_frames(frames)
     shifts_arr = _as_shifts(shifts, frames_arr.shape[0])
     n_workers = _resolve_workers(workers, n_jobs)
-    x = _initial_image(frames_arr, shifts_arr, initial, scale=scale, workers=n_workers)
+    x = _initial_image(
+        frames_arr,
+        shifts_arr,
+        initial,
+        scale=scale,
+        workers=n_workers,
+        splat_sigma=splat_sigma,
+    )
 
     records: list[dict[str, float | int | bool]] = []
     max_iter = max(0, int(max_iter))
@@ -343,6 +407,7 @@ def reconstruct_ibp(
             psf_sigma=psf_sigma,
             scale=scale,
             workers=n_workers,
+            splat_sigma=splat_sigma,
         )
         update = beta * correction
         denom = float(np.linalg.norm(x))

@@ -16,7 +16,9 @@ from typing import Iterable
 
 import numpy as np
 import pandas as pd
+from scipy import ndimage
 
+from common.forward_model import _sample_reference_to_lr, _scatter_lr_to_reference, _sigma_hr
 from ibp.ibp import (
     _as_frames,
     _as_shifts,
@@ -115,6 +117,7 @@ def _gradient_chunk(
     *,
     psf_sigma: float,
     scale: int,
+    splat_sigma: float | None = None,
 ) -> tuple[np.ndarray, float]:
     grad = np.zeros_like(x_hr, dtype=np.float64)
     sse = 0.0
@@ -127,6 +130,7 @@ def _gradient_chunk(
             psf_sigma=psf_sigma,
             hr_shape=x_hr.shape,
             scale=scale,
+            splat_sigma=splat_sigma,
         )
         sse += float(np.sum(residual * residual))
     return grad, sse
@@ -140,6 +144,7 @@ def _data_gradient_and_loss(
     psf_sigma: float,
     scale: int,
     workers: int,
+    splat_sigma: float | None = None,
 ) -> tuple[np.ndarray, float]:
     workers = min(max(1, workers), frames.shape[0])
     if workers == 1:
@@ -149,6 +154,7 @@ def _data_gradient_and_loss(
             shifts,
             psf_sigma=psf_sigma,
             scale=scale,
+            splat_sigma=splat_sigma,
         )
     else:
         grad = np.zeros_like(x_hr, dtype=np.float64)
@@ -162,6 +168,7 @@ def _data_gradient_and_loss(
                     shifts[start:stop],
                     psf_sigma=psf_sigma,
                     scale=scale,
+                    splat_sigma=splat_sigma,
                 )
                 for start, stop in _ranges(frames.shape[0], workers)
             ]
@@ -170,6 +177,81 @@ def _data_gradient_and_loss(
                 grad += chunk_grad
                 sse += chunk_sse
 
+    grad /= frames.shape[0]
+    residual_mse = sse / float(frames.size)
+    return grad, residual_mse
+
+
+def _cached_gradient_chunk(
+    blurred_hr: np.ndarray,
+    frames: np.ndarray,
+    shifts: np.ndarray,
+    *,
+    hr_shape: tuple[int, int],
+    scale: int,
+    splat_sigma: float | None = None,
+) -> tuple[np.ndarray, float]:
+    scatter_sum = np.zeros(hr_shape, dtype=np.float64)
+    sse = 0.0
+    for frame, shift in zip(frames, shifts, strict=True):
+        pred = _sample_reference_to_lr(blurred_hr, shift, scale=scale)
+        residual = np.where(np.isfinite(frame), pred - frame, 0.0)
+        scatter_sum += _scatter_lr_to_reference(
+            residual,
+            shift,
+            hr_shape=hr_shape,
+            scale=scale,
+            splat_sigma=splat_sigma,
+        )
+        sse += float(np.sum(residual * residual))
+    return scatter_sum, sse
+
+
+def _data_gradient_and_loss_cached(
+    x_hr: np.ndarray,
+    frames: np.ndarray,
+    shifts: np.ndarray,
+    *,
+    psf_sigma: float,
+    scale: int,
+    workers: int,
+    splat_sigma: float | None = None,
+) -> tuple[np.ndarray, float]:
+    sigma = _sigma_hr(psf_sigma, scale)
+    x = np.asarray(x_hr, dtype=np.float64)
+    blurred = ndimage.gaussian_filter(x, sigma=sigma, mode="constant", cval=0.0) if sigma > 0 else x
+    workers = min(max(1, workers), frames.shape[0])
+    if workers == 1:
+        scatter_sum, sse = _cached_gradient_chunk(
+            blurred,
+            frames,
+            shifts,
+            hr_shape=x.shape,
+            scale=scale,
+            splat_sigma=splat_sigma,
+        )
+    else:
+        scatter_sum = np.zeros_like(x, dtype=np.float64)
+        sse = 0.0
+        with ThreadPoolExecutor(max_workers=workers) as executor:
+            futures = [
+                executor.submit(
+                    _cached_gradient_chunk,
+                    blurred,
+                    frames[start:stop],
+                    shifts[start:stop],
+                    hr_shape=x.shape,
+                    scale=scale,
+                    splat_sigma=splat_sigma,
+                )
+                for start, stop in _ranges(frames.shape[0], workers)
+            ]
+            for future in futures:
+                chunk_scatter, chunk_sse = future.result()
+                scatter_sum += chunk_scatter
+                sse += chunk_sse
+
+    grad = ndimage.gaussian_filter(scatter_sum, sigma=sigma, mode="constant", cval=0.0) if sigma > 0 else scatter_sum
     grad /= frames.shape[0]
     residual_mse = sse / float(frames.size)
     return grad, residual_mse
@@ -185,42 +267,54 @@ def reconstruct_map_tv(
     step_size: float = 1.0,
     psf_sigma: float = 1.0,
     scale: int = 2,
+    splat_sigma: float | None = None,
     workers: int | None = None,
     n_jobs: int | None = None,
     tol: float = 1e-4,
     tv_inner_iter: int = 30,
     use_fista: bool = True,
+    cached_gradient: bool = True,
     return_dataframe: bool = False,
 ) -> tuple[np.ndarray, list[dict[str, float | int | bool]] | pd.DataFrame]:
     """Run MAP-TV reconstruction.
 
     Returns ``(image, records)`` by default. Set ``return_dataframe=True`` to
-    receive a pandas ``DataFrame``.
+    receive a pandas ``DataFrame``. ``splat_sigma`` optionally widens the SAA
+    initialization and adjoint splat in HR pixels; ``None`` keeps bilinear.
     """
 
-    if scale != 2:
-        raise ValueError("EP06 MAP-TV is defined for scale=2 only")
+    if scale not in (2, 4):
+        raise ValueError("EP06 MAP-TV is defined for scale=2 or 4 only")
 
     frames_arr = _as_frames(frames)
     shifts_arr = _as_shifts(shifts, frames_arr.shape[0])
     n_workers = _resolve_workers(workers, n_jobs)
 
-    x = _initial_image(frames_arr, shifts_arr, initial, scale=scale, workers=n_workers)
+    x = _initial_image(
+        frames_arr,
+        shifts_arr,
+        initial,
+        scale=scale,
+        workers=n_workers,
+        splat_sigma=splat_sigma,
+    )
     z = x.copy()
     t = 1.0
 
     lambda_tv = float(lambda_tv)
     step_size = float(step_size)
     records: list[dict[str, float | int | bool]] = []
+    gradient_fn = _data_gradient_and_loss_cached if cached_gradient else _data_gradient_and_loss
 
     for iteration in range(1, max(0, int(max_iter)) + 1):
-        grad, residual_mse = _data_gradient_and_loss(
+        grad, residual_mse = gradient_fn(
             z,
             frames_arr,
             shifts_arr,
             psf_sigma=psf_sigma,
             scale=scale,
             workers=n_workers,
+            splat_sigma=splat_sigma,
         )
 
         x_temp = z - step_size * grad
@@ -246,6 +340,7 @@ def reconstruct_map_tv(
                 "lambda_tv": lambda_tv,
                 "step_size": step_size,
                 "psf_sigma": float(psf_sigma),
+                "cached_gradient": bool(cached_gradient),
                 "stopped": bool(stopped),
             }
         )

@@ -72,3 +72,38 @@ def test_forward_model_with_psf_returns_finite_lr_frame() -> None:
     assert bp.shape == x_hr.shape
     assert np.isfinite(lr).all()
     assert np.isfinite(bp).all()
+
+
+def test_adjoint_default_splat_sigma_preserves_bilinear_path_at_4x() -> None:
+    rng = np.random.default_rng(12)
+    residual = rng.normal(size=(5, 6))
+    shift = np.array([0.21, 0.34])
+
+    implicit = adjoint(residual, shift, psf_sigma=0.0, hr_shape=(20, 24), scale=4)
+    explicit = adjoint(
+        residual,
+        shift,
+        psf_sigma=0.0,
+        hr_shape=(20, 24),
+        scale=4,
+        splat_sigma=None,
+    )
+
+    assert np.array_equal(implicit, explicit)
+
+
+def test_gaussian_adjoint_splat_expands_4x_support() -> None:
+    residual = np.ones((3, 3), dtype=float)
+
+    bilinear = adjoint(residual, (0.0, 0.0), psf_sigma=0.0, hr_shape=(12, 12), scale=4)
+    gaussian = adjoint(
+        residual,
+        (0.0, 0.0),
+        psf_sigma=0.0,
+        hr_shape=(12, 12),
+        scale=4,
+        splat_sigma=1.5,
+    )
+
+    assert np.count_nonzero(gaussian) > np.count_nonzero(bilinear) * 4
+    assert np.isfinite(gaussian).all()

@@ -17,8 +17,8 @@ from scipy import ndimage
 
 def _validate_scale(scale: int) -> int:
     scale = int(scale)
-    if scale != 2:
-        raise ValueError("EP06 forward model is defined for scale=2 only")
+    if scale not in (2, 4):
+        raise ValueError("EP06 forward model is defined for scale=2 or 4 only")
     return scale
 
 
@@ -62,6 +62,7 @@ def _scatter_lr_to_reference(
     *,
     hr_shape: tuple[int, int],
     scale: int,
+    splat_sigma: float | None = None,
 ) -> np.ndarray:
     lr = np.asarray(image_lr, dtype=np.float64)
     h_hr, w_hr = hr_shape
@@ -71,13 +72,42 @@ def _scatter_lr_to_reference(
     x = scale * (np.arange(w_lr, dtype=np.float64)[None, :] + dx)
     y0 = np.floor(y).astype(np.int64)
     x0 = np.floor(x).astype(np.int64)
-    fy = y - y0
-    fx = x - x0
 
     out = np.zeros(hr_shape, dtype=np.float64)
     out_flat = out.ravel()
     finite = np.isfinite(lr)
     clean = np.where(finite, lr, 0.0)
+    use_gaussian = splat_sigma is not None and float(splat_sigma) > 0.0
+    if use_gaussian:
+        sigma = float(splat_sigma)
+        radius = int(np.ceil(3.0 * sigma))
+        for oy in range(-radius, radius + 1):
+            yy = (y0 + oy)[:, 0]
+            valid_y = (yy >= 0) & (yy < h_hr)
+            if not np.any(valid_y):
+                continue
+            dy_frac = yy[:, np.newaxis] - y
+            wy = np.exp(-0.5 * (dy_frac[:, 0] * dy_frac[:, 0]) / (sigma * sigma))
+            for ox in range(-radius, radius + 1):
+                xx = (x0 + ox)[0, :]
+                valid_x = (xx >= 0) & (xx < w_hr)
+                if not np.any(valid_x):
+                    continue
+                dx_frac = xx[np.newaxis, :] - x
+                wx = np.exp(-0.5 * (dx_frac[0, :] * dx_frac[0, :]) / (sigma * sigma))
+
+                rows = yy[valid_y]
+                cols = xx[valid_x]
+                finite_block = finite[np.ix_(valid_y, valid_x)]
+                if not np.any(finite_block):
+                    continue
+                clean_block = clean[np.ix_(valid_y, valid_x)]
+                weight = wy[valid_y, np.newaxis] * wx[np.newaxis, valid_x]
+                out[np.ix_(rows, cols)] += np.where(finite_block, clean_block * weight, 0.0)
+        return out
+
+    fy = y - y0
+    fx = x - x0
     for oy in (0, 1):
         yy = y0 + oy
         wy = (1.0 - fy) if oy == 0 else fy
@@ -121,8 +151,13 @@ def adjoint(
     hr_shape: tuple[int, int] | None = None,
     scale: int = 2,
     mode: str = "constant",
+    splat_sigma: float | None = None,
 ) -> np.ndarray:
-    """Backproject one LR residual into the reference HR grid."""
+    """Backproject one LR residual into the reference HR grid.
+
+    ``splat_sigma`` optionally widens the adjoint splat with a Gaussian
+    footprint in HR pixels; ``None`` preserves the original bilinear adjoint.
+    """
 
     scale = _validate_scale(scale)
     y = np.asarray(y_residual, dtype=np.float64)
@@ -130,7 +165,13 @@ def adjoint(
         raise ValueError("y_residual must be 2D")
     if hr_shape is None:
         hr_shape = (y.shape[0] * scale, y.shape[1] * scale)
-    scattered = _scatter_lr_to_reference(y, np.asarray(shift, dtype=np.float64), hr_shape=hr_shape, scale=scale)
+    scattered = _scatter_lr_to_reference(
+        y,
+        np.asarray(shift, dtype=np.float64),
+        hr_shape=hr_shape,
+        scale=scale,
+        splat_sigma=splat_sigma,
+    )
     sigma = _sigma_hr(psf_sigma, scale)
     return ndimage.gaussian_filter(scattered, sigma=sigma, mode=mode, cval=0.0) if sigma > 0 else scattered
 
@@ -143,6 +184,7 @@ class ObservationOperator:
     psf_sigma: float = 1.0
     scale: int = 2
     mode: str = "constant"
+    splat_sigma: float | None = None
 
     def forward(self, x_hr: np.ndarray, index: int) -> np.ndarray:
         return forward(x_hr, self.shifts[index], self.psf_sigma, scale=self.scale, mode=self.mode)
@@ -155,6 +197,7 @@ class ObservationOperator:
             hr_shape=self.hr_shape,
             scale=self.scale,
             mode=self.mode,
+            splat_sigma=self.splat_sigma,
         )
 
     def forward_all(self, x_hr: np.ndarray) -> np.ndarray:
@@ -184,8 +227,13 @@ def build_observation_operator(
     psf_sigma: float = 1.0,
     scale: int = 2,
     mode: str = "constant",
+    splat_sigma: float | None = None,
 ) -> ObservationOperator:
-    """Create a functional operator without building a dense matrix."""
+    """Create a functional operator without building a dense matrix.
+
+    ``splat_sigma`` controls the adjoint splat footprint in HR pixels. Leave it
+    as ``None`` for the original bilinear behavior.
+    """
 
     scale = _validate_scale(scale)
     hr_shape = tuple(map(int, hr_shape))
@@ -196,4 +244,12 @@ def build_observation_operator(
     shift_arr = np.empty((0, 2), dtype=float) if shifts is None else np.asarray(shifts, dtype=float)
     if shift_arr.ndim != 2 or shift_arr.shape[1] != 2:
         raise ValueError("shifts must have shape (N, 2)")
-    return ObservationOperator(hr_shape, lr_shape, shift_arr, psf_sigma=float(psf_sigma), scale=scale, mode=mode)
+    return ObservationOperator(
+        hr_shape,
+        lr_shape,
+        shift_arr,
+        psf_sigma=float(psf_sigma),
+        scale=scale,
+        mode=mode,
+        splat_sigma=splat_sigma,
+    )

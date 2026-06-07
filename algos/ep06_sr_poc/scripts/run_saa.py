@@ -41,6 +41,8 @@ PROJECT_ROOT, ALGO_ROOT = bootstrap_paths()
 
 from thermal_core.io import load_frame  # noqa: E402
 
+EXPECTED_CLEAN_SR_FRAMES = 248
+
 
 def default_workers() -> int:
     return max(1, min(4, (os.cpu_count() or 2) // 2))
@@ -76,7 +78,9 @@ def call_if_available(
 
 
 def select_main_session(audit: pd.DataFrame) -> pd.DataFrame:
-    if "is_main_session" in audit.columns:
+    if "is_sr_usable" in audit.columns:
+        main = audit[boolish(audit["is_sr_usable"])].copy()
+    elif "is_main_session" in audit.columns:
         main = audit[boolish(audit["is_main_session"])].copy()
     elif "session" in audit.columns:
         if audit["session"].eq(2).any():
@@ -85,7 +89,7 @@ def select_main_session(audit: pd.DataFrame) -> pd.DataFrame:
             main_session = audit.groupby("session")["file"].count().idxmax()
             main = audit[audit["session"].eq(main_session)].copy()
     else:
-        raise ValueError("frame audit must include is_main_session or session")
+        raise ValueError("frame audit must include is_sr_usable, is_main_session, or session")
     if main.empty:
         raise ValueError("No main-session frames found in frame audit")
     return main.sort_values("acquisition_order").reset_index(drop=True)
@@ -117,6 +121,30 @@ def load_main_session_frames(
         for row in tqdm(metadata.itertuples(index=False), total=len(metadata), desc="load frames")
     ]
     return np.stack(frames).astype(np.float32, copy=False), metadata
+
+
+def validate_alignment_contract(metadata: pd.DataFrame, alignment: pd.DataFrame, alignment_csv: Path) -> None:
+    metadata_count = int(len(metadata))
+    alignment_count = int(len(alignment))
+    if metadata_count != EXPECTED_CLEAN_SR_FRAMES:
+        raise ValueError(
+            f"EP06 clean SR metadata has {metadata_count} frames; expected {EXPECTED_CLEAN_SR_FRAMES}. "
+            "Check frame audit filtering."
+        )
+    if alignment_count != metadata_count:
+        raise ValueError(
+            f"EP06 frame-count contract failed for {alignment_csv}: metadata has {metadata_count} clean SR frames, "
+            f"alignment CSV has {alignment_count} result rows."
+        )
+    if "file" in metadata.columns and "file" in alignment.columns:
+        metadata_files = set(metadata["file"].astype(str))
+        alignment_files = set(alignment["file"].astype(str))
+        missing = sorted(metadata_files - alignment_files)
+        extra = sorted(alignment_files - metadata_files)
+        if missing or extra:
+            raise ValueError(
+                f"EP06 alignment file contract failed for {alignment_csv}: missing={missing[:5]} extra={extra[:5]}"
+            )
 
 
 def highpass_preprocess(frames: np.ndarray, *, sigma_bg: float, workers: int) -> np.ndarray:
@@ -165,9 +193,11 @@ def load_alignment_shifts(
         shifts = np.asarray(result, dtype=np.float32)
         if shifts.shape == (len(metadata), 2):
             return shifts
+        raise ValueError(f"Alignment shifts have shape {shifts.shape}; expected {(len(metadata), 2)}")
 
-    alignment = pd.read_csv(alignment_csv)
-    alignment = alignment.drop_duplicates("file").set_index("file")
+    alignment_raw = pd.read_csv(alignment_csv)
+    validate_alignment_contract(metadata, alignment_raw, alignment_csv)
+    alignment = alignment_raw.drop_duplicates("file").set_index("file")
     if method in {"contour_refined", "data_driven_contour_refined", "refined"}:
         cols = ("refined_align_dx_px", "refined_align_dy_px")
     elif method in {"ncc_init", "data_driven_ncc_init", "init"}:
@@ -195,8 +225,11 @@ def load_quality_weights(metadata: pd.DataFrame, alignment_csv: Path) -> np.ndar
         weights = np.asarray(result, dtype=np.float32)
         if weights.shape[0] == len(metadata):
             return normalize_weights(weights)
+        raise ValueError(f"Quality weights have shape {weights.shape}; expected {(len(metadata),)}")
 
-    alignment = pd.read_csv(alignment_csv).drop_duplicates("file").set_index("file")
+    alignment_raw = pd.read_csv(alignment_csv)
+    validate_alignment_contract(metadata, alignment_raw, alignment_csv)
+    alignment = alignment_raw.drop_duplicates("file").set_index("file")
     table = alignment.loc[metadata["file"].astype(str)]
     if {"ncc_peak", "refined_holdout_chamfer_px"}.issubset(table.columns):
         weights = table["ncc_peak"].to_numpy(dtype=float) / (
@@ -229,6 +262,7 @@ def shift_and_add(
     weights: np.ndarray | None,
     scale: int,
     workers: int,
+    splat_sigma: float | None = None,
     desc: str,
 ) -> np.ndarray:
     result = call_if_available(
@@ -243,6 +277,7 @@ def shift_and_add(
         weights=weights,
         scale=scale,
         workers=workers,
+        splat_sigma=splat_sigma,
     )
     if result is not None:
         if isinstance(result, dict):
@@ -339,6 +374,7 @@ def run_synthetic_validation(args: argparse.Namespace) -> dict[str, Any]:
         weights=None,
         scale=args.scale,
         workers=args.workers,
+        splat_sigma=args.splat_sigma,
         desc="synthetic SAA uniform",
     )
     weighted = shift_and_add(
@@ -347,6 +383,7 @@ def run_synthetic_validation(args: argparse.Namespace) -> dict[str, Any]:
         weights=np.ones(len(frames), dtype=np.float32),
         scale=args.scale,
         workers=args.workers,
+        splat_sigma=args.splat_sigma,
         desc="synthetic SAA weighted",
     )
     return {
@@ -370,6 +407,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "output" / "ep06_sr_poc")
     parser.add_argument("--alignment-method", default="contour_refined", choices=["contour_refined", "ncc_init", "data_driven_contour_refined", "data_driven_ncc_init"])
     parser.add_argument("--scale", type=int, default=2)
+    parser.add_argument("--splat-sigma", type=float, default=None, help="Optional Gaussian splat sigma in HR pixels; default keeps bilinear splatting.")
     parser.add_argument("--highpass-sigma", type=float, default=5.0)
     parser.add_argument("--psf-sigma", type=float, default=1.0)
     parser.add_argument("--workers", type=int, default=default_workers())
@@ -383,8 +421,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     args.output_dir = args.output_dir.resolve()
-    if args.scale != 2:
-        raise ValueError("EP06 is a 2x contour-level POC; keep --scale 2.")
+    if args.scale not in (2, 4):
+        raise ValueError("EP06 is a 2x/4x contour-level POC; keep --scale 2 or 4.")
     start = time.perf_counter()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -395,10 +433,10 @@ def main() -> None:
     raw_frames = offset_correction(frames, workers=args.workers)
 
     outputs = {
-        "saa_uniform_highpass.npy": shift_and_add(highpass_frames, shifts, weights=None, scale=args.scale, workers=args.workers, desc="SAA uniform highpass"),
-        "saa_weighted_highpass.npy": shift_and_add(highpass_frames, shifts, weights=weights, scale=args.scale, workers=args.workers, desc="SAA weighted highpass"),
-        "saa_uniform_raw.npy": shift_and_add(raw_frames, shifts, weights=None, scale=args.scale, workers=args.workers, desc="SAA uniform raw"),
-        "saa_weighted_raw.npy": shift_and_add(raw_frames, shifts, weights=weights, scale=args.scale, workers=args.workers, desc="SAA weighted raw"),
+        "saa_uniform_highpass.npy": shift_and_add(highpass_frames, shifts, weights=None, scale=args.scale, workers=args.workers, splat_sigma=args.splat_sigma, desc="SAA uniform highpass"),
+        "saa_weighted_highpass.npy": shift_and_add(highpass_frames, shifts, weights=weights, scale=args.scale, workers=args.workers, splat_sigma=args.splat_sigma, desc="SAA weighted highpass"),
+        "saa_uniform_raw.npy": shift_and_add(raw_frames, shifts, weights=None, scale=args.scale, workers=args.workers, splat_sigma=args.splat_sigma, desc="SAA uniform raw"),
+        "saa_weighted_raw.npy": shift_and_add(raw_frames, shifts, weights=weights, scale=args.scale, workers=args.workers, splat_sigma=args.splat_sigma, desc="SAA weighted raw"),
     }
     for name, image in outputs.items():
         np.save(args.output_dir / name, image.astype(np.float32, copy=False))
@@ -427,6 +465,7 @@ def main() -> None:
             "real_lr_shape": list(frames.shape[1:]),
             "real_hr_shape": list(outputs["saa_uniform_highpass.npy"].shape),
             "alignment_method": args.alignment_method,
+            "splat_sigma_hr_px": None if args.splat_sigma is None else float(args.splat_sigma),
             "shift_convention": "EP05 shifts move each LR frame into reference coordinates; SAA uses positive shifts directly.",
             "reference_file": reference_file,
             "elapsed_sec": float(time.perf_counter() - start),

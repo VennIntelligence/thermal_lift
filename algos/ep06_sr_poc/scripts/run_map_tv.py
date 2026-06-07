@@ -121,6 +121,7 @@ def fallback_map_tv(
     max_iter: int,
     step_size: float,
     tol: float,
+    splat_sigma: float | None,
     track: str,
 ) -> tuple[np.ndarray, pd.DataFrame]:
     image = np.asarray(init_hr, dtype=np.float32).copy()
@@ -134,7 +135,14 @@ def fallback_map_tv(
             predicted = forward_model(image, shift, scale=scale, psf_sigma=psf_sigma)
             residual = predicted - np.asarray(frame, dtype=np.float32)
             data_mse += float(np.mean(residual**2))
-            data_grad += adjoint_model(residual, shift, hr_shape=image.shape, scale=scale, psf_sigma=psf_sigma)
+            data_grad += adjoint_model(
+                residual,
+                shift,
+                hr_shape=image.shape,
+                scale=scale,
+                psf_sigma=psf_sigma,
+                splat_sigma=splat_sigma,
+            )
         data_grad /= max(1, n_frames)
         grad = data_grad + lambda_tv * tv_gradient(image)
         update = -step_size * grad
@@ -172,6 +180,7 @@ def run_map_tv_algorithm(
     tv_inner_iter: int,
     use_fista: bool,
     workers: int,
+    splat_sigma: float | None,
     track: str,
 ) -> tuple[np.ndarray, pd.DataFrame]:
     result = call_if_available(
@@ -194,6 +203,7 @@ def run_map_tv_algorithm(
         tv_inner_iter=tv_inner_iter,
         use_fista=use_fista,
         workers=workers,
+        splat_sigma=splat_sigma,
         track=track,
     )
     if result is None:
@@ -207,6 +217,7 @@ def run_map_tv_algorithm(
             max_iter=max_iter,
             step_size=step_size,
             tol=tol,
+            splat_sigma=splat_sigma,
             track=track,
         )
     if isinstance(result, dict):
@@ -238,13 +249,30 @@ def select_lambda(
     selection_artifact_weight: float,
     selection_std_weight: float,
     workers: int,
+    splat_sigma: float | None,
     track: str,
 ) -> tuple[float, pd.DataFrame]:
     even = np.arange(len(frames)) % 2 == 0
     odd = ~even
     rows: list[dict[str, float | int | str | bool]] = []
-    init_a = shift_and_add(frames[even], shifts[even], weights=weights[even], scale=scale, workers=workers, desc=f"{track} split A init")
-    init_b = shift_and_add(frames[odd], shifts[odd], weights=weights[odd], scale=scale, workers=workers, desc=f"{track} split B init")
+    init_a = shift_and_add(
+        frames[even],
+        shifts[even],
+        weights=weights[even],
+        scale=scale,
+        workers=workers,
+        splat_sigma=splat_sigma,
+        desc=f"{track} split A init",
+    )
+    init_b = shift_and_add(
+        frames[odd],
+        shifts[odd],
+        weights=weights[odd],
+        scale=scale,
+        workers=workers,
+        splat_sigma=splat_sigma,
+        desc=f"{track} split B init",
+    )
     init_std = 0.5 * (float(np.std(init_a)) + float(np.std(init_b)))
     for lambda_tv in lambdas:
         recon_a, _ = run_map_tv_algorithm(
@@ -260,6 +288,7 @@ def select_lambda(
             tv_inner_iter=tv_inner_iter,
             use_fista=use_fista,
             workers=workers,
+            splat_sigma=splat_sigma,
             track=f"{track}_split_a",
         )
         recon_b, _ = run_map_tv_algorithm(
@@ -275,6 +304,7 @@ def select_lambda(
             tv_inner_iter=tv_inner_iter,
             use_fista=use_fista,
             workers=workers,
+            splat_sigma=splat_sigma,
             track=f"{track}_split_b",
         )
         consistency = nrmse(recon_a, recon_b)
@@ -317,11 +347,20 @@ def initial_image(
     *,
     scale: int,
     workers: int,
+    splat_sigma: float | None = None,
 ) -> np.ndarray:
     path = output_dir / name
     if path.exists():
         return np.load(path).astype(np.float32, copy=False)
-    return shift_and_add(frames, shifts, weights=weights, scale=scale, workers=workers, desc=f"init {name}")
+    return shift_and_add(
+        frames,
+        shifts,
+        weights=weights,
+        scale=scale,
+        workers=workers,
+        splat_sigma=splat_sigma,
+        desc=f"init {name}",
+    )
 
 
 def run_synthetic_validation(args: argparse.Namespace, lambda_tv: float) -> dict[str, Any]:
@@ -333,7 +372,15 @@ def run_synthetic_validation(args: argparse.Namespace, lambda_tv: float) -> dict
         seed=args.seed,
     )
     weights = np.ones(len(frames), dtype=np.float32)
-    init = shift_and_add(frames, shifts, weights=weights, scale=args.scale, workers=args.workers, desc="synthetic MAP-TV init")
+    init = shift_and_add(
+        frames,
+        shifts,
+        weights=weights,
+        scale=args.scale,
+        workers=args.workers,
+        splat_sigma=args.splat_sigma,
+        desc="synthetic MAP-TV init",
+    )
     recon, convergence = run_map_tv_algorithm(
         frames,
         shifts,
@@ -347,6 +394,7 @@ def run_synthetic_validation(args: argparse.Namespace, lambda_tv: float) -> dict
         tv_inner_iter=args.tv_inner_iter,
         use_fista=not args.no_fista,
         workers=args.workers,
+        splat_sigma=args.splat_sigma,
         track="synthetic",
     )
     return {
@@ -369,6 +417,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "output" / "ep06_sr_poc")
     parser.add_argument("--alignment-method", default="contour_refined", choices=["contour_refined", "ncc_init", "data_driven_contour_refined", "data_driven_ncc_init"])
     parser.add_argument("--scale", type=int, default=2)
+    parser.add_argument("--splat-sigma", type=float, default=None, help="Optional Gaussian adjoint/SAA-init splat sigma in HR pixels.")
     parser.add_argument("--highpass-sigma", type=float, default=5.0)
     parser.add_argument("--psf-sigma", type=float, default=1.0)
     parser.add_argument("--max-iter", type=int, default=6)
@@ -391,8 +440,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     args.output_dir = args.output_dir.resolve()
-    if args.scale != 2:
-        raise ValueError("EP06 is a 2x contour-level POC; keep --scale 2.")
+    if args.scale not in (2, 4):
+        raise ValueError("EP06 is a 2x/4x contour-level POC; keep --scale 2 or 4.")
     start = time.perf_counter()
     args.output_dir.mkdir(parents=True, exist_ok=True)
     lambdas = parse_lambda_grid(args.lambda_grid)
@@ -418,6 +467,7 @@ def main() -> None:
         selection_artifact_weight=args.selection_artifact_weight,
         selection_std_weight=args.selection_std_weight,
         workers=args.workers,
+        splat_sigma=args.splat_sigma,
         track="highpass",
     )
     lambda_raw, selection_raw = select_lambda(
@@ -435,6 +485,7 @@ def main() -> None:
         selection_artifact_weight=args.selection_artifact_weight,
         selection_std_weight=args.selection_std_weight,
         workers=args.workers,
+        splat_sigma=args.splat_sigma,
         track="raw",
     )
     pd.concat([selection_highpass, selection_raw], ignore_index=True).to_csv(
@@ -442,8 +493,26 @@ def main() -> None:
         index=False,
     )
 
-    init_highpass = initial_image(args.output_dir, "saa_weighted_highpass.npy", highpass_frames, shifts, weights, scale=args.scale, workers=args.workers)
-    init_raw = initial_image(args.output_dir, "saa_weighted_raw.npy", raw_frames, shifts, weights, scale=args.scale, workers=args.workers)
+    init_highpass = initial_image(
+        args.output_dir,
+        "saa_weighted_highpass.npy",
+        highpass_frames,
+        shifts,
+        weights,
+        scale=args.scale,
+        workers=args.workers,
+        splat_sigma=args.splat_sigma,
+    )
+    init_raw = initial_image(
+        args.output_dir,
+        "saa_weighted_raw.npy",
+        raw_frames,
+        shifts,
+        weights,
+        scale=args.scale,
+        workers=args.workers,
+        splat_sigma=args.splat_sigma,
+    )
     map_highpass, conv_highpass = run_map_tv_algorithm(
         highpass_frames,
         shifts,
@@ -457,6 +526,7 @@ def main() -> None:
         tv_inner_iter=args.tv_inner_iter,
         use_fista=not args.no_fista,
         workers=args.workers,
+        splat_sigma=args.splat_sigma,
         track="highpass",
     )
     map_raw, conv_raw = run_map_tv_algorithm(
@@ -472,6 +542,7 @@ def main() -> None:
         tv_inner_iter=args.tv_inner_iter,
         use_fista=not args.no_fista,
         workers=args.workers,
+        splat_sigma=args.splat_sigma,
         track="raw",
     )
     np.save(args.output_dir / "map_tv_highpass.npy", map_highpass)
@@ -492,6 +563,7 @@ def main() -> None:
             "max_iter_real": int(args.max_iter),
             "step_size": float(args.step_size),
             "psf_sigma": float(args.psf_sigma),
+            "splat_sigma_hr_px": None if args.splat_sigma is None else float(args.splat_sigma),
             "use_fista": bool(not args.no_fista),
             "elapsed_sec": float(time.perf_counter() - start),
         }

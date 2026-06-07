@@ -87,6 +87,7 @@ def _scatter_chunk(
     *,
     scale: int,
     hr_shape: tuple[int, int],
+    splat_sigma: float | None = None,
 ) -> tuple[np.ndarray, np.ndarray]:
     h_lr, w_lr = frames.shape[1:]
     h_hr, w_hr = hr_shape
@@ -97,6 +98,9 @@ def _scatter_chunk(
 
     base_y = scale * np.arange(h_lr, dtype=np.float64)[:, np.newaxis]
     base_x = scale * np.arange(w_lr, dtype=np.float64)[np.newaxis, :]
+    use_gaussian = splat_sigma is not None and float(splat_sigma) > 0.0
+    sigma = float(splat_sigma) if use_gaussian else 0.0
+    radius = int(np.ceil(3.0 * sigma)) if use_gaussian else 0
 
     for frame, (dx, dy), frame_weight in zip(frames, shifts, weights, strict=True):
         if frame_weight <= 0:
@@ -107,12 +111,44 @@ def _scatter_chunk(
             continue
         clean = np.where(finite, frame, 0.0)
 
-        y = base_y + scale * dy
-        x = base_x + scale * dx
-        y0 = np.floor(y).astype(np.int64)
-        x0 = np.floor(x).astype(np.int64)
-        fy = y - y0
-        fx = x - x0
+        y_center = base_y + scale * dy
+        x_center = base_x + scale * dx
+        y0 = np.floor(y_center).astype(np.int64)
+        x0 = np.floor(x_center).astype(np.int64)
+
+        if use_gaussian:
+            for oy in range(-radius, radius + 1):
+                yy = (y0 + oy)[:, 0]
+                valid_y = (yy >= 0) & (yy < h_hr)
+                if not np.any(valid_y):
+                    continue
+                dy_frac = yy[:, np.newaxis] - y_center
+                wy = np.exp(-0.5 * (dy_frac[:, 0] * dy_frac[:, 0]) / (sigma * sigma))
+                for ox in range(-radius, radius + 1):
+                    xx = (x0 + ox)[0, :]
+                    valid_x = (xx >= 0) & (xx < w_hr)
+                    if not np.any(valid_x):
+                        continue
+                    dx_frac = xx[np.newaxis, :] - x_center
+                    wx = np.exp(-0.5 * (dx_frac[0, :] * dx_frac[0, :]) / (sigma * sigma))
+
+                    rows = yy[valid_y]
+                    cols = xx[valid_x]
+                    finite_block = finite[np.ix_(valid_y, valid_x)]
+                    if not np.any(finite_block):
+                        continue
+                    clean_block = clean[np.ix_(valid_y, valid_x)]
+                    contribution_weight = frame_weight * wy[valid_y, np.newaxis] * wx[np.newaxis, valid_x]
+                    accum[np.ix_(rows, cols)] += np.where(
+                        finite_block,
+                        clean_block * contribution_weight,
+                        0.0,
+                    )
+                    norm[np.ix_(rows, cols)] += np.where(finite_block, contribution_weight, 0.0)
+            continue
+
+        fy = y_center - y0
+        fx = x_center - x0
 
         for oy in (0, 1):
             yy = y0 + oy
@@ -156,6 +192,7 @@ def reconstruct_saa(
     workers: int | None = None,
     n_jobs: int | None = None,
     fill_missing: bool = True,
+    splat_sigma: float | None = None,
     eps: float = 1e-12,
 ) -> np.ndarray:
     """Reconstruct a 2x HR reference-grid image with bilinear shift-and-add.
@@ -179,10 +216,14 @@ def reconstruct_saa(
     fill_missing:
         Fill uncovered HR pixels with a bicubic upsample of the weighted LR
         average. This only affects pixels with zero accumulated support.
+    splat_sigma:
+        Optional Gaussian splat width in HR pixels. ``None`` preserves the
+        original 2x2 bilinear splat exactly; positive values use a wider
+        Gaussian footprint to avoid 4x LR-periodic weight troughs.
     """
 
-    if scale != 2:
-        raise ValueError("EP06 SAA is defined for scale=2 only")
+    if scale not in (2, 4):
+        raise ValueError("EP06 SAA is defined for scale=2 or 4 only")
 
     frames_arr = _as_frames(frames)
     shifts_arr = _as_shifts(shifts, frames_arr.shape[0])
@@ -199,6 +240,7 @@ def reconstruct_saa(
             weights_arr,
             scale=scale,
             hr_shape=hr_shape,
+            splat_sigma=splat_sigma,
         )
     else:
         accum = np.zeros(hr_shape, dtype=np.float64)
@@ -212,6 +254,7 @@ def reconstruct_saa(
                     weights_arr[start:stop],
                     scale=scale,
                     hr_shape=hr_shape,
+                    splat_sigma=splat_sigma,
                 )
                 for start, stop in _ranges(frames_arr.shape[0], n_workers)
             ]
@@ -237,6 +280,7 @@ def saa_uniform(
     scale: int = 2,
     workers: int | None = None,
     n_jobs: int | None = None,
+    splat_sigma: float | None = None,
 ) -> np.ndarray:
     """Uniform-weight SAA reconstruction."""
 
@@ -247,6 +291,7 @@ def saa_uniform(
         scale=scale,
         workers=workers,
         n_jobs=n_jobs,
+        splat_sigma=splat_sigma,
     )
 
 
@@ -258,6 +303,7 @@ def saa_weighted(
     scale: int = 2,
     workers: int | None = None,
     n_jobs: int | None = None,
+    splat_sigma: float | None = None,
 ) -> np.ndarray:
     """Quality-weighted SAA reconstruction."""
 
@@ -268,6 +314,7 @@ def saa_weighted(
         scale=scale,
         workers=workers,
         n_jobs=n_jobs,
+        splat_sigma=splat_sigma,
     )
 
 

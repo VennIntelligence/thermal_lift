@@ -79,3 +79,35 @@ def test_saa_weighted_downweights_noisy_frames() -> None:
     assert weighted.shape == hr.shape
     assert np.isfinite(weighted).all()
     assert _psnr(hr, weighted) >= _psnr(hr, uniform) + 0.5
+
+
+def test_saa_default_splat_sigma_preserves_bilinear_path() -> None:
+    rng = np.random.default_rng(11)
+    frames = rng.normal(size=(5, 6, 7))
+    shifts = rng.uniform(-0.35, 0.35, size=(5, 2))
+    weights = rng.uniform(0.2, 1.0, size=5)
+
+    implicit = reconstruct_saa(frames, shifts, weights=weights, scale=4, fill_missing=False, workers=1)
+    explicit = reconstruct_saa(
+        frames,
+        shifts,
+        weights=weights,
+        scale=4,
+        fill_missing=False,
+        workers=1,
+        splat_sigma=None,
+    )
+
+    assert np.array_equal(implicit, explicit)
+
+
+def test_saa_gaussian_splat_fills_4x_weight_troughs() -> None:
+    frames = np.ones((1, 3, 3), dtype=float)
+    shifts = np.zeros((1, 2), dtype=float)
+
+    bilinear = reconstruct_saa(frames, shifts, scale=4, fill_missing=False, splat_sigma=None)
+    gaussian = reconstruct_saa(frames, shifts, scale=4, fill_missing=False, splat_sigma=1.5)
+
+    assert bilinear.shape == gaussian.shape == (12, 12)
+    assert np.count_nonzero(gaussian) > np.count_nonzero(bilinear) * 4
+    assert np.allclose(gaussian[gaussian > 0], 1.0)

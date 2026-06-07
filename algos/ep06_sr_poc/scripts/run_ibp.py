@@ -89,6 +89,7 @@ def adjoint_model(
     hr_shape: tuple[int, int],
     scale: int,
     psf_sigma: float,
+    splat_sigma: float | None = None,
 ) -> np.ndarray:
     result = call_if_available(
         [("common.forward_model", "adjoint")],
@@ -97,6 +98,7 @@ def adjoint_model(
         scale=scale,
         psf_sigma=psf_sigma,
         hr_shape=hr_shape,
+        splat_sigma=splat_sigma,
     )
     if result is not None:
         return np.asarray(result, dtype=np.float32)
@@ -124,6 +126,7 @@ def fallback_ibp(
     max_iter: int,
     beta: float,
     tol: float,
+    splat_sigma: float | None,
     track: str,
 ) -> tuple[np.ndarray, pd.DataFrame]:
     image = np.asarray(init_hr, dtype=np.float32).copy()
@@ -137,7 +140,14 @@ def fallback_ibp(
             predicted = forward_model(image, shift, scale=scale, psf_sigma=psf_sigma)
             residual = np.asarray(frame, dtype=np.float32) - predicted
             residual_energy += float(np.mean(residual**2))
-            correction += adjoint_model(residual, shift, hr_shape=image.shape, scale=scale, psf_sigma=psf_sigma)
+            correction += adjoint_model(
+                residual,
+                shift,
+                hr_shape=image.shape,
+                scale=scale,
+                psf_sigma=psf_sigma,
+                splat_sigma=splat_sigma,
+            )
         correction /= max(1, n_frames)
         update = beta * correction
         image += update
@@ -167,6 +177,7 @@ def run_ibp_algorithm(
     beta: float,
     tol: float,
     workers: int,
+    splat_sigma: float | None,
     track: str,
 ) -> tuple[np.ndarray, pd.DataFrame]:
     result = call_if_available(
@@ -186,6 +197,7 @@ def run_ibp_algorithm(
         beta=beta,
         tol=tol,
         workers=workers,
+        splat_sigma=splat_sigma,
         track=track,
     )
     if result is None:
@@ -198,6 +210,7 @@ def run_ibp_algorithm(
             max_iter=max_iter,
             beta=beta,
             tol=tol,
+            splat_sigma=splat_sigma,
             track=track,
         )
     if isinstance(result, dict):
@@ -221,13 +234,22 @@ def initial_image(
     scale: int,
     workers: int,
     use_bicubic: bool,
+    splat_sigma: float | None = None,
 ) -> np.ndarray:
     path = output_dir / name
     if path.exists() and not use_bicubic:
         return np.load(path).astype(np.float32, copy=False)
     if use_bicubic:
         return bicubic_upsample(frames[len(frames) // 2], scale=scale)
-    return shift_and_add(frames, shifts, weights=weights, scale=scale, workers=workers, desc=f"init {name}")
+    return shift_and_add(
+        frames,
+        shifts,
+        weights=weights,
+        scale=scale,
+        workers=workers,
+        splat_sigma=splat_sigma,
+        desc=f"init {name}",
+    )
 
 
 def run_synthetic_validation(args: argparse.Namespace) -> dict[str, Any]:
@@ -238,7 +260,15 @@ def run_synthetic_validation(args: argparse.Namespace) -> dict[str, Any]:
         noise_sigma=args.synthetic_noise,
         seed=args.seed,
     )
-    init = shift_and_add(frames, shifts, weights=None, scale=args.scale, workers=args.workers, desc="synthetic IBP init")
+    init = shift_and_add(
+        frames,
+        shifts,
+        weights=None,
+        scale=args.scale,
+        workers=args.workers,
+        splat_sigma=args.splat_sigma,
+        desc="synthetic IBP init",
+    )
     recon, convergence = run_ibp_algorithm(
         frames,
         shifts,
@@ -249,6 +279,7 @@ def run_synthetic_validation(args: argparse.Namespace) -> dict[str, Any]:
         beta=args.beta,
         tol=args.tol,
         workers=args.workers,
+        splat_sigma=args.splat_sigma,
         track="synthetic",
     )
     return {
@@ -270,6 +301,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "output" / "ep06_sr_poc")
     parser.add_argument("--alignment-method", default="contour_refined", choices=["contour_refined", "ncc_init", "data_driven_contour_refined", "data_driven_ncc_init"])
     parser.add_argument("--scale", type=int, default=2)
+    parser.add_argument("--splat-sigma", type=float, default=None, help="Optional Gaussian adjoint/SAA-init splat sigma in HR pixels.")
     parser.add_argument("--highpass-sigma", type=float, default=5.0)
     parser.add_argument("--psf-sigma", type=float, default=1.0)
     parser.add_argument("--max-iter", type=int, default=8)
@@ -287,8 +319,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     args.output_dir = args.output_dir.resolve()
-    if args.scale != 2:
-        raise ValueError("EP06 is a 2x contour-level POC; keep --scale 2.")
+    if args.scale not in (2, 4):
+        raise ValueError("EP06 is a 2x/4x contour-level POC; keep --scale 2 or 4.")
     start = time.perf_counter()
     args.output_dir.mkdir(parents=True, exist_ok=True)
 
@@ -307,6 +339,7 @@ def main() -> None:
         scale=args.scale,
         workers=args.workers,
         use_bicubic=args.bicubic_init,
+        splat_sigma=args.splat_sigma,
     )
     init_raw = initial_image(
         args.output_dir,
@@ -317,6 +350,7 @@ def main() -> None:
         scale=args.scale,
         workers=args.workers,
         use_bicubic=args.bicubic_init,
+        splat_sigma=args.splat_sigma,
     )
 
     ibp_highpass, conv_highpass = run_ibp_algorithm(
@@ -329,6 +363,7 @@ def main() -> None:
         beta=args.beta,
         tol=args.tol,
         workers=args.workers,
+        splat_sigma=args.splat_sigma,
         track="highpass",
     )
     ibp_raw, conv_raw = run_ibp_algorithm(
@@ -341,6 +376,7 @@ def main() -> None:
         beta=args.beta,
         tol=args.tol,
         workers=args.workers,
+        splat_sigma=args.splat_sigma,
         track="raw",
     )
     np.save(args.output_dir / "ibp_highpass.npy", ibp_highpass)
@@ -355,6 +391,7 @@ def main() -> None:
             "shift_convention": "EP05 LR-to-reference shifts passed directly; forward prediction applies inverse shift internally.",
             "max_iter_real": int(args.max_iter),
             "psf_sigma": float(args.psf_sigma),
+            "splat_sigma_hr_px": None if args.splat_sigma is None else float(args.splat_sigma),
             "elapsed_sec": float(time.perf_counter() - start),
         }
     )
