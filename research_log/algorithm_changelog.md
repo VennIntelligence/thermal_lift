@@ -8,6 +8,46 @@
 
 ## 变更记录
 
+### [ACL-014] 2026-06-10 — 修复 EP12 4x 增强后 drizzle/coverage 错位并默认启用 burst augmentation
+
+**问题诊断**:
+- EP12 Dataset 在执行 flip/rot90 后，只同步变换了 `obs_features` / `hr_target` / `hr_edge`，但 loss 使用的 `drizzle_mean` / `coverage` 仍来自未增强的 `obs_drz_patch`。这会让 coverage 加权 HF/NLL 和 forward consistency 在大部分增强 patch 上使用错位权重与观测约束。
+- `_crop_origin()` 只按 `scale / drizzle_scale = 2` 对齐，导致 `y % 4 == 2` 或 `x % 4 == 2` 时 1x 上下文通道相对 4x target 偏移 2 HR px，即 0.5 LR px。
+- EP12 重训若继续默认 `burst_augment=False`，会固定在单一 detector-axis coverage 图上训练，不能覆盖 M1 暴露出的 detector 轴相位覆盖坍缩风险。
+
+**修改内容**:
+1. `algos/ep12_4x_sr/src/sr4x/dataset.py`: `drizzle_mean` / `coverage` 改为从增强后的 drizzle 特征通道切片得到；普通路径和 `defer_1x_upsample` 路径均使用同一几何变换。
+2. `dataset.py`: `_crop_origin()` 改为按完整 `self.scale` 对齐，保证 drizzle crop 与 1x context crop 都落在整数源像素边界。
+3. `algos/ep12_4x_sr/src/sr4x/config.py`: `TrainingConfig.burst_augment` 默认改为 `True`，CLI 改为 `--burst-augment/--no-burst-augment`，保留 legacy fixed-drizzle pool 的关闭入口。
+4. 新增 dataset/config 回归测试，分别锁定增强后 loss 辅助通道同步、crop 原点 4x 对齐和 legacy 关闭开关。
+5. 更新 EP12 训练文档与 benchmark README，明确 4x 只作为学习型正则化/轮廓定位网格，采纳必须通过 M4 MAP-TV 与 EP07 2x x2up gate。
+
+**预期效果**:
+- 消除 EP12 训练中的系统性错位梯度，尤其是 forward consistency 用翻转/旋转后的预测去解释未翻转/未旋转观测的问题。
+- 1x 上下文、2x drizzle 和 4x target 在 patch crop 上保持整数网格一致。
+- 后续 4x 重训默认启用相位/帧子集扰动，降低对单一覆盖图的过拟合风险。
+- 风险: 默认 burst augmentation 要求训练池包含 `lr_burst.npy` 和 `shifts.npy`；旧预计算池必须显式传 `--no-burst-augment`。
+
+**推荐参数**:
+
+```bash
+cd algos/ep12_4x_sr
+CUDA_VISIBLE_DEVICES=0 uv run python -m sr4x.train \
+  --training-pool-dir ../../data/synthetic/training_pool_4x_aa_2000 \
+  --output-dir outputs/ep12_hybrid_v2_guarded \
+  --scale 4 \
+  --drizzle-scale 2 \
+  --burst-augment
+```
+
+**训练结果**:
+- 代码验证: `cd algos/ep12_4x_sr && uv run pytest -q` → 13 passed。
+- 真实重训结果: _(EP12 Hybrid v2 训练后填写)_
+
+**涉及文件**: `algos/ep12_4x_sr/src/sr4x/dataset.py`, `algos/ep12_4x_sr/src/sr4x/config.py`, `algos/ep12_4x_sr/tests/test_dataset.py`, `algos/ep12_4x_sr/tests/test_config.py`, `algos/ep12_4x_sr/README.md`, `algos/ep12_4x_sr/run_training.md`, `algos/ep12_4x_sr/scripts/run_training.md`, `research_log/episodes/ep12_4x_benchmark/README.md`
+
+---
+
 ### [ACL-013] 2026-06-10 — 4x v8 AA 训练池入口统一与 EP12 soft mask 接入
 
 **问题诊断**:

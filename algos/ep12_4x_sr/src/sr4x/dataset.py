@@ -424,15 +424,15 @@ class ThermalSR4xDataset(Dataset[dict[str, Any]]):
         if self.patch_size > rows or self.patch_size > cols:
             raise ValueError(f"patch_size={self.patch_size} larger than scene shape {shape}")
         rng = np.random.default_rng(self.seed + int(index) + self._epoch * len(self))
-        model_up = self.scale // self.drizzle_scale
         max_y = rows - self.patch_size
         max_x = cols - self.patch_size
         y = int(rng.integers(0, max_y + 1)) if max_y > 0 else 0
         x = int(rng.integers(0, max_x + 1)) if max_x > 0 else 0
-        # Align to drizzle grid for clean integer division
-        if model_up > 1:
-            y = (y // model_up) * model_up
-            x = (x // model_up) * model_up
+        # Align to the full SR scale so both drizzle and 1x context crops
+        # map to integer source pixels.
+        if self.scale > 1:
+            y = (y // self.scale) * self.scale
+            x = (x // self.scale) * self.scale
         return y, x
 
     def _augment(
@@ -496,7 +496,7 @@ class ThermalSR4xDataset(Dataset[dict[str, Any]]):
         target = scene["hr_target"]
         edge = scene["hr_edge"]
 
-        # Crop origin at HR (4x) grid; aligned to drizzle grid
+        # Crop origin at HR grid; aligned to the full SR scale.
         y, x = self._crop_origin(index, tuple(map(int, target.shape)))
         p = self.patch_size
         model_up = self.scale // self.drizzle_scale
@@ -534,6 +534,7 @@ class ThermalSR4xDataset(Dataset[dict[str, Any]]):
                 edge_patch,
                 aug_rng,
             )
+            obs_drz_loss_patch = obs_hr_patch[:2]
             sample = {
                 "obs_features_hr": torch.from_numpy(obs_hr_patch.astype(np.float32, copy=False)),
                 "obs_features_1x_lr": torch.from_numpy(obs_1x_crop.astype(np.float32, copy=False)),
@@ -547,6 +548,7 @@ class ThermalSR4xDataset(Dataset[dict[str, Any]]):
             parts = [*drz_parts, obs_1x_up_patch]
             obs_patch = np.concatenate(parts, axis=0).astype(np.float32, copy=False)
             obs_patch, target_patch, edge_patch = self._augment(obs_patch, target_patch, edge_patch, aug_rng)
+            obs_drz_loss_patch = obs_patch[:2]
             sample = {
                 "obs_features": torch.from_numpy(obs_patch.astype(np.float32, copy=False)),
             }
@@ -554,8 +556,8 @@ class ThermalSR4xDataset(Dataset[dict[str, Any]]):
         sample.update({
             "hr_target": torch.from_numpy(target_patch[None, :, :].astype(np.float32, copy=False)),
             "hr_edge": torch.from_numpy(edge_patch[None, :, :].astype(np.float32, copy=False)),
-            "drizzle_mean": torch.from_numpy(obs_drz_patch[0:1].astype(np.float32, copy=False)),
-            "coverage": torch.from_numpy(obs_drz_patch[1:2].astype(np.float32, copy=False)),
+            "drizzle_mean": torch.from_numpy(obs_drz_loss_patch[0:1].astype(np.float32, copy=False)),
+            "coverage": torch.from_numpy(obs_drz_loss_patch[1:2].astype(np.float32, copy=False)),
         })
 
         if self.return_metadata:

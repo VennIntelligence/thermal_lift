@@ -56,7 +56,7 @@ class TrainingConfig:
     resume_from: str = ""
     include_multiscale: bool = False
     defer_1x_upsample: bool = False
-    burst_augment: bool = False
+    burst_augment: bool = True
     burst_keep_min: float = 0.6
     burst_keep_max: float = 1.0
     min_burst_frames: int = 30
@@ -240,7 +240,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=TrainingConfig.defer_1x_upsample,
         help="Return 1x feature patches separately and upsample them on GPU in the training loop.",
     )
-    parser.add_argument("--burst-augment", action="store_true", default=TrainingConfig.burst_augment)
+    parser.add_argument("--burst-augment", action=argparse.BooleanOptionalAction, default=TrainingConfig.burst_augment)
     parser.add_argument("--burst-keep-min", type=float, default=TrainingConfig.burst_keep_min)
     parser.add_argument("--burst-keep-max", type=float, default=TrainingConfig.burst_keep_max)
     parser.add_argument("--min-burst-frames", type=int, default=TrainingConfig.min_burst_frames)

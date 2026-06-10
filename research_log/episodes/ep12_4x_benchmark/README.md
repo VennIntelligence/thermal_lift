@@ -24,6 +24,18 @@ scatter-add drizzle mean on the real 248 clean main-session frames.
 Contour-level visual benchmark only. Checkpoint is synthetic-pretrained at step 2000;
 real-data gains carry domain-gap risk. 3x is display zoom; reconstruction grid is 4x.
 
+After M1-M4 and the EP07x2up vs EP12 four-arm gate, 4x is no longer treated as
+evidence for recoverable 10-14 um information. The only acceptable 4x claim is
+learning-based regularization on a finer presentation grid: smoother contour
+localization with lower artifacts. A 4x checkpoint must simultaneously satisfy:
+
+1. FRC consistency at 20/16/14/12 um bands is not worse than the M4 MAP-TV anchor.
+2. Center zigzag FWHM / dip metrics are not worse than the M4 MAP-TV anchor.
+3. Artifact score and contour quality are not worse than EP07 2x x2up.
+
+If any gate fails, the 4x branch is not adopted; the delivery fallback is EP07
+2x plus MAP-TV post-processed upsampling.
+
 ## EP07 2x x2up vs EP12 4x Gate — 2026-06-10
 
 ### Inputs

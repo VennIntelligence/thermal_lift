@@ -36,10 +36,11 @@ cd /home/ujs/mycode/thermal_lift/algos/ep12_4x_sr
 
 CUDA_VISIBLE_DEVICES=0 uv run python -m sr4x.train \
     --training-pool-dir /home/ujs/mycode/thermal_lift/data/synthetic/training_pool_4x_aa_2000 \
-    --output-dir outputs/ep12_hybrid_v1 \
+    --output-dir outputs/ep12_hybrid_v2_guarded \
     --device cuda:0 \
     --scale 4 \
     --drizzle-scale 2 \
+    --burst-augment \
     --compile \
     --num-workers 8 \
     --batch-size 4 \
@@ -62,6 +63,18 @@ CUDA_VISIBLE_DEVICES=0 uv run python -m sr4x.train \
 | `--save-every` | 2000 | 每 N 步保存 checkpoint + 真实数据评估 |
 | `--amp` | on | 混合精度训练 |
 | `--defer-1x-upsample` | off | 将 1x→2x 上采样移到 GPU（减轻 CPU worker 负担） |
+| `--burst-augment` | on | 每个 epoch 从 `lr_burst.npy + shifts.npy` 重建扰动 drizzle，避免过拟合同一相位覆盖图 |
+| `--no-burst-augment` | off | 仅用于旧式预计算 drizzle 训练池的兼容开关 |
+
+## 4x 采纳门槛
+
+4x 当前只能解释为学习型正则化与更平滑的轮廓定位网格，不能解释为数据中存在新的 10–14 µm 可相干细节。重训后的 4x checkpoint 必须同时通过三组门槛：
+
+1. FRC 在 20/16/14/12 µm 频带的一致性不低于 M4 MAP-TV anchor。
+2. 中心 zigzag ROI 的 FWHM / dip 指标不低于 M4 MAP-TV anchor。
+3. artifact score 和主观轮廓质量不差于 EP07 2x x2up。
+
+任一门槛不过，4x 不进入交付主线；交付 fallback 保持为 EP07 2x + MAP-TV 后处理上采样。
 
 ### Worker 缓存参数（自动调优）
 
@@ -91,17 +104,18 @@ CUDA_VISIBLE_DEVICES=0 uv run python -m sr4x.train \
 ```bash
 uv run python -m sr4x.train \
     --training-pool-dir /home/ujs/mycode/thermal_lift/data/synthetic/training_pool_4x_aa_2000 \
-    --output-dir outputs/ep12_hybrid_v1 \
+    --output-dir outputs/ep12_hybrid_v2_guarded \
+    --burst-augment \
     --compile \
     --num-workers 8 \
-    --resume outputs/ep12_hybrid_v1/checkpoint_step_010000.pt
+    --resume outputs/ep12_hybrid_v2_guarded/checkpoint_step_010000.pt
 ```
 
 ## 监控训练
 
 ```bash
 # 启动 TensorBoard
-uv run tensorboard --logdir outputs/ep12_hybrid_v1/tb_logs --port 6006
+uv run tensorboard --logdir outputs/ep12_hybrid_v2_guarded/tb_logs --port 6006
 ```
 
 TensorBoard 中可看到：
