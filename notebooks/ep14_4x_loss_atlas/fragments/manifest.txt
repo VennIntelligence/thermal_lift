@@ -1,0 +1,12 @@
+01_setup.py
+02_training_pipeline.py
+03_tcforge_geometry.py
+04_lr_burst_and_fusion.py
+05_dataloader_and_unet.py
+06_loss_overview.py
+07_lf_and_temperature.py
+08_forward_consistency.py
+09_uncertainty_and_nll.py
+10_hf_coverage_weighting.py
+11_edge_loss.py
+12_total_recipe.py
