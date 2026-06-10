@@ -4,8 +4,12 @@
 # Route B 在 EP04 外轮廓 anchor 上沿法线提取 1D 温度剖面，拟合 Gaussian-convolved step function。筛选条件是外轮廓、温差大于 2.0°C、法线投影大于 0.5、拟合 R² 大于 0.95。
 
 # %%
-display(show_png("esf_sigma_histogram.png"))
+show_fig("esf_sigma_histogram.png")
 
+# %% [markdown]
+# Figure 2: ESF sigma distribution. Quality-gated edge-spread fits summarize apparent boundary widths across contour segments.
+
+# %%
 esf_fits = read_csv("esf_sigma_distribution.csv")
 if not esf_fits.empty:
     display(

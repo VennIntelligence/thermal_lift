@@ -11,20 +11,20 @@
 # uv run python algos/ep09_psf_calibration/scripts/run_esf_fitting.py
 # uv run python algos/ep09_psf_calibration/scripts/run_joint_estimation.py
 # uv run python algos/ep09_psf_calibration/scripts/summarize_calibration.py
+# uv run python scripts/build_ep09_cache.py
 # uv run python scripts/build_notebook.py notebooks/ep09_psf_calibration --execute
 # ```
 #
 # **边界**: 本 EP 的目标是校准 forward model 中的 Gaussian PSF sigma，并用它作为 4x SR 是否启动的前置门控。所有 sigma 默认以 LR detector pixel 为单位；写作 `HR px at 2x` 时才表示 2x 输出网格单位。
 
 # %%
-%matplotlib inline
-
 from pathlib import Path
-import json
 
 import pandas as pd
-from IPython.display import Image as NotebookImage
 from IPython.display import Markdown, display
+
+from thermal_core.ep09_cache import load_ep09_cache
+from thermal_core.notebook_cache import show_fig as _show_cached_fig
 
 PROJECT_ROOT = Path.cwd()
 while not (PROJECT_ROOT / "AGENTS.md").exists() and PROJECT_ROOT != PROJECT_ROOT.parent:
@@ -34,41 +34,37 @@ OUTPUT_DIR = PROJECT_ROOT / "output" / "ep09_psf_calibration"
 REPORT_DIR = PROJECT_ROOT / "reports" / "ep09_psf_calibration"
 CONFIG_PATH = PROJECT_ROOT / "configs" / "psf_calibration.json"
 
+cache = load_ep09_cache(project_root_path=PROJECT_ROOT, output_dir=OUTPUT_DIR)
 
-def read_json(name):
-    path = OUTPUT_DIR / name
-    if not path.exists():
-        print(f"Missing JSON: {path.relative_to(PROJECT_ROOT)}")
-        return {}
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def read_csv(name):
-    path = OUTPUT_DIR / name
-    if not path.exists():
-        print(f"Missing CSV: {path.relative_to(PROJECT_ROOT)}")
-        return pd.DataFrame()
-    return pd.read_csv(path)
+summary = cache.summary
+forward = cache.forward
+esf = cache.esf
+joint = cache.joint
+route_table = cache.route_table
 
 
-def show_png(name):
-    path = OUTPUT_DIR / name
-    if not path.exists():
-        print(f"Missing figure: {path.relative_to(PROJECT_ROOT)}")
-        return None
-    return NotebookImage(filename=str(path))
+def read_json(name: str) -> dict:
+    return cache.read_json(name)
 
 
-summary = read_json("calibration_summary.json")
-forward = read_json("sigma_forward.json")
-esf = read_json("sigma_esf.json")
-joint = read_json("sigma_joint.json")
-route_table = read_csv("route_sigma_summary.csv")
+def read_csv(name: str) -> pd.DataFrame:
+    return cache.read_csv(name)
+
+
+def show_fig(name: str) -> None:
+    """Display a cached EP09 figure (produced by algo scripts, validated by cache builder)."""
+    _show_cached_fig(
+        cache.output_dir,
+        name,
+        rebuild_command="uv run python scripts/build_ep09_cache.py",
+    )
+
 
 print(f"Project root: {PROJECT_ROOT}")
 print(f"EP09 output: {OUTPUT_DIR.relative_to(PROJECT_ROOT)}")
 print(f"Report: {(REPORT_DIR / 'psf_calibration_report.md').relative_to(PROJECT_ROOT)}")
 print(f"Config: {CONFIG_PATH.relative_to(PROJECT_ROOT)}")
+print(f"Cache rebuild: uv run python scripts/build_ep09_cache.py")
 if summary:
     print(f"Final sigma: {summary['final_sigma_lr_px']:.4f} LR px")
     print(f"4x verdict: {summary['four_x_verdict']}")

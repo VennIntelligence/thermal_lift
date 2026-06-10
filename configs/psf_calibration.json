@@ -1,8 +1,8 @@
 {
   "calibration_episode": "EP09_psf_calibration",
   "confidence_interval_95_lr_px": [
-    0.13,
-    0.20414762530761552
+    0.20844854361442405,
+    0.24024338515459948
   ],
   "four_x_verdict": "not_cleared_inconsistent_routes",
   "four_x_verdict_text": "4x is not cleared because the independent calibration routes disagree beyond the EP09 gate.",
@@ -10,9 +10,9 @@
     "Sigma is reported in LR detector pixels unless a field name says HR.",
     "Route A is the primary estimate; routes B/C are cross-checks and gate diagnostics."
   ],
-  "psf_sigma_hr_px_at_2x": 0.35929899376213914,
-  "psf_sigma_lr_px": 0.17964949688106957,
+  "psf_sigma_hr_px_at_2x": 0.45144300017693384,
+  "psf_sigma_lr_px": 0.22572150008846692,
   "status": "provisional_needs_review",
   "summary_file": "output/ep09_psf_calibration/calibration_summary.json",
-  "updated_at_utc": "2026-05-19T15:51:12.503024+00:00"
+  "updated_at_utc": "2026-06-04T13:29:52.433097+00:00"
 }

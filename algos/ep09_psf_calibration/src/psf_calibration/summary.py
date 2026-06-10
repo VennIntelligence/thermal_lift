@@ -239,6 +239,8 @@ def _write_report_markdown(
     joint: dict[str, Any] | None,
 ) -> None:
     forward_diag = forward.get("fine_diagnostic", {}) if forward else {}
+    forward_n = int(forward.get("n_frames", 0)) if forward else 0
+    forward_hr_input = forward.get("hr_input", "missing") if forward else "missing"
     lines = [
         "# EP09 — PSF Sigma Calibration Report",
         "",
@@ -262,9 +264,11 @@ def _write_report_markdown(
         "## Route A: Forward-Model Residual",
         "",
         "Route A uses the EP06 MAP-TV 2x highpass reconstruction as a pseudo-HR scene and sweeps sigma in the EP06 forward model. "
-        "The score is the cropped LR highpass residual against the 255 main-session observations, split by acquisition order into train and validation frames.",
+        f"The score is the cropped LR highpass residual against the {forward_n} clean main-session observations loaded from the EP06 SR metadata filter, "
+        "split by acquisition order into train and validation frames.",
         "",
         f"- Sigma: **{_fmt(forward['sigma_forward_lr_px'], 4) if forward else 'missing'} LR px**",
+        f"- EP06 pseudo-HR input: `{forward_hr_input}`",
         f"- Train/validation sigma delta: **{_fmt(forward.get('train_val_abs_delta_lr_px', np.nan) if forward else np.nan, 4)} px**",
         f"- Relative residual depth vs best edge: **{_fmt(forward_diag.get('relative_depth_vs_best_edge', np.nan), 4)}**",
         f"- Minimum at grid edge: **{forward_diag.get('minimum_at_grid_edge', 'missing')}**",

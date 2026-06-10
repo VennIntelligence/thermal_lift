@@ -9,8 +9,26 @@
   "pixel_size_um": 10.0,
   "spatial_resolution_um": 20.0,
   "forward_mode": "exact_ep06_point",
-  "psf_sigma_lr_px": 0.5,
+  "psf_profile": "ep09_provisional",
+  "psf_sigma_lr_px": 0.22572150008846692,
+  "psf_profiles": {
+    "ep09_provisional": {
+      "source": "configs/psf_calibration.json",
+      "psf_sigma_lr_px": 0.22572150008846692,
+      "status": "provisional_needs_review",
+      "role": "default synthetic PSF aligned to EP09 Route A forward residual"
+    },
+    "legacy_upper": {
+      "source": "legacy_ep07_default",
+      "psf_sigma_lr_px": 0.5,
+      "status": "stress_legacy_upper",
+      "role": "stress / backwards-compatibility blur upper setting"
+    }
+  },
   "noise_sigma_c": 0.0724,
+  "noise_model": "mixed",
+  "fpn_sigma_px": 5.0,
+  "stripe_sigma_c": 0.015,
   "highpass_sigma_lr_px": 5.0,
   "highpass_mode": "nearest",
   "T_bg_c": 21.0,

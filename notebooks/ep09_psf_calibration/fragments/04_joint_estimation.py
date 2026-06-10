@@ -1,11 +1,15 @@
 # %% [markdown]
 # ## Route C — 多帧联合 PSF 估计
 #
-# Route C 对每个候选 sigma 用 48 个 train frames 跑 20 步短预算 MAP-TV，再用 32 个 hold-out frames 计算 forward residual。它不依赖 EP06 固定 HR，但预算比完整 EP06 小，因此作为交叉验证而非主估计。
+# Route C 从同一 248 clean-frame pool 中抽取固定子集：对每个候选 sigma 用 48 个 train frames 跑 20 步短预算 MAP-TV，再用 32 个 hold-out frames 计算 forward residual。它不依赖 EP06 固定 HR，但预算比完整 EP06 主 baseline 小，因此作为交叉验证而非主估计。
 
 # %%
-display(show_png("joint_sigma_curve.png"))
+show_fig("joint_sigma_curve.png")
 
+# %% [markdown]
+# Figure 3: Joint PSF estimation curve. Short-budget MAP-TV reconstructions are scored by hold-out forward residual across sigma values.
+
+# %%
 joint_sweep = read_csv("joint_sigma_sweep.csv")
 if not joint_sweep.empty:
     display(

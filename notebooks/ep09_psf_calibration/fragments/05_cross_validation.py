@@ -31,6 +31,6 @@ if summary:
 # >
 # > **怎么看**: `Route consistency` 是 P0 门控，必须通过才可称为精确标定。`Forward residual clear minimum` 不只看是否有数学最小值，还要求 residual depth 足够明显。
 # >
-# > **异常是否正常**: 本次 CI width 虽然小于 0.10 px，但 route spread 达到约 1.03 px；这表示 bootstrap 只量化了 Route A 内部不确定性，没有覆盖模型系统误差。
+# > **异常是否正常**: 本次 CI width 约 0.032 px，小于 0.10 px；Route A forward curve 也清除单路线门控。但 route spread 仍约 1.010 px，表示 bootstrap 只量化了 Route A 内部不确定性，没有覆盖模型系统误差。
 # >
 # > **核心发现**: EP09 没有清除 4x 启动门控。当前最稳妥结论是：2x 工作继续；4x/PnP 不应作为物理可行主线启动，除非后续先解释 ESF 与 forward effective sigma 的冲突。

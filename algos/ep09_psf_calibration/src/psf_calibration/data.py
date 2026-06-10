@@ -23,7 +23,6 @@ DEFAULT_ALIGNMENT_CSV = PROJECT_ROOT / "output" / "ep05_contour_alignment" / "co
 DEFAULT_CONTOUR_SEGMENTS_CSV = PROJECT_ROOT / "output" / "ep04_global_validation" / "inputs" / "contour_segments.csv"
 DEFAULT_EP06_HR_CANDIDATES = [
     PROJECT_ROOT / "output" / "ep06_sr_poc" / "map_tv_highpass.npy",
-    PROJECT_ROOT / "output" / "ep06_sr_poc_data_driven_align_sweep" / "default_contour_refined_psf05" / "map_tv_highpass.npy",
     PROJECT_ROOT / "output" / "ep06_sr_poc" / "map_tv" / "hr_highpass.npy",
     PROJECT_ROOT / "output" / "ep08_inr_sr" / "ep06_patch_baseline" / "hr_image.npy",
 ]
