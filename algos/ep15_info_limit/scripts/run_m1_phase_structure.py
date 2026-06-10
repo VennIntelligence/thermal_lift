@@ -29,6 +29,8 @@ for path in (ALGO_ROOT / "src", EP06_SRC, PROJECT_ROOT / "core" / "src"):
     if text not in sys.path:
         sys.path.insert(0, text)
 
+from thermal_core.alignment_paths import default_contour_alignment_csv  # noqa: E402
+
 from common.alignment import load_alignment_shifts  # noqa: E402
 from common.data_loader import load_main_session_metadata  # noqa: E402
 from thermal_core.displacement import coordinate_to_shift  # noqa: E402
@@ -461,7 +463,7 @@ def decision_text(summary: pd.DataFrame, scale: int) -> str:
 def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--frame-audit-csv", type=Path, default=PROJECT_ROOT / "output" / "ep01_data_processing" / "frame_audit.csv")
-    parser.add_argument("--alignment-csv", type=Path, default=PROJECT_ROOT / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv")
+    parser.add_argument("--alignment-csv", type=Path, default=default_contour_alignment_csv(project_root_path=PROJECT_ROOT))
     parser.add_argument("--stage-config", type=Path, default=PROJECT_ROOT / "configs" / "stage_calibration.json")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "output" / "ep15_info_limit" / "m1_phase_structure")
     parser.add_argument("--scale", type=int, default=5)

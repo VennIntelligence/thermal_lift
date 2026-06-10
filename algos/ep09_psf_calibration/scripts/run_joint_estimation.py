@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from thermal_core.alignment_paths import default_contour_alignment_csv
 import argparse
 import sys
 from pathlib import Path
@@ -40,7 +41,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=OUTPUT_DIR)
     parser.add_argument("--data-dir", type=Path, default=PROJECT_ROOT / "data" / "data_raw" / "infrared_avi")
     parser.add_argument("--frame-audit-csv", type=Path, default=PROJECT_ROOT / "output" / "ep01_data_processing" / "frame_audit.csv")
-    parser.add_argument("--alignment-csv", type=Path, default=PROJECT_ROOT / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv")
+    parser.add_argument("--alignment-csv", type=Path, default=default_contour_alignment_csv(project_root_path=PROJECT_ROOT))
     parser.add_argument("--alignment-method", default="contour_refined")
     parser.add_argument("--highpass-sigma", type=float, default=5.0)
     parser.add_argument("--sigmas", type=parse_sigmas, default=None)

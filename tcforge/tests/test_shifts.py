@@ -37,9 +37,9 @@ def test_ideal_phase_grid_uses_quarter_phase_default_and_records_convention() ->
 
 def test_real_profile_can_be_trimmed_for_small_demo_if_source_exists() -> None:
     project_root = Path(__file__).resolve().parents[2]
-    source = project_root / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv"
+    source = shifts_mod.default_contour_alignment_csv(project_root=project_root)
     if not source.exists():
-        pytest.skip("EP05 output shift CSV is not available")
+        pytest.skip("Git-tracked contour alignment CSV is not available")
 
     shifts, metadata = shifts_mod.load_shift_profile("real_default_contour_refined", n_frames=4)
 

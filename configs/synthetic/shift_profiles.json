@@ -5,7 +5,7 @@
   "profiles": {
     "real_default_contour_refined": {
       "kind": "csv_columns",
-      "source_path": "output/ep05_contour_alignment/contour_alignment_results.csv",
+      "source_path": "configs/alignment/contour_alignment_results.csv",
       "columns": ["refined_align_dx_px", "refined_align_dy_px"],
       "sort_by": ["acquisition_order", "frame_index"],
       "filter_success_column": "success",
@@ -13,7 +13,7 @@
     },
     "real_ncc_init": {
       "kind": "csv_columns",
-      "source_path": "output/ep05_contour_alignment/contour_alignment_results.csv",
+      "source_path": "configs/alignment/contour_alignment_results.csv",
       "columns": ["init_align_dx_px", "init_align_dy_px"],
       "sort_by": ["acquisition_order", "frame_index"],
       "filter_success_column": "success",

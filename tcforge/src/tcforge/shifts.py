@@ -11,7 +11,8 @@ from typing import Any, Literal
 import numpy as np
 
 SHIFT_CONVENTION = "LR-to-reference alignment shift"
-DEFAULT_REAL_SHIFT_RELATIVE_PATH = Path("output") / "ep05_contour_alignment" / "contour_alignment_results.csv"
+PATHS_CONFIG_REL = Path("configs") / "alignment" / "paths.json"
+CONTOUR_ALIGNMENT_RESULTS_KEY = "contour_alignment_results_csv"
 ShiftProfileName = Literal["real_default_contour_refined", "ideal_phase_grid"]
 
 
@@ -19,26 +20,35 @@ def _project_root() -> Path:
     return Path(__file__).resolve().parents[3]
 
 
-def _default_real_shift_csv() -> Path:
+def _load_alignment_paths_config(*, project_root: Path | None = None) -> dict[str, Any]:
+    root = project_root or _project_root()
+    with (root / PATHS_CONFIG_REL).open("r", encoding="utf-8") as f:
+        payload = json.load(f)
+    if not isinstance(payload, dict):
+        raise ValueError(f"{PATHS_CONFIG_REL} must contain a JSON object")
+    return payload
+
+
+def _resolve_repo_path(relative: str | Path, *, project_root: Path | None = None) -> Path:
+    root = project_root or _project_root()
+    path = Path(relative).expanduser()
+    if path.is_absolute():
+        return path.resolve()
+    return (root / path).resolve()
+
+
+def default_contour_alignment_csv(*, project_root: Path | None = None) -> Path:
     env_path = os.environ.get("TCFORGE_REAL_SHIFT_CSV")
     if env_path:
-        return Path(env_path).expanduser()
+        return Path(env_path).expanduser().resolve()
+    cfg = _load_alignment_paths_config(project_root=project_root)
+    if CONTOUR_ALIGNMENT_RESULTS_KEY not in cfg:
+        raise KeyError(f"{PATHS_CONFIG_REL} missing key: {CONTOUR_ALIGNMENT_RESULTS_KEY}")
+    return _resolve_repo_path(str(cfg[CONTOUR_ALIGNMENT_RESULTS_KEY]), project_root=project_root)
 
-    candidates = [
-        Path.cwd() / DEFAULT_REAL_SHIFT_RELATIVE_PATH,
-        _project_root() / DEFAULT_REAL_SHIFT_RELATIVE_PATH,
-    ]
-    seen: set[Path] = set()
-    unique = []
-    for candidate in candidates:
-        resolved = candidate.resolve()
-        if resolved not in seen:
-            seen.add(resolved)
-            unique.append(candidate)
-    for candidate in unique:
-        if candidate.exists():
-            return candidate
-    return unique[0]
+
+def _default_real_shift_csv() -> Path:
+    return default_contour_alignment_csv()
 
 
 def _validate_shifts(shifts: np.ndarray, *, n_frames: int | None = None) -> np.ndarray:
@@ -110,7 +120,7 @@ def load_real_default_contour_refined(
     if not csv_path.exists():
         raise FileNotFoundError(
             "real_default_contour_refined CSV not found: "
-            f"{csv_path}. Pass path=... or set TCFORGE_REAL_SHIFT_CSV for installed-package use."
+            f"{csv_path}. Pass path=..., set TCFORGE_REAL_SHIFT_CSV, or update {PATHS_CONFIG_REL}."
         )
     with csv_path.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)

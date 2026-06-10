@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from thermal_core.alignment_paths import default_contour_alignment_csv
 import argparse
 from pathlib import Path
 
@@ -44,7 +45,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--alignment-csv",
         type=Path,
-        default=root / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv",
+        default=default_contour_alignment_csv(project_root_path=root),
     )
     parser.add_argument(
         "--frame-audit-csv",

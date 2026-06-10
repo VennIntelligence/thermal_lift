@@ -10,4 +10,8 @@ dependencies = [
     "pandas>=3.0.3",
     "scipy>=1.17.1",
     "tqdm>=4.68.2",
+    "thermal-core",
 ]
+
+[tool.uv.sources]
+thermal-core = { path = "../../core", editable = true }

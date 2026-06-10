@@ -37,6 +37,8 @@ for path in (
     if text not in sys.path:
         sys.path.insert(0, text)
 
+from thermal_core.alignment_paths import default_contour_alignment_csv  # noqa: E402
+
 from common.alignment import load_alignment_shifts  # noqa: E402
 from common.data_loader import (  # noqa: E402
     bicubic_upsample,
@@ -54,7 +56,7 @@ from thermal_core.plotting import COLORMAPS, FIGURE_SIZES, savefig_academic, set
 OUTPUT_DIR = PROJECT_ROOT / "output" / "ep10_tgv_sr"
 DATA_DIR = PROJECT_ROOT / "data" / "data_raw" / "infrared_avi"
 FRAME_AUDIT_CSV = PROJECT_ROOT / "output" / "ep01_data_processing" / "frame_audit.csv"
-ALIGNMENT_CSV = PROJECT_ROOT / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv"
+ALIGNMENT_CSV = default_contour_alignment_csv(project_root_path=PROJECT_ROOT)
 
 RESULT_COLUMNS = [
     "method",

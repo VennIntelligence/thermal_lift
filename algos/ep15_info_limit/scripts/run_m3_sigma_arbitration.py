@@ -35,6 +35,8 @@ for path in (ALGO_ROOT / "src", EP06_SRC, EP09_SRC, PROJECT_ROOT / "core" / "src
     if text not in sys.path:
         sys.path.insert(0, text)
 
+from thermal_core.alignment_paths import default_contour_alignment_csv  # noqa: E402
+
 from common.alignment import load_alignment_shifts  # noqa: E402
 from common.data_loader import load_main_session_frames, offset_correction  # noqa: E402
 from psf_calibration.esf_fitting import extract_normal_profile, fit_esf_profile  # noqa: E402
@@ -708,7 +710,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=PROJECT_ROOT / "data" / "data_raw" / "infrared_avi")
     parser.add_argument("--frame-audit-csv", type=Path, default=PROJECT_ROOT / "output" / "ep01_data_processing" / "frame_audit.csv")
-    parser.add_argument("--alignment-csv", type=Path, default=PROJECT_ROOT / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv")
+    parser.add_argument("--alignment-csv", type=Path, default=default_contour_alignment_csv(project_root_path=PROJECT_ROOT))
     parser.add_argument("--contour-segments-csv", type=Path, default=PROJECT_ROOT / "output" / "ep04_global_validation" / "inputs" / "contour_segments.csv")
     parser.add_argument("--m1-grid-decision-json", type=Path, default=PROJECT_ROOT / "output" / "ep15_info_limit" / "m1_phase_structure" / "grid_decision.json")
     parser.add_argument("--m2-frc-curve-csv", type=Path, default=PROJECT_ROOT / "output" / "ep15_info_limit" / "m2_frc" / "frc_curve.csv")

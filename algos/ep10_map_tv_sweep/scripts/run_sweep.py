@@ -3,6 +3,7 @@
 
 from __future__ import annotations
 
+from thermal_core.alignment_paths import default_contour_alignment_csv
 import argparse
 import hashlib
 import json
@@ -279,7 +280,7 @@ def build_parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=PROJECT_ROOT / "data" / "data_raw" / "infrared_avi")
     parser.add_argument("--frame-audit-csv", type=Path, default=PROJECT_ROOT / "output" / "ep01_data_processing" / "frame_audit.csv")
-    parser.add_argument("--alignment-csv", type=Path, default=PROJECT_ROOT / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv")
+    parser.add_argument("--alignment-csv", type=Path, default=default_contour_alignment_csv(project_root_path=PROJECT_ROOT))
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "output" / "ep10_map_tv_sweep")
     parser.add_argument("--alignment-method", default="contour_refined")
     parser.add_argument("--lambda-grid", type=parse_float_grid, default=list(LAMBDA_GRID))

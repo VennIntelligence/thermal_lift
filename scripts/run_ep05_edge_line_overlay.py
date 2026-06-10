@@ -6,6 +6,7 @@ edge pixels from each frame; all non-edge pixels are rendered against white.
 
 from __future__ import annotations
 
+from thermal_core.alignment_paths import default_contour_alignment_csv
 import argparse
 import json
 from dataclasses import dataclass
@@ -284,7 +285,7 @@ def parse_args() -> argparse.Namespace:
     root = project_root()
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--frame-audit-csv", type=Path, default=root / "output" / "ep01_data_processing" / "frame_audit.csv")
-    parser.add_argument("--alignment-csv", type=Path, default=root / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv")
+    parser.add_argument("--alignment-csv", type=Path, default=default_contour_alignment_csv(project_root_path=root))
     parser.add_argument("--stage-config", type=Path, default=root / "configs" / "stage_calibration.json")
     parser.add_argument("--data-dir", type=Path, default=root / "data" / "data_raw" / "infrared_avi")
     parser.add_argument("--output-dir", type=Path, default=root / "output" / "ep05_overlay_alignment")

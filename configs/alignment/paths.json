@@ -1,0 +1,5 @@
+{
+  "schema_version": "0.1",
+  "description": "Git-tracked alignment artifacts used as defaults across TCForge synthetic generation and SR pipelines.",
+  "contour_alignment_results_csv": "configs/alignment/contour_alignment_results.csv"
+}

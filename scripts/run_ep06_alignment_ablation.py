@@ -10,6 +10,7 @@ alignment checks; pass ``--roi-size-lr 0`` for full-frame evaluation.
 
 from __future__ import annotations
 
+from thermal_core.alignment_paths import default_contour_alignment_csv
 import argparse
 import json
 import os
@@ -464,7 +465,7 @@ def parse_args() -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--data-dir", type=Path, default=PROJECT_ROOT / "data" / "data_raw" / "infrared_avi")
     parser.add_argument("--frame-audit-csv", type=Path, default=PROJECT_ROOT / "output" / "ep01_data_processing" / "frame_audit.csv")
-    parser.add_argument("--default-alignment-csv", type=Path, default=PROJECT_ROOT / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv")
+    parser.add_argument("--default-alignment-csv", type=Path, default=default_contour_alignment_csv(project_root_path=PROJECT_ROOT))
     parser.add_argument(
         "--tuned-alignment-csv",
         type=Path,

@@ -1,3 +1,4 @@
+from thermal_core.alignment_paths import default_contour_alignment_csv
 #!/usr/bin/env python3
 """Diagnose stage prior (old_stage_model) outliers using only standard library."""
 
@@ -20,7 +21,7 @@ def coordinate_to_shift_scalar(x_um, y_um, theta_deg, pixel_size_um):
 
 def main():
     root = project_root()
-    alignment_csv = root / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv"
+    alignment_csv = default_contour_alignment_csv(project_root_path=root)
     stage_config_json = root / "configs" / "stage_calibration.json"
     
     if not alignment_csv.exists():

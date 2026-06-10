@@ -14,12 +14,13 @@ bootstrap_project_paths()
 
 from common.alignment import load_alignment_shifts, load_alignment_table  # noqa: E402
 from common.data_loader import highpass_preprocess, load_main_session_frames, load_main_session_metadata  # noqa: E402
+from thermal_core.alignment_paths import default_contour_alignment_csv  # noqa: E402
 from thermal_core.io import load_frame  # noqa: E402
 
 
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data" / "data_raw" / "infrared_avi"
 DEFAULT_FRAME_AUDIT_CSV = PROJECT_ROOT / "output" / "ep01_data_processing" / "frame_audit.csv"
-DEFAULT_ALIGNMENT_CSV = PROJECT_ROOT / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv"
+DEFAULT_ALIGNMENT_CSV = default_contour_alignment_csv(project_root_path=PROJECT_ROOT)
 DEFAULT_CONTOUR_SEGMENTS_CSV = PROJECT_ROOT / "output" / "ep04_global_validation" / "inputs" / "contour_segments.csv"
 DEFAULT_EP06_HR_CANDIDATES = [
     PROJECT_ROOT / "output" / "ep06_sr_poc" / "map_tv_highpass.npy",

@@ -6,6 +6,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+from thermal_core.alignment_paths import default_contour_alignment_csv
 
 from .data_loader import DEFAULT_CLEAN_SR_FRAME_COUNT, DEFAULT_FRAME_AUDIT_PATH, load_main_session_metadata
 
@@ -14,7 +15,7 @@ PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_ALIGNMENT_SCORES_PATH = (
     PROJECT_ROOT / "output" / "ep05_alignment_sr_capacity" / "alignment_method_holdout_scores.csv"
 )
-DEFAULT_CONTOUR_ALIGNMENT_PATH = PROJECT_ROOT / "output" / "ep05_contour_alignment" / "contour_alignment_results.csv"
+DEFAULT_CONTOUR_ALIGNMENT_PATH = default_contour_alignment_csv(project_root_path=PROJECT_ROOT)
 
 _METHOD_ALIASES = {
     "ncc_init": "data_driven_ncc_init",

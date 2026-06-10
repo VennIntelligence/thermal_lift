@@ -5,9 +5,9 @@
 #
 # | Experiment | Alignment CSV | Method passed to scripts | Role |
 # |---|---|---|---|
-# | `default_contour_refined_psf05` | `output/ep05_contour_alignment/contour_alignment_results.csv` | `data_driven_contour_refined` | EP06 主线候选 |
+# | `default_contour_refined_psf05` | `configs/alignment/contour_alignment_results.csv` | `data_driven_contour_refined` | EP06 主线候选 |
 # | `tuned_contour_refined_psf05` | `output/ep05_alignment_tuning/full_r360_e93_rad100_s0125/contour_alignment_results.csv` | `data_driven_contour_refined` | EP05 Chamfer-tuned sensitivity check |
-# | `ncc_init_psf05` | `output/ep05_contour_alignment/contour_alignment_results.csv` | `data_driven_ncc_init` | NCC init / phase-prior control |
+# | `ncc_init_psf05` | `configs/alignment/contour_alignment_results.csv` | `data_driven_ncc_init` | NCC init / phase-prior control |
 #
 # MAP-TV 使用保守设置：`psf_sigma=0.5`、`max_iter=8`、`lambda_grid=0.0003,0.001,0.003,0.01`、`--no-fista`、并用 split-half + artifact/std penalty 选择 lambda。IBP 使用同一 `psf_sigma=0.5` 检查 forward model 对 alignment 的敏感性。
 
