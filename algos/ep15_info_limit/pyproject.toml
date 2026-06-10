@@ -1,0 +1,13 @@
+[project]
+name = "ep15-info-limit"
+version = "0.1.0"
+description = "EP15 first-principles information-limit measurements for Thermal Lift"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "matplotlib>=3.10.9",
+    "numpy>=2.4.6",
+    "pandas>=3.0.3",
+    "scipy>=1.17.1",
+    "tqdm>=4.68.2",
+]
