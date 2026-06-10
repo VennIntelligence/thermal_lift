@@ -314,7 +314,6 @@ def plot_alignment_summary(results: pd.DataFrame, output_dir: Path) -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("Data-driven align dx [px]")
     ax.set_ylabel("Data-driven align dy [px]")
-    ax.set_title("Contour-Refined Frame Alignment Shifts")
     cbar = fig.colorbar(ax.collections[0], ax=ax, fraction=0.046, pad=0.02)
     cbar.set_label("Acquisition order")
     savefig_academic(fig, output_dir / "contour_refined_alignment_shifts.png")
@@ -327,7 +326,6 @@ def plot_alignment_summary(results: pd.DataFrame, output_dir: Path) -> None:
     ]
     ax.boxplot(data, tick_labels=["before", "NCC init", "contour refined"], showfliers=False)
     ax.set_ylabel("Held-out contour Chamfer [px]")
-    ax.set_title("Data-Driven Contour Alignment Validation")
     savefig_academic(fig, output_dir / "contour_alignment_chamfer_validation.png")
 
     fig, ax = plt.subplots(figsize=FIGURE_SIZES["one_half_col"])
@@ -342,7 +340,6 @@ def plot_alignment_summary(results: pd.DataFrame, output_dir: Path) -> None:
     ax.axhline(0, color="#888888", linewidth=0.8)
     ax.set_xlabel("Acquisition order")
     ax.set_ylabel("Hold-out Chamfer improvement [%]")
-    ax.set_title("Contour Alignment Improvement Over Time")
     savefig_academic(fig, output_dir / "contour_alignment_improvement_timeline.png")
 
     coord = (
@@ -372,7 +369,6 @@ def plot_alignment_summary(results: pd.DataFrame, output_dir: Path) -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("Commanded X label [um]")
     ax.set_ylabel("Commanded Y label [um]")
-    ax.set_title("Data-Driven Alignment Vector Field by Coordinate Label")
     cbar = fig.colorbar(sc, ax=ax, fraction=0.046, pad=0.02)
     cbar.set_label("Shift norm [px]")
     savefig_academic(fig, output_dir / "data_driven_coordinate_shift_field.png")

@@ -1,6 +1,6 @@
 # EP05 — 2x Phase / Alignment Baseline
 
-> **目标**: 建立 255 帧主 session 的 2x contour-level SR 对齐与相位覆盖基线。
+> **目标**: 建立 EP01 `is_sr_usable=True` 248 帧 clean main input 的 2x contour-level SR 对齐与相位覆盖基线。
 > **状态**: ✅ 已补强 displacement / phase / alignment / overlay reassessment；下一步进入 EP06 2x SR POC。
 > **前置**: EP01 数据审计、EP02 raster/stage-prior 诊断、EP03 contour observability、EP04 anchor quality gate。
 
@@ -25,23 +25,23 @@
 
 | 口径 | 结果 |
 |------|---:|
-| 主 session X 相邻 2 um 小步 | median 0.0969 px |
-| 主 session X 相邻 4 um 小步 | median 0.1917 px |
-| R=0 完整 X scanline endpoint | median 2.0836 px |
-| R=0 完整 Y column endpoint | median 4.4174 px |
-| 主 session 累计轨迹 span | 2.8809 x 9.0435 px |
-| data-driven contour held-out Chamfer | median 0.1341 px / P90 0.1613 px |
-| refined held-out Chamfer tail | max 0.1804 px |
-| refined alignment shift span | 5.0491 x 6.2536 px |
-| NCC init vs filename affine correction | median 0.3182 px |
-| contour refined vs filename affine correction | median 0.3896 px |
-| tuned refined held-out Chamfer | median 0.1250 px / P90 0.1554 px |
-| tuned refined vs NCC init | Chamfer median 低约 20.1% |
-| tuned refined vs filename affine | Chamfer median 低约 26.5% |
-| 全 R=0 overlay 最优 Chamfer | filename affine median 0.0827 px |
-| scanline_y20 overlay 最优 Chamfer | data-driven contour median 0.0970 px |
-| 2x SR phase bins, data-driven refined | 4/4 occupied, min/max 58/69 frames |
-| 2x SR phase bins, NCC init | 4/4 occupied, min/max 62/65 frames |
+| clean main X 相邻 2 um 小步 | median 0.0992 px |
+| clean main X 相邻 4 um 小步 | median 0.1937 px |
+| R=0 完整 X scanline endpoint | median 2.0768 px |
+| R=0 完整 Y column endpoint | median 4.4161 px |
+| clean main 累计轨迹 span | 2.4942 x 7.1124 px |
+| data-driven contour held-out Chamfer | median 0.1332 px / P90 0.1610 px |
+| refined held-out Chamfer tail | max 0.1817 px |
+| refined alignment shift span | 4.0166 x 4.9894 px |
+| NCC init vs filename affine correction | median 0.2977 px |
+| contour refined vs filename affine correction | median 0.3976 px |
+| tuned refined held-out Chamfer | median 0.1209 px / P90 0.1561 px |
+| tuned refined vs NCC init | Chamfer median 低约 22.2% |
+| tuned refined vs filename affine | Chamfer median 低约 22.4% |
+| 全 R=0 overlay 最优 Chamfer | filename affine median 0.0812 px |
+| scanline_y20 overlay 最优 Chamfer | data-driven contour median 0.0993 px |
+| 2x SR phase bins, data-driven refined | 4/4 occupied, min/max 59/67 frames |
+| 2x SR phase bins, NCC init | 4/4 occupied, min/max 59/66 frames |
 | 4x phase bins, contour refined | 4/16 occupied, 12 bad bins |
 | 2x SR phase bins, no alignment | 1/4 occupied, 3 bad bins |
 | contour stack off-reference density | refined 0.00003 vs no alignment 0.00287 |
@@ -50,11 +50,11 @@
 
 ## 决策记录
 
-- 255 帧主 session 具备进入 2x contour-level SR POC 的相位覆盖和对齐基础。
+- 248 帧 clean main input 具备进入 2x contour-level SR POC 的相位覆盖和对齐基础。
 - stage command 继续作为位移 prior / 初始化 / 约束，不作为对齐真值。
 - `data_driven_ncc_init` 和 `filename_affine_fit` 更适合作为连续相位 prior。
 - `data_driven_contour_refined` 的 held-out Chamfer 最低，适合作为轮廓锚定和质量门控。
-- tuned contour refined (`edge=93`, `refine_step=0.125`) 能进一步降低 held-out Chamfer，但 gradient correlation 和 EP06 SAA split-half 不自动更优；它是候选 gate，不是无条件替换默认 shift。
+- tuned contour refined quick winner (`edge=91`, `refine_radius=0.5`, `refine_step=0.125`) 能进一步降低 held-out Chamfer，但 gradient correlation 和 EP06 SAA split-half 不自动更优；它是候选 gate，不是无条件替换默认 shift。
 - `data_driven_ncc_init` / `data_driven_contour_refined` 相对 filename affine 有可测逐帧修正，不是简单复刻文件名仿射模型。
 - `data_driven_contour_refined` 在 3x/4x 上出现 phase collapse；高倍率 occupancy 或局部吸附结果不能证明 4x 可行。
 - overlay 只作为 visual sanity appendix：filename affine 在多数组别 median Chamfer 更低，`scanline_y20` 中 data-driven contour 更低。
@@ -104,10 +104,8 @@ Notebook:
 - `output/ep05_alignment_sr_capacity/alignment_method_comparison.png`
 - `output/ep05_alignment_sr_capacity/phase_bin_coverage_2x.png`
 - `output/ep05_alignment_sr_capacity/alignment_overlay_evidence.png`
-- `output/ep05_alignment_tuning/limit96_tuning_summary.csv`
-- `output/ep05_alignment_tuning/full_candidate_eval93_summary.csv`
-- `output/ep05_alignment_tuning/full_r360_e93_rad100_s0125/contour_alignment_results.csv`
 - `output/ep05_alignment_tuning_study/tuning_summary.csv`
 - `output/ep05_alignment_tuning_study/candidate_comparison_summary.csv`
+- `output/ep05_alignment_tuning_study/candidate_phase_coverage.csv`
 - `output/ep05_alignment_tuning_study/tuning_heatmap_heldout_chamfer.png`
 - `output/ep05_alignment_tuning_study/candidate_alignment_comparison.png`

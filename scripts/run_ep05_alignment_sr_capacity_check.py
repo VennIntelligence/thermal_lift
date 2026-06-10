@@ -2,7 +2,7 @@
 
 This script answers two narrow questions:
 
-1. Does the 255-frame main TXT sequence provide enough sub-pixel phase
+1. Does the clean main TXT sequence provide enough sub-pixel phase
    diversity for scale-2 contour SR?
 2. Is the per-frame data-driven alignment measurably better than filename-based
    affine alignment on held-out contour points?
@@ -26,6 +26,7 @@ import pandas as pd
 from scipy.ndimage import distance_transform_edt, gaussian_filter, map_coordinates, shift as ndi_shift, sobel
 
 from thermal_core.displacement import coordinate_to_shift
+from thermal_core.ep05 import affine_shift, fit_filename_affine
 from thermal_core.io import load_frame
 from thermal_core.plotting import COLORMAPS, FIGURE_SIZES, METHOD_COLOR_LIST, savefig_academic, setup_academic_style
 
@@ -143,16 +144,8 @@ def select_main_session(audit: pd.DataFrame) -> pd.DataFrame:
 
 
 def fit_affine_from_alignment(alignment: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    valid = alignment[alignment["success"].astype(str).str.lower().eq("true") & alignment["R"].eq(0)].copy()
-    design = np.column_stack([np.ones(len(valid)), valid["X"].to_numpy(), valid["Y"].to_numpy()])
-    beta_dx = np.linalg.lstsq(design, valid["refined_align_dx_px"].to_numpy(), rcond=None)[0]
-    beta_dy = np.linalg.lstsq(design, valid["refined_align_dy_px"].to_numpy(), rcond=None)[0]
-    return beta_dx, beta_dy
-
-
-def affine_shift(row: pd.Series, beta_dx: np.ndarray, beta_dy: np.ndarray) -> tuple[float, float]:
-    coord = np.array([1.0, float(row["X"]), float(row["Y"])])
-    return float(coord @ beta_dx), float(coord @ beta_dy)
+    affine_fit = fit_filename_affine(alignment, robust=True)
+    return affine_fit.beta_dx, affine_fit.beta_dy
 
 
 def stage_shift(row: pd.Series, ref_row: pd.Series, theta_deg: float, pixel_size_um: float) -> tuple[float, float]:
@@ -309,7 +302,6 @@ def plot_phase_bin_coverage(phase_summary: pd.DataFrame, phase_counts: pd.DataFr
     ax.invert_yaxis()
     ax.set_xlim(0, n_frames + expected * 1.75)
     ax.set_xlabel("Frame count, stacked by 2x phase bin")
-    ax.set_title("2x Phase-Bin Coverage")
     ax.grid(axis="x", alpha=0.2)
     handles = [plt.Rectangle((0, 0), 1, 1, color=color) for color in phase_colors]
     ax.legend(
@@ -427,7 +419,6 @@ def plot_overlay_density_evidence(
         ax.set_xticks([])
         ax.set_yticks([])
         fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
-    fig.suptitle(f"Contour stack evidence, sampled {n} frames")
     savefig_academic(fig, output_path)
 
     metrics = pd.DataFrame(
@@ -470,7 +461,15 @@ def main() -> None:
 
     ref_file = str(valid_alignment["reference_file"].dropna().iloc[0])
     ref_row = main_df[main_df["file"].eq(ref_file)].iloc[0]
-    beta_dx, beta_dy = fit_affine_from_alignment(valid_alignment)
+    affine_fit = fit_filename_affine(valid_alignment, robust=True)
+    beta_dx, beta_dy = affine_fit.beta_dx, affine_fit.beta_dy
+    print(
+        "Filename affine robust fit: "
+        f"fit_rows={affine_fit.fit_count}, clean_rows={affine_fit.clean_count}, "
+        f"median_res={affine_fit.median_residual_px:.4f}px, "
+        f"threshold={affine_fit.outlier_threshold_px:.4f}px, "
+        f"excluded={list(affine_fit.excluded_files)}"
+    )
     align_lookup = valid_alignment.set_index("file").to_dict("index")
 
     ref_full = load_frame(args.data_dir / ref_file).astype(np.float32, copy=False)
@@ -593,6 +592,18 @@ def main() -> None:
         "roi_size": int(args.roi_size),
         "edge_percentile": float(args.edge_percentile),
         "alignment_method_summary": summary.to_dict(orient="records"),
+        "filename_affine_fit": {
+            "robust": True,
+            "fit_count": affine_fit.fit_count,
+            "clean_count": affine_fit.clean_count,
+            "median_residual_px": affine_fit.median_residual_px,
+            "outlier_threshold_px": affine_fit.outlier_threshold_px,
+            "excluded_files": list(affine_fit.excluded_files),
+            "beta_dx": affine_fit.beta_dx.tolist(),
+            "beta_dy": affine_fit.beta_dy.tolist(),
+            "baseline_beta_dx": affine_fit.baseline_beta_dx.tolist(),
+            "baseline_beta_dy": affine_fit.baseline_beta_dy.tolist(),
+        },
         "phase_bin_summary_2x": phase_summary_2x.to_dict(orient="records"),
         "phase_capacity": phase,
         "data_driven_minus_filename_affine_norm_px": quantiles(correction),

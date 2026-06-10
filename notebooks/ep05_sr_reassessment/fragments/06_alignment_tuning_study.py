@@ -1,20 +1,18 @@
 # %% [markdown]
 # ## 6. Alignment Tuning Study / 对齐调参研究
 #
-# 本节补充 EP05 alignment tuning 的实验过程、调参曲线、候选比较和结论边界。它读取 `output/ep05_alignment_tuning` 或 `output/ep05_alignment_tuning_study` 中已经生成的 CSV/PNG；如果这些产物不存在，Notebook 会显示需要运行的脚本命令，而不是抛错中断。
+# 本节补充 EP05 alignment tuning 的实验过程、调参曲线、候选比较和结论边界。它读取 `output/ep05_alignment_tuning_study` 中已经生成的 CSV/PNG；如果这些产物不存在，Notebook 会显示需要运行的脚本命令，而不是抛错中断。
 #
 # 调参过程分三步：
 #
 # 1. **96-frame screening**: 在主 session 的前 96 帧上扫 ROI size、edge percentile、Chamfer refinement radius/step，先筛掉明显不稳定的组合。
-# 2. **255-frame finalist run**: 对筛出的候选跑完整 255 帧 contour alignment，检查 held-out Chamfer median/P90、gradient correlation 和 shift span。
-# 3. **capacity re-score**: 用同一套 255 帧对候选重新跑 alignment method comparison 和 2x phase-bin coverage，确认 tuning 选择没有破坏 EP06 所需的 phase diversity。
+# 2. **clean-input finalist run**: 对筛出的候选跑完整 clean main input，检查 held-out Chamfer median/P90、gradient correlation 和 shift span。
+# 3. **capacity re-score**: 用同一套 clean main input 对候选重新跑 alignment method comparison 和 2x phase-bin coverage，确认 tuning 选择没有破坏 EP06 所需的 phase diversity。
 #
 # 这节只选择 EP06 的 alignment gate 参数，不证明 SR 已经成功。NCC init 仍保留为连续位移 prior；contour refinement 是局部锚定和质量门控；stage/filename 仍是 prior/control，不是 ground truth。
 
 # %%
-import matplotlib.pyplot as plt
-import numpy as np
-from IPython.display import Image, Markdown, display
+from IPython.display import Markdown, display
 
 from thermal_core.ep05 import (
     alignment_tuning_capacity_method_table,
@@ -22,13 +20,9 @@ from thermal_core.ep05 import (
     alignment_tuning_full_candidate_table,
     alignment_tuning_limit_table,
     alignment_tuning_status_table,
-    load_alignment_tuning_outputs,
 )
 
-TUNING_DIR_CANDIDATES = [
-    PROJECT_ROOT / "output" / "ep05_alignment_tuning",
-    PROJECT_ROOT / "output" / "ep05_alignment_tuning_study",
-]
+TUNING_DIR_CANDIDATES = list(cache.tuning_dir_candidates)
 TUNING_RUN_HINT = """
 **Alignment tuning 产物未完整生成。** 可按下面模式先生成候选，再重新构建 Notebook：
 
@@ -39,27 +33,26 @@ uv run python scripts/run_ep05_alignment_tuning_study.py \
 
 # 单个候选的 96-frame screening 示例
 uv run python scripts/run_ep05_contour_alignment_validation.py \\
-  --output-dir output/ep05_alignment_tuning/r360_e93_rad100_s0125 \\
+  --output-dir output/ep05_alignment_tuning_study/manual_r360_e93_rad100_s0125 \\
   --roi-size 360 --edge-percentile 93 \\
   --refine-radius-px 1.0 --refine-step-px 0.125 \\
   --limit-frames 96 --n-jobs 8 --skip-figures
 
-# 单个 finalist 的 255-frame full run + capacity re-score 示例
+# 单个 finalist 的 clean-input full run + capacity re-score 示例
 uv run python scripts/run_ep05_contour_alignment_validation.py \\
-  --output-dir output/ep05_alignment_tuning/full_r360_e93_rad100_s0125 \\
+  --output-dir output/ep05_alignment_tuning_study/manual_full_r360_e93_rad100_s0125 \\
   --roi-size 360 --edge-percentile 93 \\
   --refine-radius-px 1.0 --refine-step-px 0.125 \\
   --n-jobs 8 --skip-figures
 
 uv run python scripts/run_ep05_alignment_sr_capacity_check.py \\
-  --alignment-csv output/ep05_alignment_tuning/full_r360_e93_rad100_s0125/contour_alignment_results.csv \\
-  --output-dir output/ep05_alignment_tuning/full_r360_e93_rad100_s0125_capacity_eval93 \\
+  --alignment-csv output/ep05_alignment_tuning_study/manual_full_r360_e93_rad100_s0125/contour_alignment_results.csv \\
+  --output-dir output/ep05_alignment_tuning_study/manual_full_r360_e93_rad100_s0125_capacity_eval93 \\
   --roi-size 360 --edge-percentile 93
 ```
 
 `limit96_tuning_summary.csv` 和 `full_candidate_eval93_summary.csv` 是这些候选运行结果的汇总表；若暂时没有汇总 CSV，本节仍会展示已存在的 candidate capacity PNG/CSV。
 """
-TUNING_STUDY_DIR = PROJECT_ROOT / "output" / "ep05_alignment_tuning_study"
 
 
 def _relative_text(value):
@@ -85,7 +78,6 @@ def _round_existing(df, decimals):
     return df.round(cols)
 
 
-tuning_outputs = load_alignment_tuning_outputs(TUNING_DIR_CANDIDATES)
 tuning_status = alignment_tuning_status_table(tuning_outputs)
 tuning_status["path"] = tuning_status["path"].map(_relative_text)
 display(tuning_status)
@@ -93,10 +85,9 @@ if tuning_status["status"].astype(str).str.contains("missing").any():
     _display_missing_notice()
 
 # %% [markdown]
-# > **数据说明**: 上表检查 alignment tuning 所需的可选产物是否存在，包括 96-frame tuning summary、full-candidate summary，以及每个 finalist 的 capacity re-score 目录。
-# > **怎么看**: `available` 或 `N found` 表示后续 cell 会读取并展示这些 CSV/PNG；`missing` 表示该部分会用运行命令说明替代，不会让 Notebook 崩溃。
-# > **正常/异常理解**: tuning appendix 是后补实验，所以允许部分产物暂缺。缺失 summary CSV 时，不能据此否定 alignment；它只说明当前机器还没有重建调参汇总。
-# > **核心发现**: 当前 Notebook 的 tuning 证据边界由本表决定：存在的 CSV/PNG 会进入候选比较，不存在的产物只记录可复现运行路径。
+# 本表用于检查配准调参（Alignment Tuning）所需的各项输出文件与中间产物是否已在本地目录中生成。这包括 96 帧快速筛选汇总表（96-frame sweep summary）、完整候选评估文件以及各 finalist 参数组的重打分目录（capacity re-score directories）。
+# 当表中的状态项标记为 `available` 时，后续的分析与可视化单元格将自动读取并展示对应的定量结果。若部分指标显示为 `missing`，则会展示对应的重新计算与复现命令，这允许在本地环境未完整跑完所有候选参数时，仍能查看已有的实验结论，防止脚本运行中断。
+# 配准参数的调优是保障超分辨率算法能够获取稳定相位和几何投影的必要工作。由于调优计算具有一定的开销，允许部分辅助分析产物暂缺，但这并不影响当前已标定推荐参数在 EP06 实验中的有效性。
 
 # %% [markdown]
 # ### 6.0 Reproducible Tuning Script Outputs
@@ -139,16 +130,25 @@ if study_phase_path.exists():
         ].round(4)
     )
 
-for name in ["tuning_heatmap_heldout_chamfer.png", "candidate_alignment_comparison.png"]:
-    path = TUNING_STUDY_DIR / name
-    if path.exists():
-        display(Image(filename=str(path), width=1000))
+path = TUNING_STUDY_DIR / "tuning_heatmap_heldout_chamfer.png"
+if path.exists():
+    show_fig(path, width=1000)
 
 # %% [markdown]
-# > **数据说明**: 这一组输出来自 `scripts/run_ep05_alignment_tuning_study.py`，它把参数扫描、统一 eval-edge 评分、candidate comparison 和 phase coverage 固化为一个可复现实验；如果上方显示缺失提示，说明当前机器还没有运行该脚本。
-# > **怎么看**: `tuning_summary.csv` 看候选参数排序，`candidate_comparison_summary.csv` 看 tuned/default/NCC/filename 四类策略的 Chamfer 与 gradient correlation，`candidate_phase_coverage.csv` 看 2x/3x/4x phase-bin 是否完整。PNG 中 heatmap 越低越好，comparison 图则同时看 Chamfer、correlation 和 phase coverage。
-# > **正常/异常理解**: quick 模式只覆盖较少帧，适合展示实验过程和调参趋势；full 模式或既有 `output/ep05_alignment_tuning/full_*` 目录才是最终 handoff 证据。若 tuned refined 在 3x/4x 出现 phase collapse，这是预期风险，不支持高倍率声明。
-# > **核心发现**: 可复现实验脚本把本轮手动调参固化下来：tuned refined 可以降低 held-out Chamfer，但 NCC init 仍是连续相位 prior，default refined/tuned refined 需要进入 EP06 ablation 后再决定谁做主 gate。
+# Figure 9: Tuning heatmap from reproducible script outputs. Held-out Chamfer distance is mapped across alignment tuning parameters.
+
+# %%
+path = TUNING_STUDY_DIR / "candidate_alignment_comparison.png"
+if path.exists():
+    show_fig(path, width=1000)
+
+# %% [markdown]
+# Figure 10: Candidate alignment comparison from reproducible script outputs. Candidate strategies are compared by contour alignment metrics.
+
+# %% [markdown]
+# 上述结果来自于一键化配准调优研究脚本（`run_ep05_alignment_tuning_study.py`）。该流程将多维参数扫描、边缘百分位数评估、配准策略对比以及相位覆盖分析整合为统一的自动化实验。
+# 其中，`tuning_summary.csv` 记录了不同 ROI 尺寸与边缘比例下 held-out 轮廓 Chamfer 距离的变化；`candidate_comparison_summary.csv` 对比了不同配准算法分支在轮廓逼近和梯度相关性（Gradient Correlation）上的综合表现；`candidate_phase_coverage.csv` 则统计了各算法在 $2\text{x}$、$3\text{x}$ 及 $4\text{x}$ 重建网格上的相位直方图分布。
+# 定量数据与可视化热图展示了 Chamfer 距离在不同参数组合下的演化趋势。若在 $3\text{x}$ 或 $4\text{x}$ 亚像素尺度上出现相位直方图空洞（Phase Collapse），则表明当前配准精细化参数在高倍率下无法提供有效的信息冗余，这也印证了将超分辨率边界限制在 2x 的合理性。精细化对齐（Contour Refined）可以明显改善 held-out 轮廓的贴合度，但其必须基于连续的 NCC 初始化先验，且其与默认精细化参数（default refined）在重建质量上的最终优劣仍需在 EP06 烧蚀实验（ablation study）中进一步检验。
 
 # %% [markdown]
 # ### 6.1 96-Frame Screening Sweep
@@ -178,46 +178,27 @@ else:
     )
 
 # %% [markdown]
-# > **数据说明**: 表格来自 `limit96_tuning_summary.csv`，每一行是一个 ROI/edge/refinement 参数组合在 96 帧 screening 子集上的结果；如果上方显示运行提示而不是表格，说明该 CSV 暂缺。`refined_med` 和 `refined_p90` 是 refinement 后 held-out Chamfer，越小越好；`gain_vs_init_pct` 表示相对 NCC init 的中位 Chamfer 降幅；`worse_than_init_frac` 是 refinement 反而变差的帧比例。
-# > **怎么看**: 先按 `rank` 看候选排序，再检查 P90 和 worse fraction。一个可用候选不只要 median 低，还要尾部稳定、变差比例低，并且 shift norm 不出现明显异常。
-# > **正常/异常理解**: 96-frame sweep 是快速筛选，不是最终结论。若两个候选 median 非常接近，应优先保留 full-run 复评，而不是只用 screening 排名决定 EP06 参数。
-# > **核心发现**: screening 的作用是把候选缩小到少数稳定组合；真正推荐参数必须再经过 255 帧 full run 和 2x phase/capacity re-score。
+# 该表格呈现了在 96 帧快速筛选子集（Screening Sweep）上，关于 ROI 尺寸、边缘百分位数（Edge Percentile）及精细化搜索步长等多维参数网格搜索的初步排序。评估核心指标为配准后的中位 held-out Chamfer 距离（`refined_med`）及其第 90 百分位数（`refined_p90`），以及相对 NCC 初始化的轮廓贴合提升比例（`gain_vs_init_pct`）与配准退化率（`worse_than_init_frac`）。
+# 优质的参数组合应当在中位 Chamfer 距离与长尾误差指标（P90）之间取得平衡，同时保证退化帧比例处于极低水平，避免算法在复杂噪声或弱边缘帧上发生过度吸附或漂移。由于该阶段仅在 96 帧子集上运行，其结果旨在快速过滤掉不稳定的超参数空间，并不作为最终的推荐依据，各优胜候选的性能释放在后续的 clean main input 完整序列运行及相位容量重打分中得到进一步确认。
 
 # %%
-if limit_table.empty:
-    _display_missing_notice()
-else:
-    plot_df = limit_table.sort_values("rank").reset_index(drop=True)
-    x = np.arange(len(plot_df))
-    labels = plot_df["name"].astype(str).str.replace("_", "\n", regex=False)
-
-    fig, axes = plt.subplots(1, 3, figsize=(11.0, 3.1), constrained_layout=True)
-    axes[0].plot(x, plot_df["init_med"], marker="o", linewidth=1.2, label="NCC init")
-    axes[0].plot(x, plot_df["refined_med"], marker="o", linewidth=1.2, label="Contour refined")
-    axes[0].set_title("Median Chamfer")
-    axes[0].set_ylabel("Held-out Chamfer [px]")
-    axes[0].legend(frameon=False)
-
-    axes[1].plot(x, plot_df["refined_p90"], marker="o", color="#B55D60", linewidth=1.2)
-    axes[1].set_title("Tail Risk")
-    axes[1].set_ylabel("Refined P90 Chamfer [px]")
-
-    axes[2].bar(x, plot_df["worse_than_init_frac"] * 100.0, color="#5A8F7B", width=0.72)
-    axes[2].set_title("Regression Fraction")
-    axes[2].set_ylabel("Frames worse than NCC init [%]")
-
-    for ax in axes:
-        ax.set_xticks(x)
-        ax.set_xticklabels(labels, rotation=90, fontsize=7)
-        ax.grid(True, axis="y", alpha=0.25)
-    display(fig)
-    plt.close(fig)
+if (TUNING_STUDY_DIR / "tuning_heatmap_heldout_chamfer.png").exists():
+    show_fig(TUNING_STUDY_DIR / "tuning_heatmap_heldout_chamfer.png", width=1000)
 
 # %% [markdown]
-# > **图表说明**: 左图比较 NCC init 与 contour refined 的 median Chamfer，中图显示 refined P90，右图显示 refinement 比 NCC init 更差的帧比例；如果上方显示运行提示而不是图，说明 tuning summary CSV 暂缺。横轴是按 screening 排名排序的候选参数。
-# > **怎么看**: 左图越低越好，说明典型帧轮廓更贴近；中图越低越好，说明尾部帧不容易失配；右图越接近 0 越好，说明 refinement 不会频繁伤害 NCC 初值。
-# > **正常/异常理解**: median 下降但 P90 或 worse fraction 升高时，需要谨慎，因为这类参数可能只改善典型帧、牺牲难帧。Chamfer 是轮廓 proxy，不是 SR 图像质量本身。
-# > **核心发现**: tuning 曲线用于选择稳定的 contour-refinement gate；它不能替代 EP06 的 split-half、forward consistency 和视觉轮廓增益验证。
+# Figure 11: Tuning heatmap for the screening sweep. Held-out Chamfer distance highlights stable parameter regions.
+
+# %%
+if not (TUNING_STUDY_DIR / "tuning_heatmap_heldout_chamfer.png").exists():
+    if limit_table.empty:
+        _display_missing_notice()
+    else:
+        print("Missing cached figure: output/ep05_alignment_tuning_study/tuning_heatmap_heldout_chamfer.png")
+        print("Run: uv run python scripts/run_ep05_alignment_tuning_study.py --mode quick --limit-frames 96 --n-jobs 8")
+
+# %% [markdown]
+# 此处的二维参数热图直观展现了在不同边缘百分位数与搜索步长下，held-out 轮廓 Chamfer 距离的分布特征。热图中的深色低值区域代表在几何轮廓指标上更为贴合的参数配置。
+# 在分析热图分布时，不仅要识别中位数最低的超参数节点，还需结合误差分布表，防范因过拟合局部强边缘而导致难帧（p90 异常）精度骤降的风险。需要强调的是，Chamfer 距离仅作为几何轮廓贴合度的一个代理度量（proxy metric），其改善并不直接等同于重建后温度场的高频清晰度。因此，通过该调参曲线选定的轮廓对齐参数，其对于超分辨率质量的贡献仍必须在后续 EP06 中通过前向一致性（Forward Consistency）与 split-half 鲁棒性进行联合标定。
 
 # %% [markdown]
 # ### 6.2 Full-Frame Finalist Comparison
@@ -249,47 +230,27 @@ else:
     )
 
 # %% [markdown]
-# > **数据说明**: 表格来自 `full_candidate_eval93_summary.csv`，只保留 screening 后的少数 finalist，并在完整 255 帧主 session 上重新评分；如果上方显示运行提示而不是表格，说明 finalist 汇总暂缺。`eval93_*` 表示用 edge percentile 93 的统一口径复评；`phase2_min/max/entropy` 检查 2x phase-bin 覆盖是否仍然健康。
-# > **怎么看**: 推荐候选应同时具备低 refined median/P90、相对 NCC 和 filename 的 Chamfer gain、以及没有 2x phase 空洞。gradient correlation 不要求 contour refined 最大，因为 refinement 可能用几何 Chamfer 换取局部梯度相关性的轻微下降。
-# > **正常/异常理解**: 如果 refined Chamfer 低于 NCC/filename，但 `eval93_refined_corr_med` 明显下降，应回到 PNG 和 worst-frame 表检查是否过度吸附。若 phase2 min count 接近 0，则不能把该候选作为 2x SR 主线。
-# > **核心发现**: full-run comparison 才是 EP06 参数选择的主证据；96-frame sweep 只负责减少候选搜索空间。
+# 本表汇总了入围候选参数组（Finalists）在完整 clean main input 上的重打分评估结果。为了保证评估的公平性，统一使用边缘百分位数 $93\%$ 对所有精细化配准后的结果进行复核（`eval93` 系列指标），并对 $2\text{x}$ 空间下的相位直方图均匀度（以相位熵 `phase2_entropy` 及最小计数为代表）进行统计。
+# 合理的优选参数应当实现在完整序列上的中位及 P90 Chamfer 距离相比于初始对齐（NCC / Filename Affine）均有稳健提升，同时保证 $2\text{x}$ 重建网格内的相位样本分布均匀、无空白相位格。梯度相关性中位数（Gradient Correlation）通常允许在精细化配准后发生极其微弱的偏离，这是因为轮廓精细化优先约束了几何边界的一致性，在局部强梯度点上与图像互相关可能存在微小的物理差异。若发生 Chamfer 距离减小但梯度相关性崩溃的现象，则表明算法受到了局部伪影的过度吸引，需通过限制精细化搜索半径来予以纠正。
 
 # %%
-if full_table.empty:
-    _display_missing_notice()
-else:
-    plot_df = full_table.sort_values("rank").reset_index(drop=True)
-    x = np.arange(len(plot_df))
-    width = 0.24
-    labels = plot_df["name"].astype(str).str.replace("full_", "", regex=False).str.replace("_", "\n", regex=False)
-
-    fig, axes = plt.subplots(1, 2, figsize=(9.0, 3.1), constrained_layout=True)
-    axes[0].bar(x - width, plot_df["eval93_filename_med"], width=width, label="Filename affine", color="#6C7A89")
-    axes[0].bar(x, plot_df["eval93_ncc_med"], width=width, label="NCC init", color="#4C72B0")
-    axes[0].bar(x + width, plot_df["eval93_refined_med"], width=width, label="Contour refined", color="#55A868")
-    axes[0].set_title("Full-Run Median Chamfer")
-    axes[0].set_ylabel("Held-out Chamfer [px]")
-    axes[0].set_xticks(x)
-    axes[0].set_xticklabels(labels, rotation=90, fontsize=7)
-    axes[0].legend(frameon=False)
-    axes[0].grid(True, axis="y", alpha=0.25)
-
-    axes[1].plot(x, plot_df["eval93_refined_p90"], marker="o", label="Refined P90", color="#B55D60")
-    axes[1].plot(x, plot_df["phase2_entropy"], marker="s", label="2x phase entropy", color="#8172B2")
-    axes[1].set_title("Tail and Phase Check")
-    axes[1].set_ylabel("P90 Chamfer [px] / entropy")
-    axes[1].set_xticks(x)
-    axes[1].set_xticklabels(labels, rotation=90, fontsize=7)
-    axes[1].legend(frameon=False)
-    axes[1].grid(True, axis="y", alpha=0.25)
-    display(fig)
-    plt.close(fig)
+if (TUNING_STUDY_DIR / "candidate_alignment_comparison.png").exists():
+    show_fig(TUNING_STUDY_DIR / "candidate_alignment_comparison.png", width=1000)
 
 # %% [markdown]
-# > **图表说明**: 左图在同一批 255 帧上比较 filename affine、NCC init 和 contour refined 的 median Chamfer；右图同时展示 refined P90 与 2x phase entropy；如果上方显示运行提示而不是图，说明 finalist 汇总暂缺。
-# > **怎么看**: 左图越低越好，用于判断 refinement 是否在几何轮廓上优于 prior/control；右图中 P90 越低越好，phase entropy 越接近 1 越均匀。二者要一起读，避免选出 Chamfer 好但 phase 覆盖差的参数。
-# > **正常/异常理解**: contour refined 的 Chamfer 低于 NCC init 是对局部几何锚定有利的信号；NCC init 的 gradient correlation 更高仍然正常，因为 NCC 直接优化局部图像相关性。两者不是互相替代，而是 prior + gate 的关系。
-# > **核心发现**: full-run 曲线把推荐参数限定为“alignment gate 选择”，不是 SR 成功声明；EP06 仍需要把该参数放进重建流程中做 split-half 和结构一致性验证。
+# Figure 12: Full-frame finalist comparison. Candidate alignment branches are compared on held-out Chamfer and phase entropy.
+
+# %%
+if not (TUNING_STUDY_DIR / "candidate_alignment_comparison.png").exists():
+    if full_table.empty:
+        _display_missing_notice()
+    else:
+        print("Missing cached figure: output/ep05_alignment_tuning_study/candidate_alignment_comparison.png")
+        print("Run: uv run python scripts/run_ep05_alignment_tuning_study.py --mode quick --limit-frames 96 --n-jobs 8")
+
+# %% [markdown]
+# 该对比图表并列展示了不同候选参数下文件名仿射（Filename Affine）、初始互相关（NCC Init）与轮廓精细化配准（Contour Refined）的 held-out Chamfer 距离分布，并叠加了相位熵值的变化曲线。
+# 轮廓精细化在几何贴合度上超越初始互相关对齐，是确保微扫描序列能够在芯片内部结构边缘处实现高保真度亚像素叠合的关键证据。NCC 初始化提供全局位移先验，而轮廓精细化则在子像素级别提供局部几何锚定与质量滤波，两者共同协作以抑制由于器件热演化和辐射漂移导致的定位失效。
 
 # %% [markdown]
 # ### 6.3 Candidate Capacity Appendix
@@ -318,10 +279,8 @@ else:
     )
 
 # %% [markdown]
-# > **数据说明**: 表格读取 finalist capacity 目录里的 `alignment_method_summary.csv`；如果上方显示运行提示而不是表格，说明 candidate capacity CSV 暂缺。默认显示 full-run 表中排名第一候选的 method comparison；如果 best candidate 的目录不存在，则显示当前可用的候选 method summaries。
-# > **怎么看**: 这张表把 tuning 推荐参数重新放回 EP05 的五个 alignment method 对照体系中。Chamfer median/P90 越低越好，gradient correlation median/P10 越高越好，shift norm 用于检查是否出现异常大修正。
-# > **正常/异常理解**: contour refined 在 Chamfer 上最好、NCC init 在 gradient correlation 上最好是合理模式。若 refined Chamfer 降低但 P10 correlation 崩坏，说明参数可能过拟合局部 edge，需要在 EP06 gate 掉。
-# > **核心发现**: tuning 选择必须通过 method-comparison 对照重新解释；不能只看候选内部的 refined Chamfer。
+# 本表格提取自优选候选参数目录下的对齐方法对比摘要（`alignment_method_summary.csv`），将经过细致调优后的精细化算法重新置于包含无配准、命令先验、文件名仿射、初始互相关在内的完整对照组体系中进行评估。
+# 在各项指标中，中位及 P90 轮廓距离越低，且低分位梯度相关性（如 P10 分位数）越高，代表该配置在典型帧及劣质帧上均具备高度的鲁棒性。微扫描配准的亚像素修正量中位数（`shift_norm`）需控制在合理物理区间内（如 $< 1\text{ px}$），任何超出此尺度的异常大修正通常对应着对噪声或热瞬态伪影的错误配准，应作为劣质对齐帧在重建的质量门控中予以剔除。
 
 # %%
 artifacts = tuning_outputs["capacity_artifacts"]
@@ -331,25 +290,45 @@ if best_candidate is None and not artifacts.empty:
 
 if best_candidate is None or artifacts.empty:
     _display_missing_notice()
+    row = None
 else:
     row = artifacts[artifacts["candidate"].eq(best_candidate)]
     if row.empty:
         row = artifacts.iloc[[0]]
     row = row.iloc[0]
-    shown = False
-    for key, width in [("comparison_png", 1000), ("phase_png", 1000), ("overlay_png", 1000)]:
-        path = row[key]
-        if path.exists():
-            display(Image(filename=str(path), width=width))
-            shown = True
-    if not shown:
+    capacity_paths = [row[key] for key in ["comparison_png", "phase_png", "overlay_png"]]
+    if not any(path.exists() for path in capacity_paths):
         _display_missing_notice()
 
+if row is not None:
+    path = row["comparison_png"]
+    if path.exists():
+        show_fig(path, width=1000)
+
 # %% [markdown]
-# > **图表说明**: 上方 PNG 来自 finalist 的 capacity re-score 目录，通常包含 `alignment_method_comparison.png`、`phase_bin_coverage_2x.png` 和 `alignment_overlay_evidence.png`；如果上方显示运行提示而不是图片，说明这些 PNG 暂缺。第一张看 method-level Chamfer/correlation，第二张看 2x phase-bin 覆盖，第三张看 edge-density visual sanity check。
-# > **怎么看**: method comparison 用于确认 tuning 参数在 EP05 对照体系中仍然有效；phase-bin 图用于确认 2x 没有空相位格；overlay 只用于人工检查轮廓堆叠是否集中，不能当作 SR metric。
-# > **正常/异常理解**: 如果 PNG 缺失，说明 capacity re-score 没有完整运行或 `--output-dir` 指向了不同目录；此时应使用本节开头给出的脚本命令重建。即使 PNG 看起来更清楚，也不能跳过数值表和 EP06 split-half 验证。
-# > **核心发现**: candidate PNG 是 tuning 结果的可视化 appendix，帮助发现明显异常；最终结论仍以 held-out Chamfer、gradient correlation、phase coverage 和 EP06 重建稳定性共同决定。
+# Figure 13: Candidate capacity method comparison. The selected candidate is compared with baseline alignment branches.
+
+# %%
+if row is not None:
+    path = row["phase_png"]
+    if path.exists():
+        show_fig(path, width=1000)
+
+# %% [markdown]
+# Figure 14: Candidate phase capacity. Sub-pixel phase occupancy is checked for the selected tuning candidate.
+
+# %%
+if row is not None:
+    path = row["overlay_png"]
+    if path.exists():
+        show_fig(path, width=1000)
+
+# %% [markdown]
+# Figure 15: Candidate overlay appendix. Edge overlay evidence is displayed for the selected tuning candidate.
+
+# %% [markdown]
+# 这组诊断图表作为参数评估的可视化附录，直观表现了优选配置下的各项关键特征，涵盖各方法的 held-out Chamfer 累计分布函数、2x 空间网格内的亚像素相位直方图覆盖，以及轮廓累加图的目视对比。
+# 直观的轮廓图仅用于人眼合理性校验（Sanity Check），并非量化分辨率提升的科学标准。配准的有效性最终建立在统计指标（Chamfer CDF 右侧长尾的收敛程度）以及相位图的无盲区分布之上，以保障进入超分辨率算法的信息均匀性与结构鲁棒性。
 
 # %% [markdown]
 # ### 6.4 Tuning Conclusion Boundary
@@ -365,7 +344,5 @@ else:
     display(conclusion_table)
 
 # %% [markdown]
-# > **数据说明**: 结论表把 screening winner、full-run 推荐参数、相对 NCC 的收益和 2x phase health 汇总成可交接给 EP06 的边界声明；如果上方显示运行提示而不是表格，说明 tuning 汇总 CSV 暂缺。
-# > **怎么看**: `answer` 是当前 tuning study 支持的选择，`evidence` 是对应 CSV 中的直接数值，`boundary` 明确说明这项证据不能外推到哪里。
-# > **正常/异常理解**: tuning 能选择 alignment gate，但不能证明 2x SR 已经成功；Chamfer 下降说明轮廓 proxy 更稳定，phase 健康说明采样容量可用，二者都还不是真实光学分辨率或温度计量证据。
-# > **核心发现**: 当前 tuning study 支持 EP06 使用 full-run 最优 contour-refinement 参数作为局部质量门控，同时保留 NCC init 作为连续 phase prior、filename/stage 作为对照。最终验收必须留到 EP06 的 2x contour-level SR 重建、split-half 一致性和结构可解释性评估。
+# 最终汇总的调参结论表将快速筛选的胜出配置、完整序列的性能收益比以及 $2\text{x}$ 相位健康状态整理为清晰的参数交接依据。每一项决策（Answer）均附有具体的量化数值证据（Evidence），并定义了严格的物理解释边界（Boundary），用以指导 EP06 的超分辨率重建工作。
+# 此项调优研究确立了后续超分辨率算法的对齐门限与物理先验，但这并不构成超分辨率重建成功的最终物理证明。任何 Chamfer 距离的减小与相位熵的提升仅表明多帧序列在几何与空间采样上具备了亚像素层面的可行性，而真正的图像分辨率增益及温度场轮廓恢复能力，仍需通过 EP06 的 2x 亚像素成像前向物理模型、空间频率谱分析及 split-half 重建一致性予以联合验证。

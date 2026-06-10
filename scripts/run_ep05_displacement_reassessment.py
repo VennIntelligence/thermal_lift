@@ -412,7 +412,6 @@ def plot_trajectory(trajectory: pd.DataFrame, output_dir: Path) -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("Cumulative measured dx [px]")
     ax.set_ylabel("Cumulative measured dy [px]")
-    ax.set_title("Main Session Cumulative Frame-to-Frame Trajectory")
     cbar = fig.colorbar(sc, ax=ax, fraction=0.046, pad=0.02)
     cbar.set_label("Acquisition order")
     savefig_academic(fig, output_dir / "main_session_cumulative_trajectory.png")
@@ -445,7 +444,6 @@ def plot_norm_summary(measurements: pd.DataFrame, output_dir: Path) -> None:
     values = [data.loc[data["pair_class"].eq(cls), "measured_norm_px"].dropna().to_numpy() for cls in classes]
     ax.boxplot(values, tick_labels=classes, showfliers=False)
     ax.set_ylabel("Measured 2D shift magnitude [px]")
-    ax.set_title("Visible Displacement by Pair Class, High-pass NCC")
     ax.tick_params(axis="x", rotation=25)
     savefig_academic(fig, output_dir / "visible_shift_by_pair_class.png")
 
@@ -473,7 +471,6 @@ def plot_endpoint_vectors(measurements: pd.DataFrame, output_dir: Path) -> None:
     ax.set_aspect("equal", adjustable="box")
     ax.set_xlabel("Measured dx [px]")
     ax.set_ylabel("Measured dy [px]")
-    ax.set_title("Endpoint Displacement Vectors")
     ax.legend()
     savefig_academic(fig, output_dir / "endpoint_displacement_vectors.png")
 

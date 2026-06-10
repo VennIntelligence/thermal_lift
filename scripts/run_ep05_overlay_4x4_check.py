@@ -21,6 +21,7 @@ from PIL import Image
 from scipy.ndimage import gaussian_filter, shift as ndi_shift, sobel
 
 from thermal_core.displacement import coordinate_to_shift
+from thermal_core.ep05 import affine_shift, filename_affine_diagnostics, fit_filename_affine
 from thermal_core.io import load_frame
 from thermal_core.plotting import COLORMAPS, savefig_academic, setup_academic_style
 
@@ -141,14 +142,6 @@ def load_main_frames(audit_csv: Path, data_dir: Path, alignment: pd.DataFrame) -
     return main.sort_values("acquisition_order").reset_index(drop=True)
 
 
-def fit_filename_affine(alignment: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    valid = alignment[boolish(alignment["success"]) & alignment["R"].eq(0)].copy()
-    design = np.column_stack([np.ones(len(valid)), valid["X"].to_numpy(), valid["Y"].to_numpy()])
-    beta_dx = np.linalg.lstsq(design, valid["refined_align_dx_px"].to_numpy(), rcond=None)[0]
-    beta_dy = np.linalg.lstsq(design, valid["refined_align_dy_px"].to_numpy(), rcond=None)[0]
-    return beta_dx, beta_dy
-
-
 def build_shift_tables(
     frames: pd.DataFrame,
     alignment: pd.DataFrame,
@@ -159,7 +152,20 @@ def build_shift_tables(
     if ref.empty:
         raise RuntimeError(f"Reference file {ref_file} is not in selected frame set")
     ref_row = ref.iloc[0]
-    beta_dx, beta_dy = fit_filename_affine(alignment)
+    affine_fit = fit_filename_affine(alignment, robust=True)
+    diagnosis = filename_affine_diagnostics(alignment, affine_fit)
+    excluded_from_overlay = set(
+        diagnosis.loc[diagnosis["residual_gate_outlier"], "file"].astype(str).tolist()
+    )
+    filename_label = f"Filename affine\n(n_excluded={len(excluded_from_overlay)})"
+    print(
+        "Filename affine robust fit: "
+        f"fit_rows={affine_fit.fit_count}, clean_rows={affine_fit.clean_count}, "
+        f"median_res={affine_fit.median_residual_px:.4f}px, "
+        f"threshold={affine_fit.outlier_threshold_px:.4f}px, "
+        f"fit_excluded={list(affine_fit.excluded_files)}, "
+        f"overlay_excluded={sorted(excluded_from_overlay)}"
+    )
     align_lookup = {
         str(row["file"]): (float(row["refined_align_dx_px"]), float(row["refined_align_dy_px"]))
         for _, row in alignment[boolish(alignment["success"])].iterrows()
@@ -170,7 +176,7 @@ def build_shift_tables(
     tables: dict[str, dict[str, tuple[float, float]]] = {
         "No alignment": {},
         "Old stage model": {},
-        "Filename affine": {},
+        filename_label: {},
         "Data-driven contour": {},
     }
     for _, row in frames.iterrows():
@@ -185,8 +191,8 @@ def build_shift_tables(
         )
         tables["Old stage model"][name] = (-float(dx_stage), float(dy_stage_math))
 
-        design = np.array([1.0, float(row["X"]), float(row["Y"])])
-        tables["Filename affine"][name] = (float(design @ beta_dx), float(design @ beta_dy))
+        if name not in excluded_from_overlay:
+            tables[filename_label][name] = affine_shift(row, affine_fit.beta_dx, affine_fit.beta_dy)
         tables["Data-driven contour"][name] = align_lookup[name]
     return tables
 
@@ -214,6 +220,8 @@ def make_overlays(
     n = 0
     for _, row in frames.iterrows():
         name = str(row["file"])
+        if name not in shifts:
+            continue
         dx, dy = shifts[name]
 
         txt = load_frame(data_dir / name).astype(np.float32, copy=False)
@@ -234,6 +242,8 @@ def make_overlays(
         bmp_edge_sum = bmp_edges if bmp_edge_sum is None else bmp_edge_sum + bmp_edges
         n += 1
 
+    if n == 0:
+        raise RuntimeError("No frames were available for overlay construction")
     return {
         "txt_mean": txt_sum / n,
         "txt_edges": txt_edge_sum / n,
@@ -268,11 +278,6 @@ def plot_grid(method_outputs: dict[str, dict[str, np.ndarray]], output_path: Pat
             axes[row, col].set_facecolor("white")
             if col == 0:
                 axes[row, col].set_ylabel(row_labels[row], fontsize=11)
-    fig.suptitle(
-        f"All main-session TXT/BMP overlays, center 3x crop, n={n_frames} paired frames",
-        fontsize=13,
-        fontweight="bold",
-    )
     savefig_academic(fig, output_path)
 
 

@@ -19,7 +19,10 @@
 # | 验收指标 | Acceptance metrics | split-half consistency、held-out contour Chamfer、phase-bin coverage、visual contour gain | Split-half consistency, held-out contour Chamfer, phase-bin coverage, visual contour gain | back-projection residual 或 Tenengrad 单独不足以证明 SR 成功 |
 
 # %% [markdown]
-# > **数据说明**: 结论表汇总 EP06 推荐方法、保留对照组、3x/4x 风险边界、overlay 用途、主要失败风险和验收指标。它是前面 displacement、phase、alignment、overlay 四类证据的 handoff，而不是新的实验结果。
-# > **怎么读**: `decision` 列给出 EP06 应采用或保留的选择，`reason` 列说明为什么这个选择符合当前证据边界。推荐方法、对照组、风险和验收指标需要一起读，避免只拿“推荐 alignment”去扩大成最终 SR 成功声明。
-# > **正常/异常理解**: 正常 handoff 应同时包含主方法和 control groups，因为没有 no alignment/stage/filename 对照，就无法区分真实 alignment gain 与显示或先验带来的变化。若 EP06 只看单一 sharpness 指标、只看 overlay，或只用 stage command 当真值，会重新落入“展示倍率不是 SR 证据”和“stage command 不是 ground truth”的风险。
-# > **核心发现**: 数据支持启动 EP06 2x contour-level SR POC；对齐主线应为 data-driven NCC init + contour refinement gate，stage/filename 继续作为 prior 和对照。EP06 的验收必须围绕 split-half consistency、held-out contour Chamfer、phase-bin coverage 和可解释的视觉轮廓增益共同判断。
+# 本节汇总的交接决策表是对位移容量（Displacement Capacity）、相位容量（Phase Capacity）、配准精度（Alignment Comparison）和图像重叠证据（Overlay Evidence）的系统性提炼，旨在确立进入 2x 轮廓级超分辨率 POC 阶段（EP06）的基准配置与准入边界。
+# 决策表中的各项条款并非独立的实验结论，而是为后续重建建立的多维度质量控制门限：
+# 1. **配准推荐方案**：采用数据驱动的归一化互相关（Data-driven NCC）初始化，并引入轮廓精细化门控（Contour Refinement Gate），以获得最低的 held-out 轮廓 Chamfer 距离，同时引入局部定位锚点作为物理约束。
+# 2. **对照组设计**：必须包含未对齐（no alignment）、名义命令先验（stage prior）、文件名仿射变换（filename affine）及 NCC 初始对齐，以严格区分超分辨率重建中的真实对齐增益与纯粹的缩放或插值带来的伪增益。
+# 3. **高倍率（3x/4x）约束**：将 3x/4x 超分辨率重建归类为风险诊断状态，明确在当前点扩散函数（PSF）及信噪比限制下其相位覆盖容易出现塌陷（Phase Collapse），不能盲目将 2x contour 级别的局部可见度增益外推到更高倍率。
+# 4. **验收指标体系**：摒弃单一的 back-projection 残差或 Tenengrad 锐度指标，采用以 split-half 一致性、held-out 轮廓 Chamfer 距离、phase-bin 覆盖度及视觉轮廓可解释性增益组成的综合门控指标。
+# 综上所述，当前数据与配准分析支持启动 2x contour-level SR POC 阶段；后续重建工作必须在上述多维度验收指标下进行严谨评估，避免落入以单一指标代表分辨率提升的认知误区。

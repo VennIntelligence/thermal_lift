@@ -16,6 +16,7 @@ import pandas as pd
 from scipy.ndimage import distance_transform_edt, gaussian_filter, map_coordinates, shift as ndi_shift, sobel
 
 from thermal_core.displacement import coordinate_to_shift
+from thermal_core.ep05 import affine_shift, filename_affine_diagnostics, fit_filename_affine
 from thermal_core.io import load_frame
 from thermal_core.plotting import COLORMAPS, FIGURE_SIZES, savefig_academic, setup_academic_style
 
@@ -74,19 +75,6 @@ def load_main_session(audit_csv: Path) -> pd.DataFrame:
         main_session = audit.groupby("session")["file"].count().idxmax()
         main = audit[audit["session"].eq(main_session)].copy()
     return main.sort_values("acquisition_order").reset_index(drop=True)
-
-
-def fit_affine_from_alignment(alignment: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    valid = alignment[alignment["success"].astype(str).str.lower().eq("true") & alignment["R"].eq(0)].copy()
-    design = np.column_stack([np.ones(len(valid)), valid["X"].to_numpy(), valid["Y"].to_numpy()])
-    beta_dx = np.linalg.lstsq(design, valid["refined_align_dx_px"].to_numpy(), rcond=None)[0]
-    beta_dy = np.linalg.lstsq(design, valid["refined_align_dy_px"].to_numpy(), rcond=None)[0]
-    return beta_dx, beta_dy
-
-
-def affine_shift(row: pd.Series, beta_dx: np.ndarray, beta_dy: np.ndarray) -> tuple[float, float]:
-    x = np.array([1.0, float(row["X"]), float(row["Y"])])
-    return float(x @ beta_dx), float(x @ beta_dy)
 
 
 def stage_shift(row: pd.Series, ref_row: pd.Series, theta_deg: float, pixel_size_um: float) -> tuple[float, float]:
@@ -157,7 +145,6 @@ def plot_method_grid(results: dict[str, dict], title: str, output_path: Path) ->
         im = axes[1, col].imshow(edges, cmap=COLORMAPS["coverage"], vmin=0, vmax=1, interpolation="nearest")
         axes[1, col].set_title(f"Chamfer med {results[method]['median_chamfer_px']:.3f}px")
         axes[1, col].axis("off")
-    fig.suptitle(title)
     fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.025, pad=0.01, label="Edge persistence")
     savefig_academic(fig, output_path)
 
@@ -200,7 +187,19 @@ def main() -> None:
     alignment = pd.read_csv(args.alignment_csv)
     ref_file = str(alignment["reference_file"].dropna().iloc[0])
     ref_row = main_df[main_df["file"].eq(ref_file)].iloc[0]
-    beta_dx, beta_dy = fit_affine_from_alignment(alignment)
+    affine_fit = fit_filename_affine(alignment, robust=True)
+    diagnosis = filename_affine_diagnostics(alignment, affine_fit)
+    excluded_from_affine = set(
+        diagnosis.loc[diagnosis["residual_gate_outlier"], "file"].astype(str).tolist()
+    )
+    print(
+        "Filename affine robust fit: "
+        f"fit_rows={affine_fit.fit_count}, clean_rows={affine_fit.clean_count}, "
+        f"median_res={affine_fit.median_residual_px:.4f}px, "
+        f"threshold={affine_fit.outlier_threshold_px:.4f}px, "
+        f"fit_excluded={list(affine_fit.excluded_files)}, "
+        f"affine_score_excluded={sorted(excluded_from_affine)}"
+    )
     alignment_lookup = {
         str(row["file"]): (float(row["refined_align_dx_px"]), float(row["refined_align_dy_px"]))
         for _, row in alignment[alignment["success"].astype(str).str.lower().eq("true")].iterrows()
@@ -216,8 +215,9 @@ def main() -> None:
             for _, row in group.iterrows()
         }
         shifts_by_method["filename_affine_fit"] = {
-            str(row["file"]): affine_shift(row, beta_dx, beta_dy)
+            str(row["file"]): affine_shift(row, affine_fit.beta_dx, affine_fit.beta_dy)
             for _, row in group.iterrows()
+            if str(row["file"]) not in excluded_from_affine
         }
         shifts_by_method["data_driven_contour"] = {
             str(row["file"]): data_driven_shift(row, alignment_lookup)

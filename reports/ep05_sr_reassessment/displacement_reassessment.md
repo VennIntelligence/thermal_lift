@@ -2,11 +2,11 @@
 
 ## 1. Baseline Decision
 
-主 session 的 255 帧 TXT 温度矩阵具备进入 **2x contour-level SR POC** 的采样和对齐基础。当前路线不再以单个小步、单个边缘段或单个静态参考帧判断全局可行性，而是使用主 session 的全帧相位覆盖、数据驱动对齐和 held-out 轮廓残差共同约束。
+EP01 `is_sr_usable=True` 的 248 帧 clean main input 具备进入 **2x contour-level SR POC** 的采样和对齐基础。当前路线不再以单个小步、单个边缘段或单个静态参考帧判断全局可行性，而是使用 clean main input 的相位覆盖、数据驱动对齐和 held-out 轮廓残差共同约束。
 
 当前使用边界：
 
-- 采用 255 帧主 session 作为默认 SR 输入。
+- 采用剔除 `R != 0` repeat 后的 248 帧 clean main input 作为默认 SR 输入。
 - stage command 只作为位移 prior / 初始化 / 约束。
 - 连续相位 prior 优先使用 highpass NCC init 或 filename affine fit。
 - 轮廓精修和质量门控使用 data-driven contour refined alignment。
@@ -27,12 +27,12 @@ uv run python scripts/run_ep05_displacement_reassessment.py --n-jobs 16
 
 | 口径 | highpass NCC 结果 | 用途 |
 |---|---:|---|
-| 主 session X 相邻 2 um 小步 | median `0.0969 px` | 短时线性诊断 |
-| 主 session X 相邻 4 um 小步 | median `0.1917 px` | 短时线性诊断 |
-| R=0 完整 X scanline endpoint, 40 um | median `2.0836 px` | scanline 相位覆盖 |
-| R=0 完整 Y column endpoint, 40 um | median `4.4174 px` | column 相位覆盖 |
-| 主 session 逐帧累计轨迹 span | `2.8809 x 9.0435 px` | raster 二维覆盖 |
-| 主 session 逐帧路径长度 | `64.6964 px` | 全路径运动诊断 |
+| clean main X 相邻 2 um 小步 | median `0.0992 px` | 短时线性诊断 |
+| clean main X 相邻 4 um 小步 | median `0.1937 px` | 短时线性诊断 |
+| R=0 完整 X scanline endpoint, 40 um | median `2.0768 px` | scanline 相位覆盖 |
+| R=0 完整 Y column endpoint, 40 um | median `4.4161 px` | column 相位覆盖 |
+| clean main 逐帧累计轨迹 span | `2.4942 x 7.1124 px` | raster 二维覆盖 |
+| clean main 逐帧路径长度 | `61.1801 px` | 全路径运动诊断 |
 
 这些数值用于约束 2x SR POC 的相位覆盖和对齐设计。不要把任一局部测量单独上升为全局位移结论。
 
@@ -57,7 +57,7 @@ Notebook 前置页展示 `main_session_cumulative_trajectory.png`、`visible_shi
 uv run python scripts/run_ep05_alignment_sr_capacity_check.py
 ```
 
-该脚本在同一参考帧 `10_16_0.txt`、同一中心 ROI、同一 held-out edge points 上比较：
+该脚本在同一参考帧 `6_16_0.txt`、同一中心 ROI、同一 held-out edge points 上比较：
 
 1. `no_alignment`
 2. `old_stage_model`
@@ -69,11 +69,11 @@ uv run python scripts/run_ep05_alignment_sr_capacity_check.py
 
 | 方法 | held-out Chamfer median / P90 | gradient corr median | 2x occupied / bad bins | 2x min / max | entropy |
 |---|---:|---:|---:|---:|---:|
-| no alignment | `0.3813 / 0.7011 px` | `0.7023` | `1 / 3` | `0 / 255` | `0.000` |
-| old stage model | `0.2402 / 0.4158 px` | `0.8817` | `4 / 0` | `62 / 65` | `1.000` |
-| filename affine | `0.1708 / 0.2087 px` | `0.9551` | `4 / 0` | `60 / 67` | `0.999` |
-| data-driven NCC init | `0.1563 / 0.1758 px` | `0.9668` | `4 / 0` | `62 / 65` | `1.000` |
-| data-driven contour refined | `0.1341 / 0.1613 px` | `0.9487` | `4 / 0` | `58 / 69` | `0.999` |
+| no alignment | `0.3976 / 0.7080 px` | `0.6985` | `1 / 3` | `0 / 248` | `0.000` |
+| old stage model | `0.2462 / 0.4422 px` | `0.8776` | `4 / 0` | `60 / 64` | `1.000` |
+| filename affine | `0.1701 / 0.2043 px` | `0.9549` | `4 / 0` | `57 / 65` | `0.999` |
+| data-driven NCC init | `0.1558 / 0.1752 px` | `0.9672` | `4 / 0` | `59 / 66` | `0.999` |
+| data-driven contour refined | `0.1332 / 0.1610 px` | `0.9492` | `4 / 0` | `59 / 67` | `0.999` |
 
 Multi-scale phase 风险诊断：
 
@@ -89,14 +89,14 @@ Data-driven correction magnitude：
 
 | 对比 | shift delta median / P90 / max | paired Chamfer delta median | 解读 |
 |---|---:|---:|---|
-| NCC init - filename affine | `0.3182 / 0.5609 / 6.3922 px` | `-0.0149 px` | NCC init 不是简单复刻 filename affine |
-| contour refined - filename affine | `0.3896 / 0.7332 / 6.3491 px` | `-0.0355 px` | contour refined 有独立局部修正 |
+| NCC init - filename affine | `0.2977 / 0.5334 / 0.6173 px` | `-0.0156 px` | NCC init 不是简单复刻 filename affine |
+| contour refined - filename affine | `0.3976 / 0.7141 / 1.1703 px` | `-0.0356 px` | contour refined 有独立局部修正 |
 | contour refined - NCC init | `0.2500 / 0.3536 / 0.7071 px` | `-0.0201 px` | refinement 是小范围局部锚定 |
-| filename affine - stage prior | `0.5893 / 1.2409 / 2.0179 px` | `-0.0615 px` | filename affine 本身也明显不同于旧 stage prior |
+| filename affine - stage prior | `0.5797 / 1.4443 / 2.2329 px` | `-0.0738 px` | filename affine 本身也明显不同于旧 stage prior |
 
 结论：
 
-- 2x SR 四个相位格全部被覆盖，且每格约 `58-69` 帧。
+- 2x SR 四个相位格全部被覆盖，且每格约 `57-67` 帧。
 - `data_driven_contour_refined` 的 held-out Chamfer 最低，适合作为轮廓锚定和质量门控。
 - `data_driven_ncc_init` 和 `filename_affine_fit` 的相位分布更连续，适合作为 SR phase prior。
 - 3x/4x occupancy 不能证明高倍率 SR 可行；`data_driven_contour_refined` 在 3x/4x 上出现 phase collapse，尤其不能用于声明 4x。
@@ -105,10 +105,10 @@ Data-driven correction magnitude：
 
 | 方法 | sampled frames | density peak | density P99 | near-reference mean | off-reference mean | near/off ratio |
 |---|---:|---:|---:|---:|---:|---:|
-| no alignment | `80` | `1.0000` | `0.8750` | `0.4956` | `0.0029` | `172.5` |
-| data-driven contour refined | `80` | `1.0000` | `0.9959` | `0.5136` | `0.00003` | `17483.3` |
+| no alignment | `80` | `1.0000` | `0.8750` | `0.4990` | `0.0025` | `197.1` |
+| data-driven contour refined | `80` | `1.0000` | `0.9962` | `0.5149` | `0.00003` | `16117.4` |
 
-叠图采用 edge-density heatmap，而不是把 255 帧低透明度线条直接叠成不可读图。data-driven contour refined 后，远离参考边缘的背景 edge density 明显下降，和 held-out Chamfer 改善一致。
+叠图采用 edge-density heatmap，而不是把 248 帧低透明度线条直接叠成不可读图。data-driven contour refined 后，远离参考边缘的背景 edge density 明显下降，和 held-out Chamfer 改善一致。
 
 输出：
 
@@ -132,7 +132,7 @@ uv run python scripts/run_ep05_contour_alignment_validation.py --n-jobs 16
 
 方法：
 
-1. 选择主 session 中间帧 `10_16_0.txt` 作为对齐坐标系。
+1. 选择 clean main input 中间帧 `6_16_0.txt` 作为对齐坐标系。
 2. 每帧使用 highpass NCC 得到自由 2D 平移初值。
 3. 用 highpass-gradient 强边缘和 reference distance transform 做 Chamfer refinement。
 4. 用未参与细化的 held-out edge points 评价对齐。
@@ -141,23 +141,23 @@ uv run python scripts/run_ep05_contour_alignment_validation.py --n-jobs 16
 
 | 指标 | 数值 |
 |---|---:|
-| 参与帧数 | 255 |
-| 成功对齐帧数 | 255 |
-| 对齐前 held-out Chamfer median / P90 / max | `0.3813 / 0.7011 / 1.1966 px` |
-| NCC 初始化后 held-out Chamfer median / P90 / max | `0.1563 / 0.1758 / 0.1852 px` |
-| 轮廓细化后 held-out Chamfer median / P90 / max | `0.1341 / 0.1613 / 0.1804 px` |
-| refined Chamfer <= 0.2 px 的帧数 | `255 / 255` |
-| data-driven shift span | `5.0491 x 6.2536 px` |
-| refined shift norm median / P90 / max | `1.3991 / 2.3189 / 4.2197 px` |
+| 参与帧数 | 248 |
+| 成功对齐帧数 | 248 |
+| 对齐前 held-out Chamfer median / P90 / max | `0.3976 / 0.7080 / 1.0520 px` |
+| NCC 初始化后 held-out Chamfer median / P90 / max | `0.1558 / 0.1752 / 0.1829 px` |
+| 轮廓细化后 held-out Chamfer median / P90 / max | `0.1332 / 0.1610 / 0.1817 px` |
+| refined Chamfer <= 0.2 px 的帧数 | `248 / 248` |
+| data-driven shift span | `4.0166 x 4.9894 px` |
+| refined shift norm median / P90 / max | `1.4261 / 2.2816 / 3.1288 px` |
 
 Worst refined Chamfer frames：
 
 | frame | acquisition order | refined Chamfer | NCC peak | refined gradient corr | shift norm |
 |---|---:|---:|---:|---:|---:|
-| `2_36_0.txt` | 226 | `0.1804 px` | `0.9116` | `0.8838` | `1.0194 px` |
-| `14_20_0.txt` | 168 | `0.1788 px` | `0.9243` | `0.8903` | `0.0103 px` |
-| `24_36_0.txt` | 236 | `0.1760 px` | `0.9231` | `0.9077` | `2.2906 px` |
-| `20_40_0.txt` | 251 | `0.1752 px` | `0.9190` | `0.9037` | `2.1726 px` |
+| `32_10_0.txt` | 95 | `0.1817 px` | `0.9183` | `0.9157` | `2.0897 px` |
+| `10_20_0.txt` | 166 | `0.1793 px` | `0.9249` | `0.9180` | `0.7651 px` |
+| `40_40_0.txt` | 256 | `0.1782 px` | `0.9051` | `0.8761` | `1.9959 px` |
+| `4_12_0.txt` | 100 | `0.1747 px` | `0.9271` | `0.8951` | `0.0157 px` |
 
 本节优先使用 absolute held-out Chamfer，而不是依赖 improvement pct。improvement pct 仍可作为辅助诊断，但当 before Chamfer 很小时会被放大，不适合作为 EP06 handoff 的主证据。
 
@@ -187,10 +187,6 @@ Worst refined Chamfer frames：
 - `output/ep05_alignment_tuning_study/candidate_phase_coverage.csv`
 - `output/ep05_alignment_tuning_study/tuning_heatmap_heldout_chamfer.png`
 - `output/ep05_alignment_tuning_study/candidate_alignment_comparison.png`
-- `output/ep05_alignment_tuning/limit96_tuning_summary.csv`
-- `output/ep05_alignment_tuning/full_candidate_eval93_summary.csv`
-- `output/ep05_alignment_tuning/full_r360_e93_rad100_s0125/contour_alignment_results.csv`
-- `output/ep05_alignment_tuning/full_r360_e93_rad100_s0125_capacity_eval93/alignment_sr_capacity_summary.json`
 
 可复现脚本：
 
@@ -202,13 +198,12 @@ uv run python scripts/run_ep05_alignment_tuning_study.py --mode quick --limit-fr
 
 | 候选 | self held-out Chamfer median/P90 | fixed 93% eval Chamfer median/P90 | gradient corr median | 相对 NCC init | 相对 filename affine | 2x bins |
 |---|---:|---:|---:|---:|---:|---:|
-| default refined, step 0.25 | `0.1341 / 0.1613 px` | `0.1341 / 0.1613 px` | `0.9487` | `14.2%` 更低 | `21.4%` 更低 | `4/4` |
-| tuned refined, edge 93, step 0.125 | `0.1250 / 0.1554 px` | `0.1250 / 0.1554 px` | `0.9416` | `20.1%` 更低 | `26.5%` 更低 | `4/4` |
-| tuned refined, edge 91, step 0.125 | `0.1290 / 0.2411 px` | `0.1250 / 0.1563 px` | `0.9415` | `20.1%` 更低 | `26.6%` 更低 | `4/4` |
+| default refined, step 0.25 | `0.1281 / 0.1579 px` | `0.1281 / 0.1579 px` | `0.9518` | `17.6%` 更低 | `17.8%` 更低 | `4/4` |
+| tuned refined, edge 91, step 0.125 | `0.1209 / 0.1561 px` | `0.1209 / 0.1561 px` | `0.9439` | `22.2%` 更低 | `22.4%` 更低 | `4/4` |
 
 调参解释：
 
-- `edge_percentile=93, refine_step=0.125` 是当前 Chamfer 最强候选，但它牺牲了一部分 gradient correlation。
+- quick study 当前 Chamfer 最强候选为 `edge_percentile=91, refine_radius=0.5, refine_step=0.125`，但它牺牲了一部分 gradient correlation。
 - default refined 的 Chamfer 略高，但 gradient correlation 和 SAA split-half 更稳。
 - `data_driven_ncc_init` 的 Chamfer 不如 contour refined，但 gradient correlation 最强，且 3x/4x phase coverage 完整。
 - contour refined 不论默认还是 tuned，在 3x/4x 上都会出现 phase collapse：3x 只占 `4/9`，4x 只占 `4/16`。这强化了当前边界：**contour refinement 可作为 2x contour gate，不可作为 4x 证据**。
@@ -239,11 +234,11 @@ uv run python scripts/run_ep05_edge_line_overlay.py
 
 | 组别 | 最优/接近最优叠法 | 关键数值 |
 |---|---|---:|
-| 全部 R=0, 248 帧 | filename affine / data-driven contour | median `0.0827 / 0.0910 px` |
-| `Y=10` X scanline | filename affine | median `0.0391 px` |
-| `Y=20` X scanline | data-driven contour | median `0.0970 px` |
-| `X=10` Y column | filename affine / data-driven contour | median `0.0833 / 0.0888 px` |
-| `X=20` Y column | filename affine / data-driven contour | median `0.0826 / 0.0935 px` |
+| 全部 R=0, 248 帧 | filename affine / data-driven contour | median `0.0812 / 0.0904 px` |
+| `Y=10` X scanline | filename affine | median `0.0419 px` |
+| `Y=20` X scanline | data-driven contour | median `0.0993 px` |
+| `X=10` Y column | filename affine / data-driven contour | median `0.0862 / 0.0896 px` |
+| `X=20` Y column | filename affine / data-driven contour | median `0.0807 / 0.0890 px` |
 
 逐组 median Chamfer 结论：
 

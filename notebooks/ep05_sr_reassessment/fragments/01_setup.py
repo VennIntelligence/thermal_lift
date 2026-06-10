@@ -7,38 +7,49 @@
 # cd /path/to/thermal_lift
 # uv sync
 # uv pip install -e core/
-# uv run python scripts/run_ep05_alignment_sr_capacity_check.py
-# uv run jupyter notebook
-# # Kernel 选择: 项目 .venv 下的 Python 3
+#
+# # EP05 脚本产物变更后，先验证/写入 manifest：
+# uv run python scripts/build_ep05_cache.py
+#
+# # 再构建/执行本 notebook：
+# uv run python scripts/build_notebook.py notebooks/ep05_sr_reassessment --execute
 # ```
 #
-# **目标**: 汇总 255 帧主 session 的 2x phase-bin 覆盖、对齐方法 holdout 指标和叠图证据，为 EP06 的 2x contour-level SR POC 选择对齐起点。stage/filename 位移只作为 prior 和对照，EP04 localization 只作为 alignment anchor 与 quality gate。
+# %% [markdown]
+# # EP05 — 2x超分辨率物理容量评估与对齐基准标定
 #
-# **读者定位**: 本 Notebook 面向有科学/数学基础、但不熟悉微扫描 SR 证据链的读者。它不是直接展示最终 SR 图像，而是在进入 EP06 之前回答四个前置问题：
+# **研究目标**：基于亚像素微扫描原理与正向成像模型，定量评估 255 帧主 Session 温度矩阵的亚像素空间相位覆盖率，对比不同数据驱动对齐算法在 Holdout 测试集上的配准指标，为 EP06 轮廓级（Contour-level）超分辨率重建（SR）选定高精度的对齐起点。
 #
-# 1. 主 session 的 255 帧是否真的覆盖了 2x SR 所需的 sub-pixel phase？
-# 2. 哪种对齐方式在未参与拟合的轮廓点上更稳定？
-# 3. 轮廓叠图是否给出与数值指标一致的视觉证据？
-# 4. stage command 为什么只能作为 prior，而不能作为 ground truth？
+# ### 1. 超分辨率正向成像数学模型
 #
-# **证据边界**: 本 Episode 只判断“是否值得启动 2x contour-level SR POC”和“EP06 应从哪种 alignment baseline 起步”。它不声明已经实现 5 µm 计量级温度读数，也不把显示放大、Tenengrad 变大或 back-projection residual 变小单独当作 SR 成功证据。
+# 设待恢复的高清温度分布图像为 $x$，观测获取的第 $k$ 帧低清温度矩阵为 $y_k$。热成像仪的物理退化过程可表示为如下的正向成像模型（Forward Imaging Model）：
+# $$ y_k = D \cdot H \cdot W_k \cdot x + n_k $$
+# 其中：
+# - $W_k$ 为由平移和旋转运动决定的亚像素几何运动算子（Warping Operator）。
+# - $H$ 为光学系统的点扩散函数（PSF）低通模糊算子。
+# - $D$ 为物理孔径下采样算子（Downsampling Operator）。
+# - $n_k$ 为探测器随机热噪声（加性白噪声，物理底限为 $\sigma_n = 0.0724^\circ\text{C}$）。
+#
+# ### 2. 2x 轮廓增强与评价指标边界
+#
+# 本算法框架的 2x 重建物理目标，不是在物理极限之外恢复绝对的微小温度读数（如恢复 5 µm 尺度的计量级温度信号），而是为了**提高芯片内部结构和形状的轮廓可见性（Contour-level Enhancement）**。
+# 在超分辨率重建的评价中：
+# 1. **回投残差（Back-projection Residual）** $\sum_k \|y_k - D H W_k \hat{x}\|_2^2$ 仅反映前向投影的数学拟合度，容易因图像过度平滑（PSF展宽）或配准过拟合而人为降低。
+# 2. **Tenengrad 锐度指标** 容易受到噪声放大和重建伪影的污染而虚高。
+#
+# 综上，回投残差与锐度指标均不能作为超分辨率成功的唯一性证据。必须强制引入 **空间几何特征一致性（Contour Chamfer Distance）** 和 **梯度相关系数（Gradient Correlation）** 联合校验作为重建成功的验收标准。
+
 
 # %%
-%matplotlib inline
-
 from pathlib import Path
 
 import pandas as pd
-from IPython.display import Image, display
+from IPython.display import Image as NotebookImage, display
 
 from thermal_core.ep05 import (
     contour_alignment_tail_table,
     data_driven_correction_table,
     fractional_phase_distribution_table,
-    load_capacity_outputs,
-    load_contour_alignment_outputs,
-    load_displacement_outputs,
-    load_overlay_alignment_outputs,
     multi_scale_phase_coverage_table,
     ordered_method_table,
     overlay_density_table,
@@ -49,68 +60,43 @@ from thermal_core.ep05 import (
     visible_shift_key_table,
     worst_contour_frames_table,
 )
+from thermal_core.ep05_cache import load_ep05_cache
 from thermal_core.plotting import setup_academic_style
 
 PROJECT_ROOT = Path.cwd()
 while not (PROJECT_ROOT / "AGENTS.md").exists() and PROJECT_ROOT != PROJECT_ROOT.parent:
     PROJECT_ROOT = PROJECT_ROOT.parent
 
-DISPLACEMENT_DIR = PROJECT_ROOT / "output" / "ep05_sr_reassessment"
-CAPACITY_DIR = PROJECT_ROOT / "output" / "ep05_alignment_sr_capacity"
-CONTOUR_DIR = PROJECT_ROOT / "output" / "ep05_contour_alignment"
-OVERLAY_DIR = PROJECT_ROOT / "output" / "ep05_overlay_alignment"
-OUTPUT_DIR = CAPACITY_DIR
-
-REQUIRED_OUTPUTS = {
-    DISPLACEMENT_DIR: [
-        "displacement_reassessment_summary.json",
-        "displacement_measurements.csv",
-        "displacement_summary_by_class.csv",
-        "main_session_cumulative_trajectory.csv",
-        "main_session_cumulative_trajectory.png",
-        "visible_shift_by_pair_class.png",
-        "endpoint_displacement_vectors.png",
-    ],
-    CAPACITY_DIR: [
-        "alignment_sr_capacity_summary.json",
-        "alignment_method_summary.csv",
-        "alignment_method_holdout_scores.csv",
-        "phase_bin_summary_2x.csv",
-        "phase_bin_counts_2x.csv",
-        "alignment_method_comparison.png",
-        "phase_bin_coverage_2x.png",
-        "alignment_overlay_evidence.png",
-        "alignment_overlay_density_metrics.csv",
-    ],
-    CONTOUR_DIR: [
-        "contour_alignment_results.csv",
-        "contour_alignment_summary.json",
-    ],
-    OVERLAY_DIR: [
-        "overlay_alignment_summary.csv",
-        "all_main_4x4_txt_bmp_overlay.png",
-        "all_main_4x4_edge_line_overlay.png",
-    ],
-}
-missing = [
-    f"{directory.relative_to(PROJECT_ROOT)}/{name}"
-    for directory, names in REQUIRED_OUTPUTS.items()
-    for name in names
-    if not (directory / name).exists()
-]
-if missing:
-    raise FileNotFoundError(
-        "Missing EP05 reassessment outputs. Re-run the EP05 reassessment, contour, overlay, "
-        "and capacity scripts before building this notebook. "
-        f"Missing: {missing}"
-    )
-
 setup_academic_style()
-outputs = load_capacity_outputs(OUTPUT_DIR)
-displacement_outputs = load_displacement_outputs(DISPLACEMENT_DIR)
-contour_outputs = load_contour_alignment_outputs(CONTOUR_DIR)
-overlay_outputs = load_overlay_alignment_outputs(OVERLAY_DIR)
-summary_json = outputs["summary_json"]
+cache = load_ep05_cache(project_root_path=PROJECT_ROOT)
+
+DISPLACEMENT_DIR = cache.displacement_dir
+CAPACITY_DIR = cache.capacity_dir
+CONTOUR_DIR = cache.contour_dir
+OVERLAY_DIR = cache.overlay_dir
+OUTPUT_DIR = CAPACITY_DIR
+TUNING_STUDY_DIR = cache.tuning_study_dir
+
+displacement_outputs = cache.displacement_outputs
+outputs = cache.capacity_outputs
+contour_outputs = cache.contour_outputs
+overlay_outputs = cache.overlay_outputs
+tuning_outputs = cache.tuning_outputs
+summary_json = cache.summary_json
+
+
+def show_fig(path: Path, *, width: int | None = None) -> None:
+    """Display a cached EP05 PNG via NotebookImage (retina)."""
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Missing cached figure: {path}\n"
+            "Run: uv run python scripts/build_ep05_cache.py"
+        )
+    kwargs = {"filename": str(path), "retina": True}
+    if width is not None:
+        kwargs["width"] = width
+    display(NotebookImage(**kwargs))
+
 
 pd.set_option("display.max_colwidth", 120)
 print(f"Project root: {PROJECT_ROOT}")
@@ -123,7 +109,9 @@ print(f"Reference frame: {summary_json['reference_file']}")
 print(f"ROI size: {summary_json['roi_size']} px, edge percentile: {summary_json['edge_percentile']:.1f}")
 
 # %% [markdown]
-# > **数据说明**: 本 Notebook 读取 `run_ep05_alignment_sr_capacity_check.py` 生成的 EP05 capacity 输出，输入帧限制在 EP01 标记的主 session。
-# > **怎么读**: 上方几行输出确认了项目根目录、结果目录、参与评分的主 session 帧数、参考帧、ROI 大小和边缘阈值。后续所有表格和图片都基于这组固定输入，因此不同方法之间的比较是同一数据、同一 ROI、同一 reference frame 下的横向比较。
-# > **正常/异常理解**: 正常情况下，`Main frames scored` 应等于主 session 帧数 255，reference frame 和 ROI 参数应固定。如果帧数明显变少，说明前置筛选或输出文件不完整；如果跨 session 混入，则温度漂移会污染 alignment 和 phase 统计。
-# > **核心发现**: 后续判断只讨论 2x contour-level SR POC 是否可以启动；stage 和 filename shift 是 prior/对照，不作为对齐真值，因为它们描述的是命令或文件名坐标下的期望位移，而不是热像数据实际支持的局部对齐结果。
+# %% [markdown]
+# ### ⚙️ 空间相位与对齐性能参数审计
+#
+# 审计确认本 Notebook 的输入严格锁定于 Session 2 的稳定主扫描数据（共 255 帧）。
+#
+# **💡 算法决策**：全局运动先验仅作为优化重构的初始种子。配准算法的性能优劣必须基于独立特征集（Holdout contours）进行评估。如果 Holdout 测试指标显示名义对齐的 Chamfer 距离大于 0.2 像素，则算法必须激活基于高通 NCC 或轮廓梯度的数据驱动配准精化，防止配准漂移在前向成像模型中引入累积残差。

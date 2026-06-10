@@ -37,16 +37,15 @@ if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
 from scripts.run_ep05_alignment_sr_capacity_check import (  # noqa: E402
-    affine_shift,
     center_roi,
     chamfer_score,
     deterministic_subsample,
     edge_mask_from_frame,
-    fit_affine_from_alignment,
     gradient_magnitude,
     image_correlation_after_shift,
     phase_occupancy,
 )
+from thermal_core.ep05 import affine_shift, fit_filename_affine  # noqa: E402
 from scripts.run_ep05_contour_alignment_validation import (  # noqa: E402
     AlignmentTask,
     choose_reference,
@@ -363,7 +362,8 @@ def score_candidate_comparison(
 
     tuned_lookup = tuned_valid.set_index("file").to_dict("index")
     default_lookup = default_valid.set_index("file").to_dict("index")
-    beta_dx, beta_dy = fit_affine_from_alignment(tuned_valid)
+    affine_fit = fit_filename_affine(tuned_valid, robust=True)
+    beta_dx, beta_dy = affine_fit.beta_dx, affine_fit.beta_dy
 
     records: list[dict] = []
     for _, row in main_df.iterrows():
@@ -506,7 +506,6 @@ def plot_tuning_heatmap(summary: pd.DataFrame, output_path: Path, metric_col: st
 
     cbar = fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.046, pad=0.04)
     cbar.set_label("Held-out Chamfer [px], lower is better")
-    fig.suptitle("Alignment Tuning: Common-Evaluation Held-Out Chamfer")
     savefig_academic(fig, output_path)
 
 
@@ -577,7 +576,6 @@ def plot_candidate_comparison(
     cbar = fig.colorbar(im, ax=axes[2], fraction=0.046, pad=0.04)
     cbar.set_label("Occupied fraction")
 
-    fig.suptitle("Tuned Alignment Candidate Comparison")
     savefig_academic(fig, output_path)
 
 

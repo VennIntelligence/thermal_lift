@@ -19,6 +19,7 @@ from PIL import Image
 from scipy.ndimage import gaussian_filter, shift as ndi_shift
 
 from thermal_core.displacement import coordinate_to_shift
+from thermal_core.ep05 import affine_shift, filename_affine_diagnostics, fit_filename_affine
 from thermal_core.io import load_frame
 from thermal_core.plotting import savefig_academic, setup_academic_style
 
@@ -148,14 +149,6 @@ def load_main_frames(audit_csv: Path, data_dir: Path, alignment: pd.DataFrame) -
     return main.sort_values("acquisition_order").reset_index(drop=True)
 
 
-def fit_filename_affine(alignment: pd.DataFrame) -> tuple[np.ndarray, np.ndarray]:
-    valid = alignment[boolish(alignment["success"]) & alignment["R"].eq(0)].copy()
-    design = np.column_stack([np.ones(len(valid)), valid["X"].to_numpy(), valid["Y"].to_numpy()])
-    beta_dx = np.linalg.lstsq(design, valid["refined_align_dx_px"].to_numpy(), rcond=None)[0]
-    beta_dy = np.linalg.lstsq(design, valid["refined_align_dy_px"].to_numpy(), rcond=None)[0]
-    return beta_dx, beta_dy
-
-
 def build_shift_tables(
     frames: pd.DataFrame,
     alignment: pd.DataFrame,
@@ -163,7 +156,22 @@ def build_shift_tables(
 ) -> dict[str, dict[str, tuple[float, float]]]:
     ref_file = str(alignment["reference_file"].dropna().iloc[0])
     ref_row = frames[frames["file"].eq(ref_file)].iloc[0]
-    beta_dx, beta_dy = fit_filename_affine(alignment)
+    affine_fit = fit_filename_affine(alignment, robust=True)
+    diagnosis = filename_affine_diagnostics(alignment, affine_fit)
+    excluded_from_overlay = set(
+        diagnosis.loc[diagnosis["residual_gate_outlier"], "file"].astype(str).tolist()
+    )
+    stage_label = f"Old stage model\n(n_excluded={len(excluded_from_overlay)})"
+    filename_label = f"Filename affine\n(n_excluded={len(excluded_from_overlay)})"
+    print(
+        "Filename affine robust fit: "
+        f"fit_rows={affine_fit.fit_count}, clean_rows={affine_fit.clean_count}, "
+        f"median_res={affine_fit.median_residual_px:.4f}px, "
+        f"threshold={affine_fit.outlier_threshold_px:.4f}px, "
+        f"fit_excluded={list(affine_fit.excluded_files)}, "
+        f"overlay_excluded={sorted(excluded_from_overlay)}"
+    )
+    print(f"Old stage model overlay_excluded={sorted(excluded_from_overlay)}")
     align_lookup = {
         str(row["file"]): (float(row["refined_align_dx_px"]), float(row["refined_align_dy_px"]))
         for _, row in alignment[boolish(alignment["success"])].iterrows()
@@ -172,8 +180,8 @@ def build_shift_tables(
     pixel_size_um = float(stage_config["pixel_size_um"])
     tables = {
         "No alignment": {},
-        "Old stage model": {},
-        "Filename affine": {},
+        stage_label: {},
+        filename_label: {},
         "Data-driven contour": {},
     }
     for _, row in frames.iterrows():
@@ -185,9 +193,9 @@ def build_shift_tables(
             theta_deg=theta_deg,
             pixel_size_um=pixel_size_um,
         )
-        tables["Old stage model"][name] = (-float(dx_stage), float(dy_stage_math))
-        design = np.array([1.0, float(row["X"]), float(row["Y"])])
-        tables["Filename affine"][name] = (float(design @ beta_dx), float(design @ beta_dy))
+        if name not in excluded_from_overlay:
+            tables[stage_label][name] = (-float(dx_stage), float(dy_stage_math))
+            tables[filename_label][name] = affine_shift(row, affine_fit.beta_dx, affine_fit.beta_dy)
         tables["Data-driven contour"][name] = align_lookup[name]
     return tables
 
@@ -207,6 +215,8 @@ def composite_edges(
 
     for idx, (_, row) in enumerate(frames.iterrows()):
         name = str(row["file"])
+        if name not in shifts:
+            continue
         dx, dy = shifts[name]
         if modality == "txt":
             frame = load_frame(data_dir / name).astype(np.float32, copy=False)
@@ -232,7 +242,7 @@ def composite_edges(
         rgba[mask, 3] = out_alpha
         persistence[mask] += 1.0
 
-    persistence /= float(len(frames))
+    persistence /= float(max(1, len(shifts)))
     return rgba, persistence
 
 
@@ -267,11 +277,6 @@ def plot_grid(outputs: dict[str, dict[str, tuple[np.ndarray, np.ndarray]]], outp
                 axes[row_idx, col].set_ylabel(label, fontsize=11)
     fig.patch.set_facecolor("white")
     fig.patch.set_alpha(1.0)
-    fig.suptitle(
-        f"White-background edge-only overlays, center 3x crop, n={n_frames} paired frames",
-        fontsize=13,
-        fontweight="bold",
-    )
     savefig_academic(fig, output_path, close=True)
 
 
