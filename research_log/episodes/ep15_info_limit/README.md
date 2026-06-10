@@ -56,7 +56,18 @@
 
 ## M3 结论（σ 仲裁）
 
-（由下游 agent 回填）
+**结论**: Route B 偏大的机制被支持。多边缘 ESF 显示 die 外边框的 apparent `sigma_total` 明显宽于内部强边缘：外边框 median **1.015 LR px**，内部金属强边缘 median **0.747 LR px**，最陡温度边缘 median **0.888 LR px**；外边框/内部边缘比值 **1.36**，差值 **0.267 LR px**。这说明 EP09 Route B 的 **1.129 LR px** 主要是在测 `系统 PSF ⊗ 热边缘宽度`，不是纯光学 PSF。若把最锐单边缘 `sigma_total=0.546 LR px` 当作光学上界，外边框还需要约 **0.855 LR px** 的热/几何边缘宽度才能解释。
+
+FRC 形状交叉检验也没有支持 `sigma≈1.0 LR px` 的宽 PSF：在 12-80 µm 周期拟合 `Gaussian PSF × 10 µm detector aperture` 的 MTF² 形状时，最佳 grid 点为 **0.2 LR px**（MSE 0.044，corr 0.931），随后 0.3/0.4/0.5 LR px 逐步变差，0.7/1.0 LR px 明显更差。结合 M2 cutoff 给出的 `sigma_target_02=0.486`、`sigma_target_03=0.421`，后续 M4 的可信扫描区间采用 **0.2-0.5 LR px**。注意：ESF 最锐边缘上界 0.546 LR px 略高于该区间，说明“部分解释”仍比“完全定标”更准确；M4 的 σ 扫描已覆盖这一风险。
+
+产物：
+
+- `output/ep15_info_limit/m3_sigma/edge_comparison.png`
+- `output/ep15_info_limit/m3_sigma/frc_shape_fit.png`
+- `output/ep15_info_limit/m3_sigma/sigma_summary.json`
+- `output/ep15_info_limit/m3_sigma/edge_fit_table.csv`
+- `output/ep15_info_limit/m3_sigma/edge_summary.csv`
+- `output/ep15_info_limit/m3_sigma/frc_shape_fit_scores.csv`
 
 ## M4 结论（去卷积锚）
 

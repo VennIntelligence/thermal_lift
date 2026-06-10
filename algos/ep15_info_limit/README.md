@@ -25,3 +25,11 @@ uv run python scripts/run_m2_frc.py
 ```
 
 Outputs are written to `output/ep15_info_limit/m2_frc/`.
+
+## M3 Sigma Arbitration
+
+```bash
+uv run python scripts/run_m3_sigma_arbitration.py
+```
+
+Outputs are written to `output/ep15_info_limit/m3_sigma/`.
