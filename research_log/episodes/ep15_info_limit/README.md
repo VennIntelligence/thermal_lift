@@ -71,4 +71,19 @@ FRC 形状交叉检验也没有支持 `sigma≈1.0 LR px` 的宽 PSF：在 12-80
 
 ## M4 结论（去卷积锚）
 
-（由下游 agent 回填）
+**结论**: MAP-TV 建立了后续 4x 网络必须超越的经典基准线，但 zigzag 增益是小幅且混合的，不应包装成强阳性结果。全量 248 帧、5x 网格、box detector forward model 下，split-half selection 选择 **σ=0.2 LR px、λ=1e-3**；全任务在 GPU 0 上耗时 **4563 s（约 76.1 min）**。zigzag 三条硬编码剖面均仍可分离，median 单线表观 FWHM **114 → 100 µm**（收窄 14 µm），median valley dip depth **0.929 → 0.934**（+0.005），但逐条剖面有两条 FWHM 变宽、一条明显收窄，因此只能解释为“有限轮廓增强”。
+
+FRC 复验支持“去卷积提高 split-half 一致性”，但不是 4 µm 光学分辨率证明：bare drizzle cutoff 仍为 **17.03 µm**，MAP-TV 曲线在 20/16/14/12/10 µm 的 FRC 分别为 **0.976/0.965/0.955/0.947/0.934**（bare 为 **0.319/0.088/0.053/0.575/0.893**）。MAP-TV highpass 图能减轻 bare drizzle 的 lattice/coverage 伪影并增强中心 zigzag 轮廓，但仍有点状去卷积伪影，且 150 iter 后 full-run relative update 约 **0.005**，达到平台期但没有触发 `tol=1e-5` 早停。
+
+后续判据：任何 4x UNet/Transformer 若不能在 **FRC 频带一致性** 和 **zigzag FWHM / dip 指标** 上同时优于这个 MAP-TV 锚，则不予采纳。负结果也同样有效：若网络只产生更锐视觉但 FRC 或 zigzag 剖面不优于 M4，应视为伪锐化风险。
+
+关键产物：
+
+- `output/ep15_info_limit/m4_deconv_anchor/four_arm_comparison.png`
+- `output/ep15_info_limit/m4_deconv_anchor/four_arm_highpass.png`
+- `output/ep15_info_limit/m4_deconv_anchor/zigzag_profiles.png`
+- `output/ep15_info_limit/m4_deconv_anchor/zigzag_profile_metrics.csv`
+- `output/ep15_info_limit/m4_deconv_anchor/convergence_curves.png`
+- `output/ep15_info_limit/m4_deconv_anchor/frc_verification.png`
+- `output/ep15_info_limit/m4_deconv_anchor/parameter_selection.csv`
+- `output/ep15_info_limit/m4_deconv_anchor/map_tv_best.npy`
