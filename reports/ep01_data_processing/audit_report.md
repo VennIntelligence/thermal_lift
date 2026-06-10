@@ -11,10 +11,11 @@ EP01 audits the raw LWIR TXT/BMP dataset and turns it into a reproducible input 
 | Raw TXT/BMP files | 263 TXT, 263 BMP, 263 paired | Use TXT as SR input; BMP is visual reference. |
 | Matrix size | 480 x 640 | All frames share one detector grid. |
 | Total frames | 263 | Full audit population before session gating. |
-| Main session frames | session 2: 255 | Default input set for micro-scan SR. |
+| Raw main session frames | session 2: 255 | Physical temperature segment before repeat exclusion. |
+| Clean SR input frames | 248 | Default input set for micro-scan SR after repeat exclusion. |
 | Session temperature jump scale | 2.91 deg C median, 4.16 deg C max (40x / 57x noise floor) | Cross-session frames should not be mixed. |
-| Main-session drift span | 0.62 deg C | Default input frames stay within this temperature band. |
-| Coordinate coverage | 253/256 total; 253/256 in main session | Main session covers the full usable coordinate grid. |
+| Main-session drift span | 0.54 deg C | Default input frames stay within this temperature band. |
+| Coordinate coverage | 253/256 total; 253/256 raw main; 248/256 clean SR | Clean SR input covers the usable coordinate grid after repeat exclusion. |
 
 ## Frame Inventory
 
@@ -46,6 +47,16 @@ Repeat-ID distribution:
 | 0 | 253 | 253 |
 | 1 | 4 | 4 |
 | 2 | 6 | 6 |
+
+Repeat-frame exclusion summary:
+
+| frame_role | repeat_exclusion_reason | sr_exclusion_reason | n_frames |
+| --- | --- | --- | --- |
+| other_session |  | not_raw_main_session | 5 |
+| repeat_diagnostic | post_main_repeat | repeat_frame | 6 |
+| repeat_diagnostic | prewarm_or_main_start_repeat | not_raw_main_session | 3 |
+| repeat_diagnostic | prewarm_or_main_start_repeat | repeat_frame | 1 |
+| sr_default |  |  | 248 |
 
 The dataset contains `253/256` actual coordinates. Missing coordinates are `[(14, 6), (16, 6), (16, 16)]`. These gaps are coordinate-level absences, not merely missing `R=0` repeats.
 
@@ -81,7 +92,7 @@ Boundary jumps compared with the `0.0724` deg C noise floor:
 | 0 | 1 | S0 -> S1 | 0_0_1.txt | 0_0_0.txt | -1.662 | 1.662 | 0.072 | 22.954 | thermal-state jump; keep sessions isolated |
 | 7 | 8 | S1 -> S2 | 8_0_0.txt | 8_0_1.txt | 4.157 | 4.157 | 0.072 | 57.416 | thermal-state jump; keep sessions isolated |
 
-The main session is session `2` with `255` frames. It spans acquisition orders `8` to `262`, covers `253/256` coordinates, and has a mean-temperature span of `0.621` deg C within the session.
+The raw physical main session is session `2` with `255` frames. It spans acquisition orders `8` to `262` and covers `253/256` coordinates before repeat exclusion. The clean SR input set excludes all `R != 0` repeat frames and contains `248` frames across `248/256` coordinates. Its acquisition-order span is `9` to `256` and its mean-temperature span is `0.544` deg C.
 
 R=0 raster row-order diagnostic:
 
@@ -106,7 +117,7 @@ R=0 raster row-order diagnostic:
 
 ## SR Input Rule
 
-Downstream SR should inherit `frame_audit.csv` and use `acquisition_order`, `session`, and `is_main_session` as the frame-selection contract. The default 2x contour-level SR POC input is the `255`-frame main session. Stage/filename coordinates are useful as command priors for initialization or regularization, but actual alignment must be constrained by image data and later EP04 localization quality gates.
+Downstream SR should inherit `frame_audit.csv` and use `acquisition_order` plus `is_sr_usable == True` as the frame-selection contract. `session == 2` remains the raw physical temperature segment (`255` frames), while `is_sr_usable` / the compatibility alias `is_main_session` define the repeat-excluded clean SR input (`248` frames). Stage/filename coordinates are useful as command priors for initialization or regularization, but actual alignment must be constrained by image data and later EP04 localization quality gates.
 
 Cross-session frames should not be mixed into one reconstruction pass. The detected session-boundary jumps are `2.91` deg C median and `4.16` deg C max, which are about `40x` and `57x` the `0.0724` deg C noise floor.
 
@@ -122,11 +133,22 @@ Cross-session frames should not be mixed into one reconstruction pass. The detec
 | rows, cols | Detector matrix shape. | Validate that all TXT frames share the 480 x 640 grid. | required |
 | T_min, T_max, T_mean, T_std | Basic per-frame temperature statistics. | Detect bad frames and session-level thermal jumps. | required |
 | T_q05, T_median, T_q95, T_robust | Robust per-frame temperature statistics. | Check that session conclusions are not driven by extreme pixels. | required |
-| session | Temperature segment ID detected in acquisition order. | Session gate for downstream alignment and reconstruction inputs. | required |
+| session | Temperature segment ID detected in acquisition order. | Physical thermal-state diagnostic; do not use alone for SR input after repeat exclusion. | required |
 | session_source | Method used to assign the session field. | Provenance guard against filename-order session artifacts. | required |
-| is_main_session | Boolean flag for the largest usable temperature segment. | Default filter for the 255-frame main-session input set. | required |
+| is_raw_main_session | Boolean flag for the largest acquisition-order temperature segment before repeat exclusion. | Preserves the 255-frame physical session-2 definition for diagnostics. | required |
+| is_repeat_frame | Boolean flag for nonzero repeat IDs (R != 0). | Exclude from downstream SR inputs; keep only for repeat diagnostics. | required |
+| has_repeat_sibling | Whether the same (X, Y) coordinate has more than one repeat ID in the full audit. | Use for repeat-acquisition diagnostics and provenance checks. | required |
+| repeat_exclusion_reason | Reason a repeat frame is excluded from clean SR input. | Documents prewarm/main/post-main repeat handling without deleting audit rows. | required |
+| is_clean_main_session | Boolean flag for raw main-session frames after repeat-frame exclusion. | Clean thermal baseline for later alignment and SR work. | required |
+| is_sr_usable | Boolean flag for the default downstream SR input set. | Primary frame-selection gate for reconstruction code. | required |
+| sr_input_index | Zero-based index within is_sr_usable frames sorted by acquisition_order. | Stable per-frame index for clean SR inputs; blank for excluded frames. | required |
+| sr_exclusion_reason | Reason a frame is outside the default SR input set. | Audit trail for repeat, non-main-session, and invalid-frame exclusion. | required |
+| frame_role | Human-readable role assigned by EP01. | Quickly separates sr_default, repeat_diagnostic, and non-main diagnostic frames. | required |
+| is_main_session | Compatibility alias for is_sr_usable after repeat exclusion. | Legacy loaders that filter is_main_session now receive the clean SR input set. | required |
 
 ## Output Files
+
+Rebuild cache with `uv run python scripts/build_ep01_cache.py`.
 
 - `frame_audit.csv`
 - `acquisition_order_audit.csv`
@@ -135,6 +157,7 @@ Cross-session frames should not be mixed into one reconstruction pass. The detec
 - `frame_temperature_statistics.png`
 - `robust_temperature_timeline.png`
 - `order_comparison.png`
-- `acquisition_raster_trajectory.png`
-- `session_detection.png`
+- `repeat_exclusion_order_comparison.png`
+- `session_detection_a.png`
+- `session_detection_b.png`
 - `session_coordinate_coverage.png`

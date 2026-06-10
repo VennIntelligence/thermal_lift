@@ -60,7 +60,7 @@
 - [x] 更新 notebook fragments
 - [x] 增加 BMP/TXT pairing provenance 表；`rename_mapping.csv` 缺失时只记录 provenance gap，不臆造原始映射
 - [x] 增加 `frame_audit.csv` 下游 contract 表，固定关键列含义和使用边界
-- [ ] 重新构建并执行 EP01 notebook（本轮为遵守写入范围，未生成 `.ipynb`/`output/` 产物）
+- [x] Notebook 改为只读 `output/ep01_data_processing/` 缓存；重算走 `scripts/build_ep01_cache.py`
 - [x] 更新正式报告 `reports/ep01_data_processing/audit_report.md`
 - [x] 输出机器可读 CSV 到 `output/ep01_data_processing/`
 

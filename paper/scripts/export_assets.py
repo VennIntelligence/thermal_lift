@@ -20,7 +20,7 @@ TABLE_DIR = PAPER_ROOT / "tables"
 
 
 FIGURES = {
-    "ep01_session_detection.png": "output/ep01_data_processing/session_detection.png",
+    "ep01_session_detection.png": "output/ep01_data_processing/session_detection_a.png",
     "ep01_raster_trajectory.png": "output/ep01_data_processing/acquisition_raster_trajectory.png",
     "ep02_data_driven_alignment.png": "output/ep02_displacement_calibration/ep02_data_driven_alignment_comparison.png",
     "ep03_mtf_snr_recoverability.png": "output/ep03_theoretical_limits/mtf_snr_recoverability_heatmap.png",

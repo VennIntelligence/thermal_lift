@@ -1,29 +1,12 @@
 # %% [markdown]
 # ## 2.4 全数据坐标覆盖率可视化
-#
-# 16×16 坐标网格的 frame 计数热力图。颜色越深 = 该坐标拥有的帧数越多。
 
 # %%
-grid = compute_coverage_grid(coord_map, list(VALID_COORDS))
-plot_coverage_heatmap(grid, list(VALID_COORDS),
-                      save_path="coordinate_coverage_map.png", save_fn=save_fig)
+show_fig("coordinate_coverage_map.png")
 
 # %% [markdown]
-# > **图表说明**: 16×16 坐标网格热力图，横轴为 X 坐标 (µm)，纵轴为 Y 坐标 (µm)，
-# > 颜色编码每个 (X,Y) 位置的重复测量次数 (0/1/2/3)。
-# > 这张图回答的问题是：电动台命令网格上，哪些位置真的有温度矩阵。
-# >
-# > **怎么读**: 每个小格对应一个 stage command 坐标，不对应单个 detector 像素。
-# > 颜色为 0 表示该坐标没有任何帧；颜色为 1 表示只有一次采集；颜色为 2/3 表示存在重复测量。
-# > 读图时先看是否有大片空洞，再看重复测量是否集中在少数区域。
-# >
-# > **数据分布**: 绝大多数坐标 (247/256) 仅有 1 次测量。
-# > 4 个坐标拥有完整 3-repeat: (0,0)(2,0)(6,0)(8,0)，均位于 Y=0 行。
-# > 3 个坐标完全缺失 (值=0): (14,6)(16,6)(16,16)。
-# >
-# > **正常/异常理解**: 对 EP01 来说，近乎完整的二维覆盖是正常且可用的；
-# > 少量零值坐标会减少采样点，但不会自动否定主 session。
-# > 如果出现整行/整列缺失，才会提示扫描中断或命名解析错误，需要重新审计采集路径。
-# >
-# > **核心发现**: 坐标覆盖率 253/256 = 98.8%，数据集近乎完整。
-# > 这张图说明主数据具备微扫描 SR 所需的二维采样覆盖；少量 repeat 可用于质量诊断，但不是重建主证据。
+# Figure 1: Coordinate coverage map. Frame counts are shown for each commanded scan coordinate.
+
+# %% [markdown]
+# > [!TIP]
+# > **图表解读**：上图为 $16 \times 16$ 命令坐标平面上的帧数覆盖图。直观展示了 3 个缺失坐标（空白格）以及 $Y=0$ 线上少量 3-repeat 帧的空间分布。

@@ -12,76 +12,65 @@
 # ### 运行环境
 #
 # ```bash
-# # 本 notebook 使用项目根目录的 UV 环境
+# # 本 notebook 只读取 EP01 缓存产物，不重复扫描 263 个 TXT。
 # cd /path/to/thermal_lift
-# uv sync                  # 安装依赖（含 thermal-core）
-# uv run jupyter notebook  # 启动 Jupyter
-# # Kernel 选择: 项目 .venv 下的 Python 3
+# uv sync
+#
+# # 原始数据或 EP01 逻辑变更时，先重建缓存（约 15–20 s）：
+# uv run python scripts/build_ep01_cache.py
+#
+# # 再构建/执行本 notebook（通常 < 2 s）：
+# uv run python scripts/build_notebook.py notebooks/ep01_data_processing --execute
 # ```
 
 # %%
-%matplotlib inline
-
-import json
 from pathlib import Path
 
 import pandas as pd
+from IPython.display import Image as NotebookImage, display
 
-from thermal_core.plotting import setup_academic_style, savefig_academic
-from thermal_core.io import audit_all_frames, check_bmp_txt_pairing, \
-    build_coord_repeat_map, compute_coverage_grid
-from thermal_core.ep01 import (
-    add_robust_temperature_stats,
-    build_session_model,
-    make_acquisition_order_audit_table,
-    make_boundary_jump_table,
-    make_bmp_txt_pairing_table,
-    make_ep01_summary_table,
-    make_frame_audit_contract_table,
-    make_missing_coordinate_table,
-    make_raster_row_table,
-    plot_acquisition_raster_trajectory,
-    plot_order_comparison,
-    plot_robust_temperature_curve,
-    plot_session_coverage_heatmaps,
-)
-from thermal_core.viz import plot_coverage_heatmap, plot_temperature_histograms, \
-    plot_sessions
+from thermal_core.ep01_cache import EP01_FIGURE_ARTIFACTS, load_ep01_cache
+from thermal_core.plotting import setup_academic_style
 
-# 项目路径
 PROJECT_ROOT = Path.cwd()
 while not (PROJECT_ROOT / "AGENTS.md").exists() and PROJECT_ROOT != PROJECT_ROOT.parent:
     PROJECT_ROOT = PROJECT_ROOT.parent
 
-DATA_DIR = PROJECT_ROOT / "data" / "data_raw" / "infrared_avi"
 OUTPUT_DIR = PROJECT_ROOT / "output" / "ep01_data_processing"
 REPORT_DIR = PROJECT_ROOT / "reports" / "ep01_data_processing"
-OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
-REPORT_DIR.mkdir(parents=True, exist_ok=True)
 
 setup_academic_style()
+cache = load_ep01_cache(project_root=PROJECT_ROOT, output_dir=OUTPUT_DIR)
 
-def save_fig(fig, name):
-    savefig_academic(fig, OUTPUT_DIR / name)  # close=True: 从 Gcf 注销，防止 post_execute 二次显示
-    print(f"💾 已保存: output/ep01_data_processing/{name}")
-    return fig  # Figure 对象仍可用于 Jupyter cell output 的 _repr_png_()
+df = cache.df
+pairing = cache.pairing
+pairing_detail = cache.pairing_detail
+rename_mapping_path = cache.rename_mapping_path
+rename_special = cache.rename_special
+coord_config = cache.coord_config
+VALID_COORDS = cache.valid_coords
+noise_floor_c = cache.noise_floor_c
+matrix_summary = cache.matrix_audit_summary
 
-# 加载坐标配置
-with open(PROJECT_ROOT / "configs" / "coordinate_set.json") as f:
-    coord_config = json.load(f)
-VALID_COORDS = set(coord_config["x_coords_um"])
+def show_fig(name: str):
+    """Display a cached EP01 figure (300 dpi PNG from build_ep01_cache.py)."""
+    path = cache.figure_path(name)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Missing cached figure: {path}\n"
+            "Run: uv run python scripts/build_ep01_cache.py"
+        )
+    display(NotebookImage(filename=str(path), retina=True))
 
 print(f"✅ 项目根目录: {PROJECT_ROOT}")
-print(f"✅ 数据目录: {DATA_DIR}")
+print(f"✅ EP01 缓存: {OUTPUT_DIR}")
+print(f"   构建时间 (UTC): {cache.manifest.get('built_at_utc', 'unknown')}")
+print(f"   重建命令: {cache.manifest.get('rebuild_command', 'scripts/build_ep01_cache.py')}")
+print(
+    f"   审计帧数: {len(df)}  |  原始主 session: {cache.manifest.get('n_raw_main_session_frames', 'unknown')}  |  "
+    f"干净 SR 输入: {cache.manifest.get('n_sr_usable_frames', 'unknown')}  |  图表: {len(EP01_FIGURE_ARTIFACTS)} 张"
+)
 
 # %% [markdown]
-# > **输出说明**: 这里打印 notebook 实际识别到的项目根目录和原始红外数据目录。
-# >
-# > **怎么读**: 项目根目录应指向 `thermal_lift`，数据目录应指向 `data/data_raw/infrared_avi`。
-# > 这两个路径是后续所有读取、缓存和报告输出的基准。
-# >
-# > **正常/异常理解**: 正常情况下，两行路径都存在，后续 cell 可以直接读取 TXT/BMP 原始数据。
-# > 如果路径指向了错误目录，常见原因是从子目录外启动 Jupyter，或新机器上尚未放置 `data/`。
-# >
-# > **对 EP01 的意义**: EP01 是数据审计而不是算法验证；先确认路径，是为了保证后面的帧数、
-# > 坐标覆盖和 session 结论都来自同一份原始数据。
+# > [!NOTE]
+# > **运行说明**：本 Notebook 仅作为交互式报告层，直接读取缓存的轻量级 CSV 与预生成图像。如果修改了原始数据或审计规则，请在终端运行 `uv run python scripts/build_ep01_cache.py` 以更新缓存。
