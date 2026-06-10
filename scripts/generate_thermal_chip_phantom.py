@@ -50,6 +50,35 @@ def _load_json(path: Path) -> dict[str, Any]:
         return json.load(f)
 
 
+def _resolve_psf_settings(config: dict[str, Any]) -> tuple[float, dict[str, Any]]:
+    profile = str(config.get("psf_profile", "explicit"))
+    if profile == "ep09_provisional":
+        psf_config_path = PROJECT_ROOT / str(config.get("psf_calibration_path", "configs/psf_calibration.json"))
+        calibration = _load_json(psf_config_path)
+        sigma = float(calibration["psf_sigma_lr_px"])
+        return sigma, {
+            "psf_profile": profile,
+            "psf_profile_source": str(psf_config_path.relative_to(PROJECT_ROOT)),
+            "psf_calibration_episode": calibration.get("calibration_episode", ""),
+            "psf_calibration_status": calibration.get("status", ""),
+            "psf_confidence_interval_95_lr_px": calibration.get("confidence_interval_95_lr_px", []),
+            "psf_four_x_verdict": calibration.get("four_x_verdict", ""),
+        }
+    profiles = config.get("psf_profiles", {})
+    if profile in profiles:
+        entry = dict(profiles[profile])
+        return float(entry["psf_sigma_lr_px"]), {
+            "psf_profile": profile,
+            "psf_profile_source": entry.get("source", ""),
+            "psf_calibration_status": entry.get("status", ""),
+        }
+    return float(config["psf_sigma_lr_px"]), {
+        "psf_profile": profile,
+        "psf_profile_source": "config.psf_sigma_lr_px",
+        "psf_calibration_status": "explicit_or_legacy",
+    }
+
+
 def _write_json(path: Path, payload: dict[str, Any] | list[dict[str, Any]]) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
     with path.open("w", encoding="utf-8") as f:
@@ -320,7 +349,7 @@ def _fallback_forward(x_hr: np.ndarray, shift: np.ndarray, psf_sigma: float, *, 
 
 
 def _forward_frame(x_hr: np.ndarray, shift: np.ndarray, config: dict[str, Any]) -> np.ndarray:
-    psf_sigma = float(config["psf_sigma_lr_px"])
+    psf_sigma, _psf_meta = _resolve_psf_settings(config)
     scale = int(config["scale"])
     try:
         from tcforge._ep06_reference.forward import forward  # type: ignore
@@ -399,6 +428,7 @@ def _apply_drift(frames: np.ndarray, model: str, seed: int) -> np.ndarray:
 
 def _make_burst(hr_temperature: np.ndarray, shifts: np.ndarray, config: dict[str, Any], seed: int) -> tuple[np.ndarray, np.ndarray]:
     forward_mode = str(config.get("forward_mode", config.get("forward_modes", ["exact_ep06_point"])[0]))
+    psf_sigma, _psf_meta = _resolve_psf_settings(config)
     try:
         from tcforge.forward import generate_lr_burst
 
@@ -407,7 +437,7 @@ def _make_burst(hr_temperature: np.ndarray, shifts: np.ndarray, config: dict[str
                 hr_temperature,
                 shifts,
                 forward_mode=forward_mode,
-                psf_sigma_lr_px=float(config["psf_sigma_lr_px"]),
+                psf_sigma_lr_px=psf_sigma,
                 scale=int(config["scale"]),
             ),
             dtype=np.float32,
@@ -425,7 +455,21 @@ def _make_burst(hr_temperature: np.ndarray, shifts: np.ndarray, config: dict[str
         try:
             from tcforge.physics import add_noise
 
-            raw = np.asarray(add_noise(raw, noise_sigma_c=noise_sigma, seed=seed + 23), dtype=np.float32)
+            raw = np.asarray(
+                add_noise(
+                    raw,
+                    noise_sigma_c=noise_sigma,
+                    seed=seed + 23,
+                    noise_model=str(config.get("noise_model", "iid_gaussian")),
+                    fpn_sigma_px=float(config.get("fpn_sigma_px", 5.0)),
+                    stripe_sigma_c=(
+                        None
+                        if config.get("stripe_sigma_c") is None
+                        else float(config.get("stripe_sigma_c"))
+                    ),
+                ),
+                dtype=np.float32,
+            )
         except Exception as exc:
             if not _allow_fallback(config):
                 raise RuntimeError("TCForge noise injection failed; pass --allow-fallback-demo only for notebook demos") from exc
@@ -476,7 +520,12 @@ def _manifest_row(metadata: dict[str, Any], scene_dir: Path, metadata_sha256: st
         "min_feature_um": geometry["min_feature_um"],
         "delta_T_c": physics["delta_T_c"],
         "psf_sigma_lr_px": physics["psf_sigma_lr_px"],
+        "psf_profile": physics.get("psf_profile", ""),
+        "psf_calibration_status": physics.get("psf_calibration_status", ""),
         "noise_sigma_c": physics["noise_sigma_c"],
+        "noise_model": physics.get("noise_model", "iid_gaussian"),
+        "fpn_sigma_px": physics.get("fpn_sigma_px", ""),
+        "stripe_sigma_c": physics.get("stripe_sigma_c", ""),
         "shift_profile": shifts["profile"],
         "scene_dir": str(scene_dir),
         "metadata_sha256": metadata_sha256,
@@ -504,6 +553,7 @@ def generate_dataset(config: dict[str, Any], output_root: Path, shift_config_pat
         mask, geometry = _build_scene_mask(config, str(difficulty), seed)
         hr_temperature = _temperature(mask, config, str(difficulty), seed)
         edge_map = _edge_map(mask, config)
+        psf_sigma, psf_metadata = _resolve_psf_settings(config)
         raw, hp = _make_burst(hr_temperature, shifts, config, seed)
         metadata = {
             "schema_version": "0.1",
@@ -523,8 +573,14 @@ def generate_dataset(config: dict[str, Any], output_root: Path, shift_config_pat
                 "T_bg_c": float(config["T_bg_c"]),
                 "delta_T_c": float(config["delta_T_c_by_difficulty"][difficulty]),
                 "low_freq_background_c": float(config["low_freq_amplitude_c"]),
-                "psf_sigma_lr_px": float(config["psf_sigma_lr_px"]),
+                "psf_sigma_lr_px": psf_sigma,
+                **psf_metadata,
                 "noise_sigma_c": float(config["noise_sigma_c"]),
+                "noise_model": str(config.get("noise_model", "iid_gaussian")),
+                "fpn_sigma_px": float(config.get("fpn_sigma_px", 5.0)),
+                "stripe_sigma_c": (
+                    None if config.get("stripe_sigma_c") is None else float(config.get("stripe_sigma_c"))
+                ),
                 "forward_mode": config.get("forward_mode", config.get("forward_modes", ["exact_ep06_point"])[0]),
                 "highpass_sigma_lr_px": float(config["highpass_sigma_lr_px"]),
                 "highpass_mode": str(config.get("highpass_mode", "nearest")),
@@ -549,7 +605,7 @@ def generate_dataset(config: dict[str, Any], output_root: Path, shift_config_pat
             metadata=metadata,
         )
         manifest.append(_manifest_row(metadata, scene_dir, metadata_sha))
-        print(f"generated {scene_id}: {raw.shape[0]} frames, lr={tuple(raw.shape[1:])}, scene_dir={scene_dir}")
+        print(f"generated synthetic scene {scene_id}: {raw.shape[0]} synthetic LR frames, lr={tuple(raw.shape[1:])}, scene_dir={scene_dir}")
 
     _write_manifest(output_root, manifest, config)
     return manifest

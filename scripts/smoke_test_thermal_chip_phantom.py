@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Run P0 structural smoke checks for ThermalChipPhantom outputs."""
+"""Run P0 structural smoke checks for synthetic ThermalChipPhantom outputs."""
 
 from __future__ import annotations
 
@@ -127,7 +127,7 @@ def _check_scene(
     _assert(raw.ndim == 3 and raw.shape[1:] == lr_shape, f"{scene_dir}: raw burst shape mismatch", failures)
     _assert(hp.shape == raw.shape, f"{scene_dir}: highpass burst shape mismatch", failures)
     _assert(shifts.shape == (raw.shape[0], 2), f"{scene_dir}: shifts shape mismatch", failures)
-    _assert(raw.shape[0] >= int(min_frames), f"{scene_dir}: burst must contain at least {min_frames} frames", failures)
+    _assert(raw.shape[0] >= int(min_frames), f"{scene_dir}: synthetic LR burst must contain at least {min_frames} frames", failures)
 
     _assert(mask.dtype == np.uint8, f"{scene_dir}: mask dtype must be uint8", failures)
     mask_values = set(np.unique(mask).tolist())

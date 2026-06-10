@@ -1,91 +1,59 @@
 # %% [markdown]
-# ## 6. 结论与集成交接
+# ## 6. 结论与交接
 #
-# EP07 的结论应按工程成熟度分层：
-#
-# 1. **已固定**: TCForge 独立 UV 包、EP06 forward 副本、geometry/physics/shifts/forward/highpass/manifest/evaluate 模块、P0 生成 CLI、smoke CLI、evaluate CLI 和 EP07 notebook 入口。
-# 2. **已展示**: Notebook 现在显式展示 Mermaid 架构图、生成配方、HR 真值层、LR observation 层、forward mode 差异、manifest、artifact catalog、smoke gate、evaluate summary 和 CLI regression 产物摘要。
-# 3. **已加保护**: benchmark/P1 config 中尚未物化的功能（例如 drift tracks、split objects、crop ROI storage）会 fail fast，避免静默生成半成品 benchmark。
-# 4. **不作声明**: EP07 demo 不证明真实数据 SR 成功，不替代 EP06 主 session 结果，也不把 synthetic shifts 或 stage command 当作真实 alignment ground truth。
+# EP07 验证的是 **合成数据引擎成熟度**，不是真实芯片 SR 成效。
 
 # %%
-handoff = pd.DataFrame(
-    [
-        {
-            "area": "Package",
-            "notebook_evidence": "TCForge import probe + architecture diagram",
-            "integration_rule": "run tcforge tests before changing public API",
-        },
-        {
-            "area": "Geometry / Physics",
-            "notebook_evidence": "HR mask, HR temperature, edge proxy and profile plots",
-            "integration_rule": "keep structure truth, temperature truth and contour proxy separate",
-        },
-        {
-            "area": "Forward",
-            "notebook_evidence": "exact_ep06_point output plus physical_block_average preview difference",
-            "integration_rule": "report forward modes separately in all metric tables",
-        },
-        {
-            "area": "Highpass",
-            "notebook_evidence": "raw/highpass panels and independent highpass allclose smoke row",
-            "integration_rule": "preserve EP06 parity: float32, nearest, spatial-only sigma",
-        },
-        {
-            "area": "Manifest / Smoke",
-            "notebook_evidence": "artifact catalog, manifest table and detailed smoke_summary.csv",
-            "integration_rule": "formal P0 datasets must use CLI manifest and smoke report",
-        },
-        {
-            "area": "Evaluate",
-            "notebook_evidence": "scene-level metrics and optional CLI evaluation_summary.csv",
-            "integration_rule": "scene health metrics are not SR success metrics unless SR outputs are provided",
-        },
-        {
-            "area": "Scale",
-            "notebook_evidence": "small lr_shape=(64,96), n_frames=16 demo",
-            "integration_rule": "do not generate full-frame multi-scene data inside notebook",
-        },
-    ]
-)
-display(handoff)
-
-# %% [markdown]
-# > **数据说明**: 这张交接表把 notebook 中已经展示的证据和后续集成规则绑定起来，避免把展示层和工程验收拆散。
-# >
-# > **怎么看**: 中列说明本 notebook 现在在哪里展示了后台工作；右列是后续改生成器、forward/highpass 或 benchmark 时必须守住的契约。
-# >
-# > **异常是否正常**: 小 demo 只用于展示和 smoke，不等价于全幅 P0 benchmark。缺少 SR 输出时，evaluate 只能给 scene/data health 指标。
-# >
-# > **核心发现**: EP07 的展示层已经从“几张 demo 图”升级为可审计的数据生成报告。
-
-# %%
-display(
-    Markdown(
-        f"""
-**EP07 产物摘要**
-
-- Demo 目录: `{relative(DEMO_DIR)}`
-- 架构图: 第 1 节 Mermaid flowchart
-- 生成配方与产物目录: 第 2 / 第 4 节 Markdown 表格
-- 图片:
-  - `{relative(OUTPUT_DIR / 'demo_hr_scene.png')}`
-  - `{relative(OUTPUT_DIR / 'demo_forward_highpass.png')}`
-  - `{relative(OUTPUT_DIR / 'demo_dataset_overview.png')}`
-  - `{relative(OUTPUT_DIR / 'demo_profiles_generation_vs_observation.png')}`
-- Manifest: `{relative(DEMO_DIR / 'manifest.csv')}`
-- Smoke summary: `{relative(DEMO_DIR / 'smoke_summary.csv')}`
-- Metadata: `{relative(DEMO_DIR / 'metadata.json')}`
-- TCForge import status: `{TCFORGE_VERSION}`
-"""
+if cache.demo_skipped:
+    display(Markdown("结论单元需要完整缓存。请运行 `uv run python scripts/build_ep07_cache.py --force`。"))
+else:
+    handoff = pd.DataFrame(
+        [
+            {"area": "Thermal field", "evidence": "demo_thermal_field_decomposition.png + physics_checks", "rule": "keep structure / low-freq / full temperature separable"},
+            {"area": "PSF", "evidence": "demo_psf_blur_check.png + demo_metadata.json", "rule": "default follows EP09 provisional Route A sigma; legacy_upper=0.5 only for stress"},
+            {"area": "Noise", "evidence": "demo_noise_check.png + demo_noise_real_vs_synthetic.png", "rule": "inject on LR burst only; model + RMS anchor must be recorded"},
+            {"area": "SNR budget", "evidence": "demo_snr_budget.png + snr_budget.csv", "rule": "risk bands are necessary conditions, not SR proof"},
+            {"area": "LR burst", "evidence": "demo_forward_highpass.png + demo_dataset_overview.png", "rule": "highpass is structure response, not absolute temperature"},
+            {"area": "Smoke", "evidence": "physics_checks + independent highpass allclose", "rule": "all checks pass before SR regression"},
+        ]
     )
-)
+    display(handoff)
 
 # %% [markdown]
-# > **数据说明**: 最后一段列出本 notebook 执行后产生的 demo 产物路径，便于复查和后续脚本对齐。
+# > **核心发现**: 最新 TCForge 引擎已形成「配置 → HR 真值 → forward/PSF → LR 加噪 → highpass → 验收」闭环；EP07 demo 用 9 张图和 5 张表把此前缺失的热场/PSF/噪声/SNR 检查补齐。
 # >
-# > **怎么看**: 这些产物都在 `output/` 下，属于可重建数据，不应提交到 Git。应提交的是 notebook `fragments/`、TCForge 源码、配置、research log 和正式 Markdown report 源文件。
-# >
-# > **异常是否正常**: 如果路径存在但 smoke 未通过，应先修复 generator 或 fallback 路径，再讨论算法指标。若 `TCForge import status` 仍不可导入，说明正式包集成尚未完成。
-# >
-# > **核心发现**: EP07 notebook 现在满足“生成原理可见、产物用途可见、检测指标可见、图表风格可控”的报告目标。
+# > **不作声明**: 不把 synthetic shifts 当真实 alignment 真值；不把 demo 指标外推为真实主 session SR 结论。
+
+# %%
+figures = [
+    "demo_hr_scene.png",
+    "demo_thermal_field_decomposition.png",
+    "demo_psf_blur_check.png",
+    "demo_noise_check.png",
+    "demo_noise_real_vs_synthetic.png",
+    "demo_snr_budget.png",
+    "demo_forward_highpass.png",
+    "demo_dataset_overview.png",
+    "demo_profiles_generation_vs_observation.png",
+]
+if not cache.demo_skipped:
+    display(Markdown(
+        "\n".join([
+            "**EP07 缓存产物**",
+            "",
+            f"- 缓存目录: `{rel(OUTPUT_DIR)}`",
+            f"- Demo 数据包: `{rel(DEMO_DIR)}`",
+            f"- 重建命令: `{REBUILD_CMD}`",
+            "",
+            "**图片**",
+            *[f"  - `{rel(OUTPUT_DIR / name)}`" for name in figures],
+            "",
+            "**表格**",
+            f"  - `{rel(OUTPUT_DIR / 'physics_checks.csv')}`",
+            f"  - `{rel(OUTPUT_DIR / 'snr_budget.csv')}`",
+            f"  - `{rel(OUTPUT_DIR / 'noise_model_checks.csv')}`",
+            f"  - `{rel(OUTPUT_DIR / 'scene_stats.csv')}`",
+            f"  - `{rel(OUTPUT_DIR / 'forward_stats.csv')}`",
+            f"  - `{rel(OUTPUT_DIR / 'demo_metrics.csv')}`",
+        ])
+    ))

@@ -25,10 +25,11 @@ uv sync --extra dev
 The EP07 notebook is built from the project root:
 
 ```bash
+uv run python scripts/build_ep07_cache.py
 uv run python scripts/build_notebook.py notebooks/ep07_thermal_chip_phantom --execute
 ```
 
-Because notebook execution starts at the project root, `01_setup.py` temporarily adds `tcforge/src` to `sys.path`.
+Notebook fragments only read `output/ep07_thermal_chip_phantom/` (figures, CSV tables, `cache_manifest.json`). Demo generation runs in `scripts/build_ep07_cache.py`; if TCForge is unavailable, the manifest records `demo_skipped=true`.
 
 ## Notebook Plan
 

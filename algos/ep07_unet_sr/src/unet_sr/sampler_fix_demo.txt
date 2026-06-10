@@ -1,0 +1,1 @@
+Optimal scenes_per_bucket = num_workers * (batch_size / patches_per_fetch)

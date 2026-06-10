@@ -22,7 +22,7 @@ The independent review follow-up has been applied: TCForge now has a scene-level
 - Disk-based demo overview, profile plot and scene-level evaluate summary.
 - Optional CLI regression smoke/evaluate summary when ignored output artifacts exist locally.
 - Integration handoff table listing remaining P1 benchmark materialization work.
-- Full P0 smoke was executed locally on 2026-05-19 under ignored `data/synthetic/thermal_chip_phantom_p0_smoke_tmp/`: 5 full-frame scenes, 255 frames each; smoke and evaluate CLIs passed.
+- Synthetic full-frame P0 smoke was executed locally on 2026-05-19 under ignored `data/synthetic/thermal_chip_phantom_p0_smoke_tmp/`: 5 synthetic scenes, 255 synthetic LR observations per scene; smoke and evaluate CLIs passed. This is a synthetic stress/smoke length, not the current real main-session or clean SR-input frame count.
 
 ## Independent Review Follow-up
 
@@ -39,4 +39,4 @@ The independent review follow-up has been applied: TCForge now has a scene-level
 
 ## Current Limitations
 
-The P0 package, CLIs and tests are present, and the full 5-scene/full-frame P0 smoke run has passed locally. P1 benchmark features in `phantom_benchmark.json` intentionally fail fast until drift tracks, split assignment and crop ROI storage are fully materialized.
+The P0 package, CLIs and tests are present, and the synthetic 5-scene/full-frame P0 smoke run has passed locally. P1 benchmark features in `phantom_benchmark.json` intentionally fail fast until drift tracks, split assignment and crop ROI storage are fully materialized.

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Write a lightweight ThermalChipPhantom evaluation summary."""
+"""Write a lightweight synthetic ThermalChipPhantom evaluation summary."""
 
 from __future__ import annotations
 

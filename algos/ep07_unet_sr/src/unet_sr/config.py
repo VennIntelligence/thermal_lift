@@ -1,0 +1,392 @@
+"""Training configuration for EP07v2 UNet SR."""
+
+from __future__ import annotations
+
+import argparse
+from dataclasses import dataclass
+from pathlib import Path
+
+
+@dataclass
+class TrainingConfig:
+    training_pool_dir: str
+    output_dir: str = "outputs/ep07_unet_sr"
+    scale: int = 4
+    in_channels: int = 5
+    out_channels: int = 1
+    base_channels: int = 64
+    patch_size_hr: int = 256
+    batch_size: int = 4
+    num_workers: int = 4
+    total_steps: int = 50_000
+    lr: float = 2e-4
+    weight_decay: float = 1e-4
+    edge_loss_weight: float = 0.05
+    ssim_loss_weight: float = 0.15
+    loss_type: str = "contour_sr"
+    highpass_loss_weight: float = 1.0
+    highpass_sigma: float = 5.0
+    structure_boost: float = 4.0
+    mse_loss_weight: float = 0.2
+    edge_coarse_weight: float = 0.25
+    grad_vector_weight: float = 0.3
+    thin_boost: float = 6.0
+    gap_boost: float = 4.0
+    laplacian_weight: float = 0.0
+    forward_model_weight: float = 0.0
+    forward_model_psf_sigma: float = 0.5
+    lr_warmup_steps: int = 500
+    log_every: int = 50
+    save_every: int = 1_000
+    seed: int = 42
+    device: str = "cuda"
+    patches_per_scene: int = 64
+    max_scene_cache: int = 0  # 0 = auto (= scenes_per_bucket)
+    amp: bool = True
+    compile_model: bool = False
+    channels_last: bool = False
+    tb_log_dir: str = ""
+    tb_image_every: int = 0
+    residual: bool = False
+    resume_from: str = ""
+    prefetch_factor: int = 4
+    scenes_per_bucket: int = 0  # 0 = auto (16)
+    patches_per_fetch: int = 0  # 0 = auto (batch_size // 8)
+    real_eval_enabled: bool = True
+    real_eval_every: int = 0
+    real_eval_frame_limit: int = 248
+    real_eval_baseline_hr: str = ""
+    real_eval_alignment_method: str = "contour_refined"
+    real_eval_center_fraction: float = 1.0 / 3.0
+    real_eval_zoom: float = 3.0
+    real_eval_overlap: int = 128
+
+    def validate(self) -> None:
+        if self.device == "cpu" and self.amp:
+            print("AMP requested on CPU; disabling AMP.")
+            self.amp = False
+        if self.residual and self.in_channels == 5:
+            self.in_channels = 6
+            print("Residual mode: auto-set in_channels 5 → 6 (5 fused + 1 classical_sr)")
+        if self.scale <= 0:
+            raise ValueError("scale must be positive")
+        if self.in_channels <= 0 or self.out_channels <= 0:
+            raise ValueError("channel counts must be positive")
+        if self.patch_size_hr <= 0:
+            raise ValueError("patch_size_hr must be positive")
+        effective_scale = 1 if self.residual else self.scale
+        if self.patch_size_hr % effective_scale != 0:
+            raise ValueError("patch_size_hr must be divisible by scale")
+        if self.batch_size <= 0:
+            raise ValueError("batch_size must be positive")
+        if self.num_workers < 0:
+            raise ValueError("num_workers must be >= 0")
+        if self.total_steps <= 0:
+            raise ValueError("total_steps must be positive")
+        if self.lr <= 0:
+            raise ValueError("lr must be positive")
+        if self.weight_decay < 0:
+            raise ValueError("weight_decay must be >= 0")
+        if self.edge_loss_weight < 0:
+            raise ValueError("edge_loss_weight must be >= 0")
+        if self.ssim_loss_weight < 0:
+            raise ValueError("ssim_loss_weight must be >= 0")
+        if self.log_every <= 0 or self.save_every <= 0:
+            raise ValueError("log_every and save_every must be positive")
+        if self.loss_type not in ("thermal_sr", "contour_sr"):
+            raise ValueError("loss_type must be 'thermal_sr' or 'contour_sr'")
+        if self.highpass_loss_weight < 0:
+            raise ValueError("highpass_loss_weight must be >= 0")
+        if self.highpass_sigma < 0:
+            raise ValueError("highpass_sigma must be >= 0")
+        if self.structure_boost < 0:
+            raise ValueError("structure_boost must be >= 0")
+        if self.mse_loss_weight < 0:
+            raise ValueError("mse_loss_weight must be >= 0")
+        if self.edge_coarse_weight < 0:
+            raise ValueError("edge_coarse_weight must be >= 0")
+        if self.grad_vector_weight < 0:
+            raise ValueError("grad_vector_weight must be >= 0")
+        if not (1.0 <= self.thin_boost < 10.0):
+            raise ValueError("thin_boost must satisfy 1 <= thin_boost < 10")
+        if not (1.0 <= self.gap_boost < 10.0):
+            raise ValueError("gap_boost must satisfy 1 <= gap_boost < 10")
+        if self.laplacian_weight < 0:
+            raise ValueError("laplacian_weight must be >= 0")
+        if self.forward_model_weight < 0:
+            raise ValueError("forward_model_weight must be >= 0")
+        if self.forward_model_psf_sigma < 0:
+            raise ValueError("forward_model_psf_sigma must be >= 0")
+        if self.lr_warmup_steps < 0:
+            raise ValueError("lr_warmup_steps must be >= 0")
+        if self.patches_per_scene <= 0:
+            raise ValueError("patches_per_scene must be positive")
+        if self.prefetch_factor <= 0:
+            raise ValueError("prefetch_factor must be positive")
+
+        # --- Auto-compute DataLoader cache parameters ---
+        # With worker-scene affinity the sampler guarantees each worker only
+        # touches its own scene partition, so:
+        #   patches_per_fetch  → controls batch diversity (~8 scenes/batch)
+        #   scenes_per_bucket  → controls per-worker cache size (16 = 0.8 GB)
+        #   max_scene_cache    → must equal scenes_per_bucket for 100% hit
+        auto_parts: list[str] = []
+        if self.patches_per_fetch <= 0:
+            self.patches_per_fetch = max(1, self.batch_size // 8)
+            auto_parts.append(f"patches_per_fetch={self.patches_per_fetch}")
+        if self.scenes_per_bucket <= 0:
+            self.scenes_per_bucket = 16
+            auto_parts.append(f"scenes_per_bucket={self.scenes_per_bucket}")
+        if self.max_scene_cache <= 0:
+            self.max_scene_cache = self.scenes_per_bucket
+            auto_parts.append(f"max_scene_cache={self.max_scene_cache}")
+        if auto_parts:
+            print(f"Auto-tuned cache params: {', '.join(auto_parts)}")
+
+        if self.max_scene_cache <= 0:
+            raise ValueError("max_scene_cache must be positive")
+        if self.scenes_per_bucket <= 0:
+            raise ValueError("scenes_per_bucket must be positive")
+        if self.patches_per_fetch <= 0:
+            raise ValueError("patches_per_fetch must be positive")
+        if self.real_eval_every < 0:
+            raise ValueError("real_eval_every must be >= 0")
+        if self.real_eval_frame_limit <= 0:
+            raise ValueError("real_eval_frame_limit must be positive")
+        if not (0.0 < self.real_eval_center_fraction <= 1.0):
+            raise ValueError("real_eval_center_fraction must be in (0, 1]")
+        if self.real_eval_zoom <= 0:
+            raise ValueError("real_eval_zoom must be positive")
+        if self.real_eval_overlap < 0 or self.real_eval_overlap >= self.patch_size_hr:
+            raise ValueError("real_eval_overlap must satisfy 0 <= overlap < patch_size_hr")
+        if not self.tb_log_dir:
+            self.tb_log_dir = str(Path(self.output_dir) / "tb_logs")
+        if self.tb_image_every < 0:
+            raise ValueError("tb_image_every must be >= 0 (0 disables TCForge batch images)")
+
+
+def build_arg_parser() -> argparse.ArgumentParser:
+    parser = argparse.ArgumentParser(description="Train EP07v2 compact-scene UNet thermal SR.")
+    parser.add_argument("--training-pool-dir", required=True, help="Directory containing manifest.csv and scene_* dirs.")
+    parser.add_argument("--output-dir", default=TrainingConfig.output_dir, help="Directory for checkpoints and logs.")
+    parser.add_argument("--total-steps", type=int, default=TrainingConfig.total_steps)
+    parser.add_argument("--batch-size", type=int, default=TrainingConfig.batch_size)
+    parser.add_argument("--patch-size-hr", type=int, default=TrainingConfig.patch_size_hr)
+    parser.add_argument("--num-workers", type=int, default=TrainingConfig.num_workers)
+    parser.add_argument("--device", default=TrainingConfig.device)
+    parser.add_argument("--scale", type=int, default=TrainingConfig.scale)
+    parser.add_argument("--base-channels", type=int, default=TrainingConfig.base_channels)
+    parser.add_argument("--lr", type=float, default=TrainingConfig.lr)
+    parser.add_argument("--weight-decay", type=float, default=TrainingConfig.weight_decay)
+    parser.add_argument("--edge-loss-weight", type=float, default=TrainingConfig.edge_loss_weight)
+    parser.add_argument("--ssim-loss-weight", type=float, default=TrainingConfig.ssim_loss_weight)
+    parser.add_argument(
+        "--loss-type",
+        default=TrainingConfig.loss_type,
+        choices=["thermal_sr", "contour_sr"],
+        help="Loss function type: 'contour_sr' (default, structure-focused) or 'thermal_sr' (legacy MSE-based).",
+    )
+    parser.add_argument("--highpass-loss-weight", type=float, default=TrainingConfig.highpass_loss_weight)
+    parser.add_argument("--highpass-sigma", type=float, default=TrainingConfig.highpass_sigma,
+                        help="Gaussian sigma for highpass filter in contour_sr loss (default: 5.0).")
+    parser.add_argument("--structure-boost", type=float, default=TrainingConfig.structure_boost,
+                        help="Gradient-based structure weight boost: edge pixels get "
+                             "(1 + structure_boost)x weight in highpass loss (default: 4.0).")
+    parser.add_argument("--mse-loss-weight", type=float, default=TrainingConfig.mse_loss_weight,
+                        help="Weight on raw MSE loss to anchor DC/low-freq and protect gaps (default: 0.2).")
+    parser.add_argument("--edge-coarse-weight", type=float, default=TrainingConfig.edge_coarse_weight,
+                        help="Weight on 2x-downsampled Sobel edge loss for connectivity (default: 0.25).")
+    parser.add_argument("--grad-vector-weight", type=float, default=TrainingConfig.grad_vector_weight,
+                        help="Full Sobel gradient vector (gx,gy) matching loss: catches thickening, "
+                             "merging, disconnection via direction+magnitude (default: 0.3).")
+    parser.add_argument("--thin-boost", type=float, default=TrainingConfig.thin_boost,
+                        help="Multiplier for <=3 HR px structure pixels in highpass/grad-vector loss "
+                             "(default: 6.0; use 1.0 to disable).")
+    parser.add_argument("--gap-boost", type=float, default=TrainingConfig.gap_boost,
+                        help="Multiplier for <=3 HR px narrow background gaps in MSE/highpass loss "
+                             "(default: 4.0; use 1.0 to disable).")
+    parser.add_argument("--laplacian-weight", type=float, default=TrainingConfig.laplacian_weight,
+                        help="Asymmetric Laplacian sharpness loss: penalises pred being blurrier "
+                             "than target, preventing thin-line thickening (default: 0.0, disabled).")
+    parser.add_argument("--forward-model-weight", type=float, default=TrainingConfig.forward_model_weight,
+                        help="PSF forward-model consistency loss: HR pred blurred by PSF and "
+                             "downsampled must match LR observation (default: 0.0, disabled).")
+    parser.add_argument("--forward-model-psf-sigma", type=float, default=TrainingConfig.forward_model_psf_sigma,
+                        help="PSF Gaussian sigma at LR pixel scale for forward model loss (default: 0.5).")
+    parser.add_argument("--lr-warmup-steps", type=int, default=TrainingConfig.lr_warmup_steps,
+                        help="Linear LR warmup from 0 to target LR over this many steps (default: 500).")
+    parser.add_argument("--log-every", type=int, default=TrainingConfig.log_every)
+    parser.add_argument("--save-every", type=int, default=TrainingConfig.save_every)
+    parser.add_argument("--seed", type=int, default=TrainingConfig.seed)
+    parser.add_argument("--patches-per-scene", type=int, default=TrainingConfig.patches_per_scene)
+    parser.add_argument("--max-scene-cache", type=int, default=TrainingConfig.max_scene_cache,
+                        help="LRU cache size per worker (0 = auto → scenes_per_bucket). "
+                             "With worker-scene affinity, should equal scenes_per_bucket.")
+    parser.add_argument(
+        "--amp",
+        action=argparse.BooleanOptionalAction,
+        default=TrainingConfig.amp,
+        help="Enable CUDA AMP mixed precision. Automatically disabled on CPU.",
+    )
+    parser.add_argument(
+        "--compile",
+        action="store_true",
+        dest="compile_model",
+        default=TrainingConfig.compile_model,
+        help="Enable torch.compile before DDP wrapping.",
+    )
+    parser.add_argument(
+        "--channels-last",
+        action=argparse.BooleanOptionalAction,
+        default=TrainingConfig.channels_last,
+        help="Use NHWC/channels-last tensors for CUDA convolution throughput experiments.",
+    )
+    parser.add_argument(
+        "--tb-log-dir",
+        default=TrainingConfig.tb_log_dir,
+        help="TensorBoard log directory. Defaults to {output_dir}/tb_logs.",
+    )
+    parser.add_argument(
+        "--tb-image-every",
+        type=int,
+        default=TrainingConfig.tb_image_every,
+        help="Log TCForge synthetic batch pred/target images every N steps (0 = disabled).",
+    )
+    parser.add_argument(
+        "--residual",
+        action="store_true",
+        default=TrainingConfig.residual,
+        help="Residual refinement mode: 6ch@2x input (5 fused upsampled + classical_sr), model learns residual.",
+    )
+    parser.add_argument(
+        "--resume",
+        dest="resume_from",
+        default=TrainingConfig.resume_from,
+        metavar="PATH",
+        help="Resume training from a checkpoint .pt file (restores model, optimizer, scheduler, step).",
+    )
+    parser.add_argument(
+        "--prefetch-factor",
+        type=int,
+        default=TrainingConfig.prefetch_factor,
+        help="DataLoader prefetch queue depth per worker (default: 4).",
+    )
+    parser.add_argument(
+        "--scenes-per-bucket",
+        type=int,
+        default=TrainingConfig.scenes_per_bucket,
+        help="Scenes interleaved per sampling bucket (0 = auto → 16). "
+             "Controls per-worker cache size; rarely needs manual tuning.",
+    )
+    parser.add_argument(
+        "--patches-per-fetch",
+        type=int,
+        default=TrainingConfig.patches_per_fetch,
+        help="Consecutive patches per scene in round-robin (0 = auto → batch_size//8). "
+             "Controls scenes-per-batch diversity.",
+    )
+    parser.add_argument(
+        "--no-real-eval",
+        action="store_false",
+        dest="real_eval_enabled",
+        default=TrainingConfig.real_eval_enabled,
+        help="Disable real-data EP11-style TensorBoard eval at checkpoint steps.",
+    )
+    parser.add_argument(
+        "--real-eval-every",
+        type=int,
+        default=TrainingConfig.real_eval_every,
+        help="Run real-data eval every N steps (0 = save_every).",
+    )
+    parser.add_argument(
+        "--real-eval-frame-limit",
+        type=int,
+        default=TrainingConfig.real_eval_frame_limit,
+        help="Number of clean main-session frames for checkpoint eval (default: 248, same as EP11).",
+    )
+    parser.add_argument(
+        "--real-eval-baseline-hr",
+        default=TrainingConfig.real_eval_baseline_hr,
+        help="Optional TGV highpass baseline .npy for side-by-side TensorBoard panels.",
+    )
+    parser.add_argument(
+        "--real-eval-alignment-method",
+        default=TrainingConfig.real_eval_alignment_method,
+        help="Alignment method passed to EP04 shifts loader during real eval.",
+    )
+    parser.add_argument(
+        "--real-eval-center-fraction",
+        type=float,
+        default=TrainingConfig.real_eval_center_fraction,
+        help="Center ROI fraction for eval_real TensorBoard images.",
+    )
+    parser.add_argument(
+        "--real-eval-zoom",
+        type=float,
+        default=TrainingConfig.real_eval_zoom,
+        help="Display zoom on center ROI (default 3.0 = EP11 center_zoom3x; SR scale stays --scale).",
+    )
+    parser.add_argument(
+        "--real-eval-overlap",
+        type=int,
+        default=TrainingConfig.real_eval_overlap,
+        help="Tiled inference overlap for real eval.",
+    )
+    return parser
+
+
+def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
+    args = build_arg_parser().parse_args(argv)
+    cfg = TrainingConfig(
+        training_pool_dir=args.training_pool_dir,
+        output_dir=args.output_dir,
+        scale=args.scale,
+        base_channels=args.base_channels,
+        patch_size_hr=args.patch_size_hr,
+        batch_size=args.batch_size,
+        num_workers=args.num_workers,
+        total_steps=args.total_steps,
+        lr=args.lr,
+        weight_decay=args.weight_decay,
+        edge_loss_weight=args.edge_loss_weight,
+        ssim_loss_weight=args.ssim_loss_weight,
+        loss_type=args.loss_type,
+        highpass_loss_weight=args.highpass_loss_weight,
+        highpass_sigma=args.highpass_sigma,
+        structure_boost=args.structure_boost,
+        mse_loss_weight=args.mse_loss_weight,
+        edge_coarse_weight=args.edge_coarse_weight,
+        grad_vector_weight=args.grad_vector_weight,
+        thin_boost=args.thin_boost,
+        gap_boost=args.gap_boost,
+        laplacian_weight=args.laplacian_weight,
+        forward_model_weight=args.forward_model_weight,
+        forward_model_psf_sigma=args.forward_model_psf_sigma,
+        lr_warmup_steps=args.lr_warmup_steps,
+        log_every=args.log_every,
+        save_every=args.save_every,
+        seed=args.seed,
+        device=args.device,
+        patches_per_scene=args.patches_per_scene,
+        max_scene_cache=args.max_scene_cache,
+        amp=args.amp,
+        compile_model=args.compile_model,
+        channels_last=args.channels_last,
+        tb_log_dir=args.tb_log_dir,
+        tb_image_every=args.tb_image_every,
+        residual=args.residual,
+        resume_from=args.resume_from,
+        prefetch_factor=args.prefetch_factor,
+        scenes_per_bucket=args.scenes_per_bucket,
+        patches_per_fetch=args.patches_per_fetch,
+        real_eval_enabled=args.real_eval_enabled,
+        real_eval_every=args.real_eval_every,
+        real_eval_frame_limit=args.real_eval_frame_limit,
+        real_eval_baseline_hr=args.real_eval_baseline_hr,
+        real_eval_alignment_method=args.real_eval_alignment_method,
+        real_eval_center_fraction=args.real_eval_center_fraction,
+        real_eval_zoom=args.real_eval_zoom,
+        real_eval_overlap=args.real_eval_overlap,
+    )
+    cfg.validate()
+    return cfg

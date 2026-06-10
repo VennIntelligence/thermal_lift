@@ -1,0 +1,445 @@
+"""Loss functions for thermal SR regression."""
+
+from __future__ import annotations
+
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+
+
+# ---------------------------------------------------------------------------
+# Sobel edge gradient
+# ---------------------------------------------------------------------------
+
+def sobel_edges_xy(x: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor]:
+    """Return Sobel gradient components (gx, gy) for a BCHW tensor.
+
+    Returns
+    -------
+    gx, gy : each has shape (B, C, H, W)
+    """
+
+    if x.ndim != 4:
+        raise ValueError("x must have shape (B, C, H, W)")
+    kernel_x = x.new_tensor([[-1.0, 0.0, 1.0], [-2.0, 0.0, 2.0], [-1.0, 0.0, 1.0]]).view(1, 1, 3, 3)
+    kernel_y = x.new_tensor([[-1.0, -2.0, -1.0], [0.0, 0.0, 0.0], [1.0, 2.0, 1.0]]).view(1, 1, 3, 3)
+    channels = x.shape[1]
+    gx = F.conv2d(x, kernel_x.repeat(channels, 1, 1, 1), padding=1, groups=channels)
+    gy = F.conv2d(x, kernel_y.repeat(channels, 1, 1, 1), padding=1, groups=channels)
+    return gx, gy
+
+
+def sobel_edges(x: torch.Tensor) -> torch.Tensor:
+    """Return Sobel gradient magnitude for a BCHW tensor."""
+    gx, gy = sobel_edges_xy(x)
+    return torch.sqrt(gx.square() + gy.square() + 1e-12)
+
+
+def laplacian(x: torch.Tensor) -> torch.Tensor:
+    """Return a 4-neighbor Laplacian response for a BCHW tensor."""
+
+    if x.ndim != 4:
+        raise ValueError("x must have shape (B, C, H, W)")
+    kernel = x.new_tensor([[0.0, 1.0, 0.0], [1.0, -4.0, 1.0], [0.0, 1.0, 0.0]]).view(1, 1, 3, 3)
+    channels = x.shape[1]
+    return F.conv2d(x, kernel.repeat(channels, 1, 1, 1), padding=1, groups=channels)
+
+
+def asymmetric_laplacian_loss(pred: torch.Tensor, target: torch.Tensor) -> torch.Tensor:
+    """Penalize places where pred is less Laplacian-sharp than target."""
+
+    pred_lap = torch.abs(laplacian(pred))
+    target_lap = torch.abs(laplacian(target))
+    return F.relu(target_lap - pred_lap).mean()
+
+
+def grad_vector_loss(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    structure_boost: float = 4.0,
+    thin_weight: torch.Tensor | None = None,
+) -> torch.Tensor:
+    """Gradient vector matching loss.
+
+    Compares full Sobel gradient vectors (gx, gy) between *pred* and *target*,
+    not just their magnitudes.  This is strictly more sensitive than
+    magnitude-only comparison:
+
+    - **Thickening**: edge shifts outward → gradient direction changes →
+      vector difference is large even when magnitudes stay the same.
+    - **Merging**: gradients between structures disappear → vector difference
+      captures the missing gradient.
+    - **Disconnection**: gradients at break points disappear → same as merging.
+    - **Hallucination**: spurious gradients appear in pred → vector difference
+      penalises them.
+
+    The loss is weighted by the target gradient magnitude so that
+    structure-rich regions dominate the loss signal.
+    """
+
+    gx_pred, gy_pred = sobel_edges_xy(pred)
+    gx_target, gy_target = sobel_edges_xy(target)
+
+    # Vector L1 difference (more stable than L2 for sparse edges)
+    vec_error = torch.abs(gx_pred - gx_target) + torch.abs(gy_pred - gy_target)
+
+    # Weight by target gradient magnitude — focuses on structure regions
+    target_mag = torch.sqrt(gx_target.square() + gy_target.square() + 1e-12)
+    mag_max = target_mag.amax(dim=(-2, -1), keepdim=True).clamp_min(1e-8)
+    mag_norm = target_mag / mag_max  # [0, 1]
+    weight_map = 1.0 + structure_boost * mag_norm
+    if thin_weight is not None:
+        if thin_weight.shape != target.shape:
+            raise ValueError(f"thin_weight shape mismatch: {thin_weight.shape} vs {target.shape}")
+        weight_map = weight_map * thin_weight.to(dtype=weight_map.dtype)
+
+    return (vec_error * weight_map).mean()
+
+
+# ---------------------------------------------------------------------------
+# Differentiable SSIM
+# ---------------------------------------------------------------------------
+
+def _gaussian_kernel_1d(size: int, sigma: float, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """1D Gaussian kernel normalised to sum=1."""
+    coords = torch.arange(size, device=device, dtype=dtype) - (size - 1) / 2.0
+    g = torch.exp(-coords.square() / (2.0 * sigma * sigma))
+    return g / g.sum()
+
+
+def _gaussian_kernel_2d(size: int, sigma: float, channels: int, device: torch.device, dtype: torch.dtype) -> torch.Tensor:
+    """2D separable Gaussian kernel with shape (channels, 1, size, size)."""
+    k1d = _gaussian_kernel_1d(size, sigma, device, dtype)
+    k2d = k1d.unsqueeze(1) * k1d.unsqueeze(0)  # outer product
+    return k2d.expand(channels, 1, size, size).contiguous()
+
+
+def ssim(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    *,
+    window_size: int = 11,
+    sigma: float = 1.5,
+    data_range: float | None = None,
+    eps: float = 1e-8,
+) -> torch.Tensor:
+    """Compute mean SSIM between pred and target (BCHW tensors).
+
+    Returns a scalar in [0, 1] where 1 = identical.
+    """
+
+    if pred.shape != target.shape:
+        raise ValueError(f"shape mismatch: {pred.shape} vs {target.shape}")
+    if pred.ndim != 4:
+        raise ValueError("input must be (B, C, H, W)")
+
+    channels = pred.shape[1]
+
+    # Disable autocast: F.conv2d under AMP would cast float32 inputs back to fp16,
+    # causing NaN in the Gaussian-windowed statistics.
+    with torch.amp.autocast(device_type=pred.device.type, enabled=False):
+        pred_f = pred.float()
+        target_f = target.float()
+
+        kernel = _gaussian_kernel_2d(window_size, sigma, channels, pred_f.device, pred_f.dtype)
+
+        # Estimate data range from target if not given
+        if data_range is None:
+            data_range = float(target_f.max() - target_f.min()) + eps
+
+        c1 = (0.01 * data_range) ** 2
+        c2 = (0.03 * data_range) ** 2
+
+        pad = window_size // 2
+        mu_p = F.conv2d(pred_f, kernel, padding=pad, groups=channels)
+        mu_t = F.conv2d(target_f, kernel, padding=pad, groups=channels)
+
+        mu_p_sq = mu_p * mu_p
+        mu_t_sq = mu_t * mu_t
+        mu_pt = mu_p * mu_t
+
+        sigma_p_sq = F.conv2d(pred_f * pred_f, kernel, padding=pad, groups=channels) - mu_p_sq
+        sigma_t_sq = F.conv2d(target_f * target_f, kernel, padding=pad, groups=channels) - mu_t_sq
+        sigma_pt = F.conv2d(pred_f * target_f, kernel, padding=pad, groups=channels) - mu_pt
+
+        # Clamp variances to avoid negative values from numerical precision
+        sigma_p_sq = sigma_p_sq.clamp(min=0.0)
+        sigma_t_sq = sigma_t_sq.clamp(min=0.0)
+
+        numerator = (2.0 * mu_pt + c1) * (2.0 * sigma_pt + c2)
+        denominator = (mu_p_sq + mu_t_sq + c1) * (sigma_p_sq + sigma_t_sq + c2)
+
+        # Stay in float32 — avoids fp16 gradient overflow in AMP backward
+        return (numerator / (denominator + eps)).mean()
+
+
+# ---------------------------------------------------------------------------
+# Combined loss
+# ---------------------------------------------------------------------------
+
+class ThermalSRLoss(nn.Module):
+    def __init__(
+        self,
+        edge_weight: float = 0.1,
+        edge_mask_boost: float = 2.0,
+        ssim_weight: float = 0.1,
+    ) -> None:
+        super().__init__()
+        if edge_weight < 0:
+            raise ValueError("edge_weight must be >= 0")
+        if edge_mask_boost < 0:
+            raise ValueError("edge_mask_boost must be >= 0")
+        if ssim_weight < 0:
+            raise ValueError("ssim_weight must be >= 0")
+        self.edge_weight = float(edge_weight)
+        self.edge_mask_boost = float(edge_mask_boost)
+        self.ssim_weight = float(ssim_weight)
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        edge_mask: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if pred.shape != target.shape:
+            raise ValueError(f"pred and target shape mismatch: {pred.shape} vs {target.shape}")
+
+        mse = F.mse_loss(pred, target)
+
+        # Sobel edge loss
+        pred_edges = sobel_edges(pred)
+        target_edges = sobel_edges(target)
+        edge_error = torch.abs(pred_edges - target_edges)
+        if edge_mask is not None:
+            if edge_mask.shape != target.shape:
+                raise ValueError(f"edge_mask shape mismatch: {edge_mask.shape} vs {target.shape}")
+            weights = 1.0 + self.edge_mask_boost * edge_mask.to(dtype=edge_error.dtype)
+            edge = (edge_error * weights).mean()
+        else:
+            edge = edge_error.mean()
+
+        # SSIM loss (1 - SSIM so that lower is better)
+        ssim_val = ssim(pred, target)
+        ssim_loss = 1.0 - ssim_val
+
+        total = mse + self.edge_weight * edge + self.ssim_weight * ssim_loss
+        return {"total": total, "mse": mse, "edge": edge, "ssim": ssim_loss}
+
+
+# ---------------------------------------------------------------------------
+# Gaussian blur for highpass computation
+# ---------------------------------------------------------------------------
+
+def gaussian_blur_2d(x: torch.Tensor, sigma: float) -> torch.Tensor:
+    """Separable Gaussian blur for BCHW tensors. AMP-safe (float32 internal)."""
+
+    if sigma <= 0:
+        return x
+    with torch.amp.autocast(device_type=x.device.type, enabled=False):
+        x_f = x.float()
+        ks = int(4 * sigma + 0.5) * 2 + 1
+        coords = torch.arange(ks, device=x_f.device, dtype=torch.float32) - (ks - 1) / 2.0
+        g = torch.exp(-coords.square() / (2.0 * sigma * sigma))
+        g = g / g.sum()
+        c = x_f.shape[1]
+        pad = ks // 2
+        k_h = g.view(1, 1, 1, -1).expand(c, 1, 1, ks).contiguous()
+        k_v = g.view(1, 1, -1, 1).expand(c, 1, ks, 1).contiguous()
+        out = F.conv2d(F.pad(x_f, (pad, pad, 0, 0), mode="reflect"), k_h, groups=c)
+        out = F.conv2d(F.pad(out, (0, 0, pad, pad), mode="reflect"), k_v, groups=c)
+        return out
+
+
+def forward_model_loss(
+    pred: torch.Tensor,
+    lr_observation: torch.Tensor,
+    *,
+    scale: int = 2,
+    psf_sigma_lr_px: float = 0.5,
+) -> torch.Tensor:
+    """Blur HR prediction by the PSF and block-average to the LR observation."""
+
+    if pred.ndim != 4 or lr_observation.ndim != 4:
+        raise ValueError("pred and lr_observation must have shape (B, C, H, W)")
+    s = int(scale)
+    if s <= 0:
+        raise ValueError("scale must be > 0")
+    if pred.shape[-2] % s != 0 or pred.shape[-1] % s != 0:
+        raise ValueError("pred spatial shape must be divisible by scale")
+    blurred = gaussian_blur_2d(pred, float(psf_sigma_lr_px) * s)
+    down = F.avg_pool2d(blurred, kernel_size=s, stride=s)
+    if down.shape != lr_observation.shape:
+        raise ValueError(f"forward-model shape mismatch: {down.shape} vs {lr_observation.shape}")
+    return F.mse_loss(down, lr_observation)
+
+
+# ---------------------------------------------------------------------------
+# Contour-focused loss for structure/edge reconstruction
+# ---------------------------------------------------------------------------
+
+class ContourSRLoss(nn.Module):
+    """Loss for contour-level SR: focuses on structure/edge reconstruction.
+
+    Strips DC background via highpass and weights structure pixels by a
+    **gradient-based continuous weight map** derived from the target's Sobel
+    gradient magnitude.
+
+    Components
+    ----------
+    mse            : MSE on raw pred vs target — anchors DC / gap temperatures.
+    highpass L1    : L1 on highpass(pred) vs highpass(target), gradient-weighted.
+    Sobel edge mag : L1 on gradient magnitude (multi-scale: 1× + 2×-downsampled).
+    SSIM           : structural similarity (secondary).
+    grad_vector    : Full Sobel gradient *vector* (gx, gy) matching, weighted by
+                     target gradient magnitude.  Compared to magnitude-only edge
+                     loss, this additionally catches:
+                       - thickening (gradient direction shifts)
+                       - merging    (inter-structure gradients vanish)
+                       - disconnection (intra-structure gradients vanish)
+    laplacian /
+    forward_model  : Optional hybrid terms kept disabled by default and enabled
+                     explicitly for v6/v8-style experiments.
+    """
+
+    def __init__(
+        self,
+        highpass_weight: float = 1.0,
+        highpass_sigma: float = 5.0,
+        edge_weight: float = 0.05,
+        ssim_weight: float = 0.15,
+        mse_weight: float = 0.2,
+        structure_boost: float = 4.0,
+        edge_coarse_weight: float = 0.25,
+        grad_vector_weight: float = 0.3,
+        laplacian_weight: float = 0.0,
+        forward_model_weight: float = 0.0,
+        forward_model_psf_sigma: float = 1.0,
+        forward_model_scale: int = 2,
+    ) -> None:
+        super().__init__()
+        for name, val in [
+            ("highpass_weight", highpass_weight),
+            ("highpass_sigma", highpass_sigma),
+            ("edge_weight", edge_weight),
+            ("ssim_weight", ssim_weight),
+            ("mse_weight", mse_weight),
+            ("structure_boost", structure_boost),
+            ("edge_coarse_weight", edge_coarse_weight),
+            ("grad_vector_weight", grad_vector_weight),
+            ("laplacian_weight", laplacian_weight),
+            ("forward_model_weight", forward_model_weight),
+            ("forward_model_psf_sigma", forward_model_psf_sigma),
+        ]:
+            if val < 0:
+                raise ValueError(f"{name} must be >= 0")
+        if int(forward_model_scale) <= 0:
+            raise ValueError("forward_model_scale must be > 0")
+        self.highpass_weight = float(highpass_weight)
+        self.highpass_sigma = float(highpass_sigma)
+        self.edge_weight = float(edge_weight)
+        self.ssim_weight = float(ssim_weight)
+        self.mse_weight = float(mse_weight)
+        self.structure_boost = float(structure_boost)
+        self.edge_coarse_weight = float(edge_coarse_weight)
+        self.grad_vector_weight = float(grad_vector_weight)
+        self.laplacian_weight = float(laplacian_weight)
+        self.forward_model_weight = float(forward_model_weight)
+        self.forward_model_psf_sigma = float(forward_model_psf_sigma)
+        self.forward_model_scale = int(forward_model_scale)
+
+    def forward(
+        self,
+        pred: torch.Tensor,
+        target: torch.Tensor,
+        lr_observation: torch.Tensor | None = None,  # kept for API compat, unused
+        thin_weight: torch.Tensor | None = None,
+        gap_weight: torch.Tensor | None = None,
+    ) -> dict[str, torch.Tensor]:
+        if pred.shape != target.shape:
+            raise ValueError(f"pred/target shape mismatch: {pred.shape} vs {target.shape}")
+        if thin_weight is not None and thin_weight.shape != target.shape:
+            raise ValueError(f"thin_weight shape mismatch: {thin_weight.shape} vs {target.shape}")
+        if gap_weight is not None and gap_weight.shape != target.shape:
+            raise ValueError(f"gap_weight shape mismatch: {gap_weight.shape} vs {target.shape}")
+
+        # ---- MSE on raw prediction — anchor DC + protect gaps ----
+        mse_error = (pred - target).square()
+        if gap_weight is not None:
+            mse_error = mse_error * gap_weight.to(dtype=mse_error.dtype)
+        mse_loss = mse_error.mean()
+
+        # ---- Highpass: strip smooth DC background ----
+        pred_hp = pred - gaussian_blur_2d(pred, self.highpass_sigma)
+        target_hp = target - gaussian_blur_2d(target, self.highpass_sigma)
+
+        # ---- Gradient-based structure weight (from target) ----
+        hp_error = torch.abs(pred_hp - target_hp)
+        target_edges = sobel_edges(target)
+        edge_max = target_edges.amax(dim=(-2, -1), keepdim=True).clamp_min(1e-8)
+        edge_norm = target_edges / edge_max
+        weight_map = 1.0 + self.structure_boost * edge_norm
+        if thin_weight is not None:
+            weight_map = weight_map * thin_weight.to(dtype=weight_map.dtype)
+        if gap_weight is not None:
+            weight_map = weight_map * gap_weight.to(dtype=weight_map.dtype)
+        hp_loss = (hp_error * weight_map).mean()
+
+        # ---- Multi-scale Sobel edge magnitude loss ----
+        pred_edges = sobel_edges(pred)
+        edge_loss_fine = torch.abs(pred_edges - target_edges).mean()
+
+        pred_2x = F.avg_pool2d(pred, kernel_size=2, stride=2)
+        target_2x = F.avg_pool2d(target, kernel_size=2, stride=2)
+        pred_edges_2x = sobel_edges(pred_2x)
+        target_edges_2x = sobel_edges(target_2x)
+        edge_loss_coarse = torch.abs(pred_edges_2x - target_edges_2x).mean()
+
+        edge_loss = edge_loss_fine + self.edge_coarse_weight * edge_loss_coarse
+
+        # ---- SSIM (structural similarity) ----
+        ssim_val = ssim(pred, target)
+        ssim_loss = 1.0 - ssim_val
+
+        # ---- Gradient vector matching ----
+        gv_loss = pred.new_tensor(0.0)
+        if self.grad_vector_weight > 0:
+            gv_loss = grad_vector_loss(pred, target, self.structure_boost, thin_weight=thin_weight)
+
+        # ---- Optional hybrid terms from v6_physics ----
+        lap_loss = pred.new_tensor(0.0)
+        if self.laplacian_weight > 0:
+            lap_loss = asymmetric_laplacian_loss(pred, target)
+
+        fm_loss = pred.new_tensor(0.0)
+        if self.forward_model_weight > 0:
+            if lr_observation is None:
+                raise ValueError("lr_observation is required when forward_model_weight > 0")
+            fm_loss = forward_model_loss(
+                pred,
+                lr_observation,
+                scale=self.forward_model_scale,
+                psf_sigma_lr_px=self.forward_model_psf_sigma,
+            )
+
+        total = (
+            self.mse_weight * mse_loss
+            + self.highpass_weight * hp_loss
+            + self.edge_weight * edge_loss
+            + self.ssim_weight * ssim_loss
+            + self.grad_vector_weight * gv_loss
+            + self.laplacian_weight * lap_loss
+            + self.forward_model_weight * fm_loss
+        )
+        out = {
+            "total": total,
+            "mse": mse_loss,
+            "highpass": hp_loss,
+            "edge": edge_loss,
+            "ssim": ssim_loss,
+            "grad_vector": gv_loss,
+        }
+        if self.laplacian_weight > 0:
+            out["laplacian"] = lap_loss
+        if self.forward_model_weight > 0:
+            out["forward_model"] = fm_loss
+        return out
