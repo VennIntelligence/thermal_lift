@@ -12,7 +12,7 @@
 
 它只做编排和健康检查，不改训练逻辑：
 
-- 计划 Stage 4 progressive 训练：64 -> 128 -> 255 frames。
+- 计划 Stage 4 progressive 训练：64 -> 128 -> 248 clean frames。
 - 每个阶段默认包含 4 个方法：EP06 MAP-TV、SIREN、WIRE、DeepInv-DIP。
 - 默认资源分配：`MAP-TV=cpu`，`SIREN/WIRE=cuda:1` 串行，`DeepInv-DIP=cuda:0`。
 - 每次 `tick` 只启动当前阶段中可以安全启动的 pending 任务，然后立即退出。
@@ -82,8 +82,8 @@ output/ep08_inr_sr/stage3/{method}_{frames:03d}_full_{preserve|stretch}
 ```text
 output/ep08_inr_sr/stage3/siren_064_full_preserve
 output/ep08_inr_sr/stage3/wire_128_full_preserve
-output/ep08_inr_sr/stage3/deepinv_dip_255_full_preserve
-output/ep08_inr_sr/stage3/ep06_map_tv_255_full_preserve
+output/ep08_inr_sr/stage3/deepinv_dip_248_full_preserve
+output/ep08_inr_sr/stage3/ep06_map_tv_248_full_preserve
 ```
 
 ## 5. Controller 数值门控
@@ -138,7 +138,7 @@ cd /home/ujs/mycode/thermal_lift/algos/ep08_inr_sr
 uv run python scripts/stage4_controller.py tick --max-frame 64 --batch-k 4
 ```
 
-如果 OOM 发生在 128 或 255 帧，把 `--max-frame` 改成对应阶段或直接省略，让 controller 回到当前 blocked phase。
+如果 OOM 发生在 128 或 248 clean-frame 阶段，把 `--max-frame` 改成对应阶段或直接省略，让 controller 回到当前 blocked phase。
 
 ## 8. Notebook 构建
 

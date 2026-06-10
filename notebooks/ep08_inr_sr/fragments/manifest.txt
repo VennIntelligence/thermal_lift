@@ -10,3 +10,4 @@
 09_stage3_progressive.py
 10_stage3_visual_comparison.py
 11_stage3_aspect_ablation.py
+12_stage3_analysis.py

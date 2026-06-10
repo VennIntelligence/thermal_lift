@@ -56,6 +56,18 @@ def test_stage4_controller_batch_override_is_neural_only() -> None:
         assert command[command.index("--batch-k") + 1] == "4"
 
 
+def test_stage4_controller_default_final_phase_is_clean_248() -> None:
+    controller = _load_script("stage4_controller")
+
+    args = controller.parse_args(["plan"])
+    tasks = controller.build_plan(args)
+
+    assert controller.parse_frame_list("64,128,all_clean") == [64, 128, 248]
+    assert sorted({task.n_frames for task in tasks}) == [64, 128, 248]
+    assert any(task.run_name == "ep06_map_tv_248_full_preserve" for task in tasks)
+    assert any(task.run_name == "deepinv_dip_248_full_preserve" for task in tasks)
+
+
 def test_stage4_health_gate_neural_best_step_and_map_tv_exception() -> None:
     controller = _load_script("stage4_controller")
     tasks = controller.build_plan(controller.parse_args(["plan", "--max-frame", "64"]))

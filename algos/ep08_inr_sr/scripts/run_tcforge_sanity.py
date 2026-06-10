@@ -3,7 +3,7 @@
 
 The original Stage 2 sanity script only covered Deep Decoder and
 DeepInverse-DIP. Stage 3 prep now uses ``run_tcforge_benchmark.py`` as the
-authoritative HR-ground-truth check for all four methods.
+authoritative synthetic HR-ground-truth check for all four methods.
 """
 
 from __future__ import annotations

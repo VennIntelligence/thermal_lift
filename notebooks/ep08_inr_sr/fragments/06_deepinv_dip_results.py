@@ -50,23 +50,15 @@ if not deepinv_metrics.empty and not deep_decoder_metrics_for_dip.empty:
     display(dip_compare.round(6))
 
 # %% [markdown]
-# > **数据说明**: 第一张表检查 DeepInverse-DIP 正式产物；第二张表读取 TCForge benchmark 的有 GT highpass PSNR/SSIM；第三张表把 DeepInverse-DIP 与本项目 Deep Decoder 放在同一真实数据指标下比较。
-# >
-# > **怎么看**: TCForge PSNR/SSIM 只验证实现链路在有 HR ground truth 的合成场景上能收敛，不代表真实数据 SR 成功。真实数据上，hold-out residual 越低越好，但 split-half NRMSE 和 artifact score 若同时变差，说明过拟合或 hallucination 风险更高。
-# >
-# > **正常/异常**: DeepInverse-DIP 的主训练监控 hold-out loss；split-half 使用相同 fixed latent/初始化、较短训练预算，目的是隔离数据分半稳定性，而不是把随机初始化差异混进指标。
-# >
-# > **核心发现**: TCForge benchmark 中四个方法都通过 HR highpass GT sanity；真实数据上 DeepInverse-DIP 的 hold-out residual 很低，但 artifact 风险仍最高。
+# 本评估汇总了基于 DeepInverse 框架内 `ConvDecoder` 先验（Stage 2）的真实数据重建结果，并与 Deep Decoder 在同一数据划分口径下进行了并排对比。
+# 评估体系在合成数据集（带高分辨率 Ground Truth 的 TCForge benchmark）与真实芯片观测序列上进行了多层次验证。在真实场景中，较低的泛化残差常指示算法具有更强的前向重投一致性，但若同时伴随着子集一致性误差（Split-Half NRMSE）及伪影评分的上升，则表征卷积网络已经陷入对探测器不均匀噪声与高频微小漂移的过拟合中。对 DeepInverse-DIP 算法的评估需深入审查其泛化性能与伪影控制的物理平衡。
 
 # %%
 display(show_png_if_exists(OUTPUT_DIR / "tcforge_benchmark" / "tcforge_benchmark_highpass.png"))
 
 # %% [markdown]
-# > **图表说明**: TCForge benchmark 图展示 HR highpass GT 以及四个方法的合成场景重建。
-# >
-# > **怎么看**: 该图只检查两个 CNN decoder 是否能在有真值的小场景上收敛到合理结构。PSNR/SSIM 越高越好，但它不包含真实 LWIR session 的热漂移、alignment uncertainty 和无 GT 风险。
-# >
-# > **核心发现**: 合成 benchmark 支持继续使用这些实现做真实数据对照，但最终方法选择仍应以真实数据五项指标为准。
+# 仿真基准测试图像（`tcforge_benchmark_highpass.png`）并列展现了高分辨率基准高通真值与两种 CNN 解码器先验的合成重建结构。
+# 该对比用于验证模型在大地坐标与前向算子约定下的几何复原精度。虽然在受控仿真场景中可以获得较高的 PSNR 与 SSIM，但合成系统无法模拟真实长波红外（LWIR）成像中的瞬态热演化及非刚性对齐扰动。因此，仿真基准的收敛性仅代表算法架构逻辑的通路完备，真实超分辨率效果的验证依然依赖于后续真实数据物理指标的交叉比对。
 
 # %%
 display(show_png_if_exists(deepinv_dir / "training_curve.png"))
@@ -75,10 +67,5 @@ display(show_png_if_exists(deepinv_dir / "hr_raw_control.png"))
 display(show_png_if_exists(deepinv_dir / "split_half_difference.png"))
 
 # %% [markdown]
-# > **图表说明**: DeepInverse-DIP 的训练摘要、HR highpass、raw-control 参照和 split-half 差异图。
-# >
-# > **怎么看**: Highpass 轮廓更强或 hold-out residual 更低并不足以通过；需要看 split-half 差异是否集中在噪声/条纹区域，以及 raw-control 是否支持相同结构位置。
-# >
-# > **正常/异常**: 若 split-half 差异图出现大面积结构差异或方向性纹理，说明该方法对训练帧子集敏感。raw-control agreement 低时，不能把高频结构直接解释为可靠芯片轮廓。
-# >
-# > **核心发现**: DeepInverse-DIP 更像强拟合上限参照，不适合作为 Stage 3 默认赢家。
+# 此处展示了 DeepInverse-DIP 算法在真实芯片序列上的参数优化轨迹曲线、重建的高分辨率高通结构响应、原始温度控制通道（Raw Control）以及子集分割一致性差异分布。
+# 对于强参数容量的 CNN 隐式先验，其具有极低的重投泛化残差，但这极易夹带高频空间纹理幻觉。若子集分割一致性差异图展现出显著且有规律的方向性高频条纹，说明重建出的几何边缘极不稳定，主要由训练子集中的局部噪声及相位不均匀性诱导产生。物理边缘的真实性判定应当以原始温度控制通道的几何契合为依据，从而限制无物理支撑的细节虚构。

@@ -295,10 +295,12 @@ def apply_cli_overrides(cfg: dict[str, Any], args: argparse.Namespace) -> dict[s
     if args.sigma_0 is not None:
         cfg.setdefault("model", {})["first_sigma_0"] = float(args.sigma_0)
         cfg.setdefault("model", {})["hidden_sigma_0"] = float(args.sigma_0)
-    if args.hidden_channels:
-        cfg.setdefault("model", {})["hidden_channels"] = [int(v) for v in str(args.hidden_channels).split(",") if v.strip()]
-    if args.latent_spatial:
-        values = [int(v) for v in str(args.latent_spatial).split(",") if v.strip()]
+    hidden_channels = getattr(args, "hidden_channels", None)
+    if hidden_channels:
+        cfg.setdefault("model", {})["hidden_channels"] = [int(v) for v in str(hidden_channels).split(",") if v.strip()]
+    latent_spatial = getattr(args, "latent_spatial", None)
+    if latent_spatial:
+        values = [int(v) for v in str(latent_spatial).split(",") if v.strip()]
         if len(values) != 2:
             raise ValueError("--latent-spatial must contain two comma-separated integers")
         cfg.setdefault("model", {})["latent_spatial"] = values

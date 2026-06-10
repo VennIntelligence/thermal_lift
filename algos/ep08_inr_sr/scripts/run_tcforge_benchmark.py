@@ -425,12 +425,12 @@ def _save_side_by_side(rows: list[dict[str, Any]], images: dict[str, np.ndarray]
         ax.set_axis_off()
     fig.colorbar(im, ax=axes_arr.tolist(), fraction=0.025, pad=0.01)
     caption = ", ".join(f"{row['method']}: {row['psnr_db']:.2f} dB" for row in rows)
-    fig.suptitle(f"TCForge HR highpass benchmark. {caption}", fontsize=8)
+    fig.suptitle(f"TCForge synthetic HR highpass benchmark. {caption}", fontsize=8)
     savefig_academic(fig, path)
 
 
 def parse_args() -> argparse.Namespace:
-    parser = argparse.ArgumentParser(description="Benchmark EP08 INR/DIP methods on TCForge HR-GT highpass data.")
+    parser = argparse.ArgumentParser(description="Benchmark EP08 INR/DIP methods on synthetic TCForge HR-GT highpass data.")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "output" / "ep08_inr_sr" / "tcforge_benchmark")
     parser.add_argument("--scene-dir", type=Path, default=PROJECT_ROOT / "data" / "synthetic" / "ep08_tcforge_benchmark" / "scenes" / "easy_seed42")
     parser.add_argument("--lr-shape", nargs=2, type=int, default=[256, 256], help="LR H W. Default gives 512x512 HR at scale=2.")
@@ -502,7 +502,7 @@ def main() -> None:
     ).to(device)
 
     rows: list[dict[str, Any]] = []
-    images: dict[str, np.ndarray] = {"HR highpass GT": target}
+    images: dict[str, np.ndarray] = {"Synthetic HR highpass GT": target}
     hidden_channels = tuple(int(v) for v in str(args.deep_decoder_hidden_channels).split(",") if v.strip())
     deepinv_in_spatial = _parse_hw(args.deepinv_in_spatial)
 

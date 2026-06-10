@@ -105,7 +105,7 @@ def load_real_dataset(
         frame_audit_path=frame_audit_path,
         workers=workers,
         dtype=np.float32,
-        limit=None if n_frames is None else int(n_frames),
+        limit=None,
     )
     shifts_np = load_alignment_shifts(
         method=alignment_method,
@@ -114,6 +114,10 @@ def load_real_dataset(
     ).astype(np.float32, copy=False)
     if shifts_np.shape != (frames.shape[0], 2):
         raise ValueError(f"alignment shifts shape {shifts_np.shape} does not match {frames.shape[0]} frames")
+    if n_frames is not None:
+        frames = frames[: int(n_frames)]
+        frame_metadata = frame_metadata.iloc[: int(n_frames)].reset_index(drop=True).copy()
+        shifts_np = shifts_np[: int(n_frames)]
 
     cropped, crop = _center_crop(np.asarray(frames, dtype=np.float32), patch_size)
     highpass_np = highpass_preprocess(

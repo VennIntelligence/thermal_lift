@@ -7,6 +7,7 @@
 # cd /path/to/thermal_lift
 # uv sync
 # uv pip install -e core/
+# uv run python scripts/build_ep08_cache.py
 # uv run python scripts/build_notebook.py notebooks/ep08_inr_sr --execute
 # ```
 #
@@ -15,8 +16,6 @@
 # **边界**: EP08 只评估 2x contour-level 结构可见性。Stage command 只能作为 prior / 初始化 / 正则约束，不能作为 alignment 真值；Highpass track 是结构响应图，不是绝对温度 SR。
 
 # %%
-%matplotlib inline
-
 import json
 from pathlib import Path
 
@@ -24,6 +23,8 @@ import pandas as pd
 from IPython.display import Image as NotebookImage
 from IPython.display import Markdown, display
 
+from thermal_core.ep08_cache import FULL_CLEAN_FRAMES, collect_stage3_metrics, load_ep08_cache
+from thermal_core.notebook_cache import show_fig as _show_cached_fig
 from thermal_core.plotting import setup_academic_style
 
 PROJECT_ROOT = Path.cwd()
@@ -36,10 +37,12 @@ EP06_OUTPUT_DIR = PROJECT_ROOT / "output" / "ep06_sr_poc"
 REPORT_DIR = PROJECT_ROOT / "reports" / "ep08_inr_sr"
 EP08_ALGO_DIR = PROJECT_ROOT / "algos" / "ep08_inr_sr"
 BASELINE_CONFIG = EP08_ALGO_DIR / "configs" / "ep06_baseline_metrics.json"
+STAGE3_DIR = OUTPUT_DIR / "stage3"
 
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
 setup_academic_style()
+cache = load_ep08_cache(project_root_path=PROJECT_ROOT, output_dir=OUTPUT_DIR)
 
 
 def relative(path: Path) -> str:
@@ -63,11 +66,31 @@ def read_csv_if_exists(path: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+def show_fig(name: str) -> None:
+    """Display a cached EP08 Stage 3 figure."""
+    path = cache.figure_path(name)
+    if not path.exists():
+        raise FileNotFoundError(
+            f"Missing cached figure: {path}\nRun: uv run python scripts/build_ep08_cache.py"
+    )
+    _show_cached_fig(cache.output_dir, name, rebuild_command="uv run python scripts/build_ep08_cache.py")
+
+
+def show_optional_fig(name: str, pending: str) -> None:
+    """Display a cached EP08 figure if present; otherwise print a pending hint."""
+    path = cache.figure_path(name)
+    if path.exists():
+        _show_cached_fig(cache.output_dir, name, rebuild_command="uv run python scripts/build_ep08_cache.py")
+    else:
+        print(pending)
+
+
 def show_png_if_exists(path: Path):
+    """Display algo-generated PNG (training curves, method outputs)."""
     if not path.exists():
         print(f"Missing figure: {relative(path)}")
         return None
-    return NotebookImage(filename=str(path))
+    return NotebookImage(filename=str(path), retina=True)
 
 
 def file_status(paths: dict[str, Path]) -> pd.DataFrame:
@@ -121,13 +144,10 @@ setup_status = file_status(
 )
 display(setup_status)
 print(f"Project root: {PROJECT_ROOT}")
+print(f"EP08 cache: {relative(OUTPUT_DIR)}")
+print(f"   rebuild: uv run python scripts/build_ep08_cache.py")
 print(f"Baseline placeholder keys: {sorted(baseline_config.keys()) if baseline_config else []}")
 
 # %% [markdown]
-# > **数据说明**: 表格检查 EP08 notebook 需要读取的目录和 baseline placeholder 是否存在；Stage 2 的四个方法输出已按约定落在 `output/ep08_inr_sr/` 的方法子目录中。
-# >
-# > **怎么看**: `exists=True` 表示路径可访问；SIREN/WIRE 位于 `siren_stage1/` 和 `wire_stage1/`，Deep Decoder/DeepInverse-DIP 位于 `deep_decoder_stage2/` 和 `deepinv_dip_stage2/`。
-# >
-# > **正常/异常**: 若任一 Stage 2 方法目录或 `EP06 baseline placeholder` 缺失，则四方对比无法完整复现；EP06 placeholder 记录 classic baseline 的可用 proxy 指标和不可用同协议指标边界。
-# >
-# > **核心发现**: EP08 报告层已经建立读取约定，Stage 2 四方输出可从统一目录加载并与 EP06 MAP-TV proxy 进行受限对比。
+# 本单元用于初始化隐式神经网络（INR）与深度图像先验（DIP）超分辨率重建环境，并检测下游分析所需的输出路径与 Baseline 占位配置文件的状态。
+# 评估体系在统一的 `output/ep08_inr_sr/` 目录下对以下各方法子目录的存在性进行检查：SIREN（`siren_stage1/`）、WIRE（`wire_stage1/`）、Deep Decoder（`deep_decoder_stage2/`）及 DeepInverse-DIP（`deepinv_dip_stage2/`）。环境校验中，`exists=True` 表征了实验数据的完整性。若发生目录缺失，则表明部分算法的训练或推断未执行，后续的多分支对比将退化。为确保回归的物理一致性，`ep06_baseline_metrics.json` 文件锁定了前文经典算法在相同数据协议及空间裁剪范围下的指标边界，用作深度隐式重建方法的对比控制锚点。

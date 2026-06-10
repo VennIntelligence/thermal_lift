@@ -25,14 +25,17 @@ def test_load_real_dataset_center_crop_and_raw_control_track(monkeypatch) -> Non
     )
 
     def fake_load_main_session_frames(**kwargs):
-        assert kwargs["limit"] == 3
+        assert kwargs["limit"] is None
         assert kwargs["workers"] == 2
-        return frames[:3], metadata.iloc[:3].copy()
+        return frames, metadata.copy()
 
     def fake_load_alignment_shifts(**kwargs):
         assert kwargs["method"] == "contour_refined"
-        assert len(kwargs["metadata"]) == 3
-        return np.array([[0.0, 0.0], [0.25, -0.5], [0.5, 0.25]], dtype=np.float32)
+        assert len(kwargs["metadata"]) == 5
+        return np.array(
+            [[0.0, 0.0], [0.25, -0.5], [0.5, 0.25], [1.0, 1.0], [-1.0, -1.0]],
+            dtype=np.float32,
+        )
 
     monkeypatch.setattr(data_mod, "load_main_session_frames", fake_load_main_session_frames)
     monkeypatch.setattr(data_mod, "load_alignment_shifts", fake_load_alignment_shifts)

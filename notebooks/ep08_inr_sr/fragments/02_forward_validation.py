@@ -39,10 +39,9 @@ gate_rows = [
 display(pd.DataFrame(gate_rows))
 
 # %% [markdown]
-# > **数据说明**: 第一张表检查 validation 产物是否存在；第二张表读取 JSON 中的门控状态、最大绝对误差和来源字段，也记录 train/val split 可复现性。
-# >
-# > **怎么看**: Forward 与 highpass 是两个独立门控。Forward 的边界模式应匹配 EP06 `mode="constant"`；highpass 背景估计应匹配 EP06 `mode="nearest"`。
-# >
-# > **正常/异常**: `status=missing` 代表当前尚未运行验证，不是通过。若 forward 与 highpass 只给出一个合并误差，应视为异常，因为两条链路的边界约定不同；若 split 结果不可复现，SIREN/WIRE activation ablation 也不公平。
-# >
-# > **核心发现**: 在这两个门控通过前，任何 SIREN / WIRE / Deep Decoder 结果都只能作为调试图，不能进入四方对比结论。
+# 本小节对 PyTorch 框架内的前向降采样算子（Forward Operator）与 EP06 中基于 NumPy 的经典退化算子之间的等价性进行严格校验。
+# 校验包含三个独立门控：
+# 1. **前向算子等价性门控**：确保 PyTorch 与 NumPy 在应用相机 PSF 与下采样时其边界模式匹配恒定填充（`constant`），最大绝对误差应收敛至机器精度。
+# 2. **高通预处理等价性门控**：确保基于 PyTorch 的空间背景高通滤波在计算局部均值时匹配最近邻填充（`nearest`）。
+# 3. **相位分层划分可复现性门控**：锁定随机种子（`seed=42`），保证训练与验证子集的相位空间直方图划分在 SIREN/WIRE 等不同模型消融实验中具有物理一致性。
+# 门控状态为 `pass` 是进入深度学习超分辨率训练的前置必要门槛。若等价性校验缺失（`missing`）或误差超限，则指示着物理前向退化模型约定存在偏差，后续的深度网络输出将退化为无物理意义的调试图像。

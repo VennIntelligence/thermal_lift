@@ -21,22 +21,13 @@ else:
     )
 
 # %% [markdown]
-# > **数据说明**: 表格读取 TCForge 四方法 benchmark 的 highpass-domain 指标；PSNR/SSIM/NRMSE/MAE 都是相对合成 HR highpass ground truth 的数值，不是实测芯片数据指标。
-# >
-# > **怎么看**: PSNR 和 global SSIM 越高越好，NRMSE 和 MAE 越低越好；`best_step/final_step` 用来确认每个方法是否真的完成了 bounded 训练循环。DeepInverse-DIP 这里使用自定义早停/有界循环，不使用 deepinv 内置 10000-step DIP 调用。
-# >
-# > **正常/异常**: 该 benchmark 的 highpass target 来自 HR 温度场先做 highpass，而 LR 输入则由 forward model 生成后再做 highpass；它检查实现、尺寸和 forward wrapper 是否大体自洽，不替代真实数据的 alignment gate。
-# >
-# > **核心发现**: 当四方法表格和图像都存在时，EP08 可以用同一 TCForge 场景检查 SIREN/WIRE/Deep Decoder/DeepInverse-DIP 的 HR 输出形状、训练闭环和 highpass 结构恢复能力。
+# 此表格汇总了基于 TCForge 仿真环境的四种模型（SIREN, WIRE, Deep Decoder, DeepInverse-DIP）在合成高分辨率 Ground Truth 下的图像复原指标。所包含的 PSNR、结构相似度（SSIM）、NRMSE 及平均绝对误差（MAE）均在高通空间域（Highpass Domain）内计算得出，而非真实热像观测下的实测结果。
+# 在基准测试中，较高的 PSNR/SSIM 以及较低的 NRMSE/MAE 指示了算法对于已知退化过程的逆向求解能力。`best_step` 与 `final_step` 字段用于检验网络优化的收敛状态。在此控制分支中，DeepInverse-DIP 重建采用了显式的早停与迭代轮次上限，从而避免了深度网络对背景高频噪声的过度记忆。
+# 本仿真基准测试验证了各神经网络的前向传输矩阵及尺寸配置的完备性，提供了深度隐式重建方法在理想退化条件下的前置数学自洽性校验。
 
 # %%
 display(show_png_if_exists(tcforge_dir / "tcforge_benchmark_highpass.png"))
 
 # %% [markdown]
-# > **图表说明**: 图像从左到右展示 HR highpass ground truth 与各方法重建结果，使用相同的红蓝对称色标。
-# >
-# > **怎么看**: 白色接近局部背景零响应，红/蓝表示相对局部背景的正/负 highpass 结构；边缘更清楚通常有利于 contour-level 观察，但过强纹理也可能是伪高频。
-# >
-# > **正常/异常**: 如果某个方法缺图，通常表示 benchmark 只运行了部分 `--methods`；如果 Deep Decoder 尺寸错误，脚本会直接报错，因为 benchmark 要求 native output 匹配 HR shape。
-# >
-# > **核心发现**: 这张图用于快速发现实现级问题，例如输出错位、尺寸不匹配、DIP 训练失控或 highpass 符号反转；真实芯片结论仍以后续 EP08 patch 指标为准。
+# 该高通图像对比图直观展现了仿真高分辨率基准真值（HR Highpass Ground Truth）与各神经网络重建图像的二维特征，图像均采用对称的红蓝色标进行渲染。
+# 在图像灰度分布中，白色表征局部零梯度，红蓝指示局部空间温度梯度起伏。边缘结构的高频边缘强度有助于芯片结构的可维性，但也需警惕由神经网络过拟合所夹带的周期性空间振荡。若因训练终止导致某些通道为空，则表明仿真测试未正常跑完所有候选方法。此可视化对比作为快速故障排查工具，用以检测图像错位、网格拉伸及符号反置等实现细节，最终的性能判定仍需依赖真实热像数据的指标评估。

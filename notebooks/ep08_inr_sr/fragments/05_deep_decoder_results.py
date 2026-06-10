@@ -46,23 +46,15 @@ if not deep_decoder_metrics.empty and not siren_metrics_for_dd.empty:
     display(dd_compare.round(6))
 
 # %% [markdown]
-# > **数据说明**: 状态表检查 Deep Decoder Stage 2 的正式产物；指标表读取 `deep_decoder_stage2/metrics.csv`，并与 SIREN Stage 1 的同 split 结果并排显示。
-# >
-# > **怎么看**: Hold-out residual、split-half NRMSE 和 artifact score 越小越好；raw-control agreement 越高越好。P95 gradient 较低通常表示边缘响应更弱，但也可能意味着噪声和伪纹理更少。
-# >
-# > **正常/异常**: Deep Decoder 的 artifact 很低但 hold-out residual 高，通常说明它更保守、更平滑，不能仅凭低 artifact 判为最好。Highpass 图中白色代表接近零局部变化，红/蓝代表相对背景的正/负结构响应。
-# >
-# > **核心发现**: Deep Decoder 在本轮最稳定、artifact 最低、raw-control agreement 最高，但 hold-out residual 明显高于 SIREN/WIRE，说明它牺牲了 forward consistency 和轮廓强度。
+# 此状态表与对比表汇集了基于深度解码器先验（Deep Decoder, Stage 2）的超分辨率重建产物，并与同数据分块下的 SIREN 基准进行了对比。
+# 各量化维度包括泛化残差、子集一致性误差（Split-Half NRMSE）、伪影得分以及原始参照一致性（Raw-Control Agreement）。深度解码器在架构上利用未训练卷积网络的归纳偏置限制高频噪声，因此其表现出更低的伪影得分，但较高的泛化残差通常提示其复原边缘的物理强度不足。因此，对于 CNN 先验的评估需在其平滑正则性与细节还原度之间进行折中，以避免陷入仅关注低伪影而忽视信号欠拟合的片面评估。
 
 # %%
 display(show_png_if_exists(deep_decoder_dir / "training_curve.png"))
 
 # %% [markdown]
-# > **图表说明**: 收敛曲线展示 Deep Decoder 的 batch train loss、hold-out loss 和 train-set loss。
-# >
-# > **数据分布/模式**: 曲线收敛到较平滑的解，最终 best step 接近训练后段，说明没有像 SIREN 那样较早达到最优 hold-out。
-# >
-# > **核心发现**: 训练稳定不等于重建充分；需要结合 hold-out residual 和视觉图判断是否欠表达。
+# Deep Decoder 优化收敛曲线展示了迭代过程中的多尺度损失轨迹变化特征。
+# 与正弦或 Gabor 等 INR 模型相比，卷积解码器由于不包含显式的空间高频振荡分量，其 Hold-out 验证损失呈现平滑且单调的收敛轨迹，并未出现过拟合带来的误差反弹。虽然参数优化曲线表现出极佳的数值稳定性，但这并不代表图像复原能力的最优，仍需配合图像空间剖面与几何轮廓分析进行联合评判。
 
 # %%
 display(show_png_if_exists(deep_decoder_dir / "hr_highpass.png"))
@@ -70,10 +62,5 @@ display(show_png_if_exists(deep_decoder_dir / "hr_raw_control.png"))
 display(show_png_if_exists(deep_decoder_dir / "split_half_difference.png"))
 
 # %% [markdown]
-# > **图表说明**: 三张图分别是 Deep Decoder HR highpass、raw-control bicubic 参照和 split-half 差异图。
-# >
-# > **怎么看**: Highpass 用于看内部轮廓是否连贯；raw-control 用于确认增强位置是否和普通强度/温度结构一致；split-half 差异越小表示不同训练帧子集恢复出的结构越稳定。
-# >
-# > **正常/异常**: CNN decoder 输出若过平，可能在 split-half 上很好看，但会丢失真实边缘。若出现规则上采样纹理，应按 decoder artifact 风险处理。
-# >
-# > **核心发现**: Deep Decoder 是一个低 artifact 的保守对照，更适合作为稳定性下界，而不是 Stage 3 的首选增强方法。
+# 此图像组展示了 Deep Decoder 重建后的高分辨率高通图、原始温度图对比以及子集交叉验证的差异分布。
+# 对于卷积解码器，其输出通常倾向于在平坦区域施加较强的物理平滑度，因此其子集一致性差异图通常接近于零。然而，这种低通特性在视觉上表现为对芯片精细引脚及内部微通道的边缘阻碍与钝化。若图像中存在明显的棋盘状上采样伪影（Checkerboard Artifacts），则表明网络架构的转置卷积或亚像素卷积层发生了数值失调，需在后文的物理先验模型中进行精细化调整。

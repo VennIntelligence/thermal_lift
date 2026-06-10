@@ -24,23 +24,15 @@ if not wire_history.empty:
     display(wire_validation_history.round(8))
 
 # %% [markdown]
-# > **数据说明**: 状态表检查 WIRE Stage 1 的正式产物，包括训练历史和收敛图；指标表只读取已有 `metrics.csv`，不会在 notebook 内补算或伪造缺失数值。
-# >
-# > **怎么看**: WIRE 若优于 SIREN，应表现为轮廓更稳定、artifact 不升高、split-half 不恶化，而不是仅仅 highpass 边缘更亮。训练历史表用于确认 loss 是否健康下降。
-# >
-# > **正常/异常**: Gabor 激活可能带来边缘敏感性，也可能引入方向性纹理。若梯度指标升高但 hold-out、split-half 或 artifact 同时恶化，应标为高风险。
-# >
-# > **核心发现**: WIRE 的判断必须建立在与 SIREN 完全共享的数据 split 和门控链路上，才能把差异归因于激活函数。
+# 此状态表与评估指标汇总了以 Gabor 函数作为激活的 WIRE（Stage 1）隐式神经网络重建产物。
+# 在物理比较中，WIRE 方法在边缘敏感性上的改善不仅应当表征在梯度指标（`p95_gradient`）的提升，更需在泛化残差（`holdout_loss`）和子集 NRMSE 上保持与 SIREN 基准一致或更优的水平，从而证明高频边缘的增强并非由振铃伪影所主导。定量分析直接调取自落盘的 `metrics.csv` 评估文件，以确立数据的统计学可信度。
 
 # %%
 display(show_png_if_exists(wire_dir / "training_curve.png"))
 
 # %% [markdown]
-# > **图表说明**: 收敛曲线展示 WIRE 训练过程中的 batch train loss，以及验证间隔上的 hold-out / train-set loss。
-# >
-# > **数据分布/模式**: 曲线应整体下降；若 hold-out 长期上升或 early stopping 过早触发，说明 Gabor layer 可能过拟合局部高频噪声。
-# >
-# > **核心发现**: 收敛曲线是 WIRE 是否可训练的直接中间证据，后续仍需结合五项指标和图像检查。
+# 此收敛曲线图展示了 WIRE 方法训练过程中批次损失及验证损失的动态演化趋势。
+# Gabor 小波由于其局部时频局域性（Time-Frequency Localization）优势，理论上能够更稳健地捕获空间局部特征。若 Hold-out 验证损失在迭代过程中出现发散，则提示网络由于网络容量过大，将前向对齐误差或背景热辐射噪声结构化为虚假的细节。该收敛轨迹用于监控参数寻优过程中的数值稳定性，不单独作为超分辨率有效的物理声明。
 
 # %%
 display(show_png_if_exists(wire_dir / "hr_highpass.png"))
@@ -48,10 +40,5 @@ display(show_png_if_exists(wire_dir / "hr_raw_control.png"))
 display(show_png_if_exists(wire_dir / "split_half_difference.png"))
 
 # %% [markdown]
-# > **图表说明**: 第一张图是 WIRE 的 HR highpass 结构响应；第二张图是 raw-control bicubic 参照；第三张图是 split-half 两次重建的差异。
-# >
-# > **怎么看**: Highpass 用来看芯片边缘和内部轮廓是否更连贯；raw-control 用来看增强是否与普通温度/强度视图中的结构一致；split-half 差异用于检查结构是否由不同训练帧子集稳定恢复。
-# >
-# > **正常/异常**: 如果出现规则条纹、棋盘纹或 pin 区域伪线，即使边缘看起来更锐，也不能解释为可靠 SR 增益。
-# >
-# > **核心发现**: WIRE 只有在视觉结构、收敛轨迹和稳定性指标同时成立时，才可作为 EP08 的候选改进方法。
+# 该组诊断图呈递了 WIRE 重建后的高分辨率高通结构响应、同一空间位置的原始温度控制图（Raw Control）以及子集交叉验证的差异空间分布。
+# 图像几何边缘的完整性与内部轮廓连贯性用于定性评估轮廓增强效果。任何在原始温度通道中缺乏物理对应的条纹或周期性网格伪影，均应定义为伪高频噪声。通过计算分割子集间的差异分布，能够定量评估重建细节的确定性，若两半子集的重建结果出现严重偏离，则证明该方法未能抵抗热像背景噪声的干扰。

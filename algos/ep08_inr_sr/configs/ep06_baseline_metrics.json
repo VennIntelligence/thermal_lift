@@ -1,36 +1,51 @@
 {
-  "source": {
-    "episode": "EP06",
-    "method": "MAP-TV",
-    "intended_input": "output/ep06_sr_poc/evaluation_summary.csv and related EP06 metric artifacts",
-    "status": "partial_fullframe_proxy_metrics_available",
-    "note": "MAP-TV proxy metrics are copied from the EP06 full-frame 255-frame highpass row. EP06 did not use the EP08 seed=42 train/val split, so holdout_residual and split_half_nrmse are unavailable and must remain null."
+  "gate_thresholds": {
+    "artifact_score_max_ratio_to_map_tv": null,
+    "holdout_residual_max_ratio_to_map_tv": null,
+    "note": "Use the generated 248 clean-frame MAP-TV row as the classic-opt baseline; do not use legacy 255-frame proxy values.",
+    "pin_region_visual_rule": null,
+    "raw_control_agreement_rule": "compare directionally; EP08 Stage 3 computes this metric on gradient magnitude against raw-control bicubic reference",
+    "split_half_nrmse_max_ratio_to_map_tv": null
   },
   "map_tv": {
-    "holdout_residual": null,
-    "holdout_residual_status": "not_available_ep06_has_no_train_val_holdout_split",
-    "split_half_nrmse": null,
-    "split_half_nrmse_status": "not_available_ep06_full_recon_split_halves_not_saved_for_ep08_metric",
-    "artifact_score": 0.1437276154756546,
-    "raw_control_agreement": null,
-    "raw_control_agreement_status": "not_available_ep08_gradient_agreement_metric_not_computed_in_ep06",
+    "artifact_score": 0.027132672817924544,
+    "best_step": 50,
+    "contour_chamfer_lr_px": 0.0,
+    "corr_to_bicubic": 0.9352289438247681,
+    "ep06_visual_proxy_row_filter": "track == 'highpass' and method == 'map_tv'",
+    "ep06_visual_proxy_shape": "960x1280",
+    "ep06_visual_proxy_source_file": "output/ep06_sr_poc/evaluation_summary.csv",
+    "final_step": 50,
+    "holdout_residual": 1.35635244846344,
+    "hr_shape": [
+      960,
+      1280
+    ],
+    "lr_shape": [
+      480,
+      640
+    ],
+    "mean_gradient": null,
+    "metric_source_file": "output/ep08_inr_sr/stage3/ep06_map_tv_248_full_preserve/metrics.json",
+    "metric_source_protocol": "EP08 Stage 3 full-frame preserve, 248 clean frames, seed=42 train/val split",
+    "n_frames": 248,
+    "nrmse_to_bicubic": 0.35623466968536377,
+    "p95_gradient": 0.09086296527525747,
     "pin_region_no_false_lines": null,
-    "contour_chamfer_lr_px": 0.015713484026367724,
-    "mean_gradient": 0.13626612722873688,
-    "p95_gradient": 0.4323444962501526,
-    "nrmse_to_bicubic": 0.3542787432670593,
-    "corr_to_bicubic": 0.9352462291717529,
-    "metric_source_file": "output/ep06_sr_poc/evaluation_summary.csv",
-    "metric_source_row_filter": "track == 'highpass' and method == 'map_tv'",
-    "metric_source_shape": "960x1280",
-    "metric_source_protocol": "EP06 full-frame 255-frame MAP-TV highpass reconstruction"
+    "protocol": "ep08_stage3_248_full_preserve_seed42",
+    "raw_control_agreement": 0.43324982009238244,
+    "split_half_nrmse": 0.043241711618355286,
+    "stage_gate": "complete",
+    "train_frame_count": 200,
+    "val_frame_count": 48
   },
-  "gate_thresholds": {
-    "holdout_residual_max_ratio_to_map_tv": null,
-    "split_half_nrmse_max_ratio_to_map_tv": null,
-    "artifact_score_max_ratio_to_map_tv": null,
-    "raw_control_agreement_rule": "not_available_for_ep06_proxy",
-    "pin_region_visual_rule": null,
-    "note": "Do not derive EP08 pass/fail thresholds from unavailable EP06 holdout or split-half metrics."
+  "source": {
+    "ep06_evaluation_source_file": "output/ep06_sr_poc/evaluation_summary.csv",
+    "episode": "EP06",
+    "generated_by": "EP08 run worker from generated metrics artifacts",
+    "method": "MAP-TV",
+    "note": "Generated from EP08 Stage 3 MAP-TV run using the EP06 MAP-TV implementation and the 248 clean-frame real-data protocol. EP06 evaluation_summary.csv highpass/map_tv values are retained as visual-proxy context only.",
+    "stage3_metric_source_file": "output/ep08_inr_sr/stage3/ep06_map_tv_248_full_preserve/metrics.json",
+    "status": "complete_ep08_stage3_248_clean_fullframe_metrics"
   }
 }

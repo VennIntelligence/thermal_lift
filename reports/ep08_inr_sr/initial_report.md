@@ -88,4 +88,4 @@ Stage 2 interpretation:
 
 ## Stage 3 Recommendation
 
-Proceed to Stage 3 with SIREN as the primary expansion method. Keep Deep Decoder as a low-artifact conservative control. Do not promote DeepInverse-DIP or WIRE to full-frame expansion unless a later ablation adds holdout-driven early stopping or stronger artifact control.
+Proceed to Stage 3 with SIREN as the primary expansion method and use the 248 clean-frame full-run data contract for the final true-data target. Keep Deep Decoder as a low-artifact conservative control. Do not promote DeepInverse-DIP or WIRE to full-frame expansion unless a later ablation adds holdout-driven early stopping or stronger artifact control.

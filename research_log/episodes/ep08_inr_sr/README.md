@@ -6,7 +6,7 @@
 
 ## 目标
 
-EP08 验证三类深度 prior 是否能在主 session 255 帧 LWIR 微扫描数据上带来可复现的 2x contour-level SR 增益，并与 EP06 classic baseline 做同一框架下的对比：
+EP08 验证三类深度 prior 是否能在主 session 的 248 clean-frame LWIR 微扫描数据上带来可复现的 2x contour-level SR 增益，并与 EP06 classic baseline 做同一框架下的对比：
 
 | Track | 方法 | 作用 |
 |---|---|---|
@@ -22,7 +22,7 @@ EP08 验证三类深度 prior 是否能在主 session 255 帧 LWIR 微扫描数�
 EP08 必须按串行门控推进，不能在基础验证未过时并行铺开结论：
 
 1. P0 forward/highpass 等价性：PyTorch forward operator 与 EP06 NumPy forward operator 逐参数等价；highpass preprocessing 独立匹配 EP06 `mode="nearest"` 约定。
-2. P0 数据与 split：只使用主 session=2 的 255 帧；hold-out split 要保留位移相位覆盖，不能简单随机破坏相位分布。
+2. P0 数据与 split：只使用主 session=2 中通过 clean-frame gate 的 248 帧；hold-out split 要保留位移相位覆盖，不能简单随机破坏相位分布。
 3. P0 单方法训练门控：SIREN / WIRE / Deep Decoder 各自必须产出 highpass track 和 raw-control track，并通过数值健康检查。
 4. P0/P1 四方对比门控：同一指标表中对比 EP06 MAP-TV、SIREN、WIRE、Deep Decoder；只有同时满足 hold-out、split-half、artifact、raw-control、pin 区域目视检查，才可报告候选增益。
 
@@ -46,7 +46,7 @@ EP08 必须按串行门控推进，不能在基础验证未过时并行铺开结
 - 本轮验证：`uv run pytest -q` 为 34 passed；`uv run python scripts/validate_p0.py` 已写出 passed forward/highpass/split validation artifacts；真实数据 2 帧 16x16 patch CPU 一步 SIREN smoke 通过；GPU0 SIREN/WIRE synthetic smoke 通过；GPU1 Deep Decoder synthetic smoke 通过。
 - Stage 1 训练：SIREN 与 WIRE 均使用同一 seed=42 train/val split（27 train / 5 val），32 帧主 session，中心 256x256 LR patch，HR 512x512，`batch_k=8`，`lr=5e-4`，`warmup_steps=200`，`early_stop_patience=1000`。
 - Stage 2 训练：Deep Decoder 与 DeepInverse-DIP 使用相同 32 帧、相同 center crop、相同 seed=42 split 和同一 EP08 `ForwardOperator`。DeepInverse-DIP 保留 `deepinv==0.4.0` 的 `ConvDecoder` backbone，但使用 EP08 自定义训练循环、固定 latent 和 hold-out early stopping；split-half 使用相同初始化的短预算数据稳定性检查。
-- Stage 4 基础设施：已新增 `algos/ep08_inr_sr/scripts/stage4_controller.py`，用于远程端按小时 tick 推进 64→128→255 full-frame progressive 训练；controller 只做后台启动、pid/log 追踪和 `metrics.json` 数值健康门控，不在 notebook 中启动训练，也不替代人工视觉检查。
+- Stage 4 基础设施：已新增 `algos/ep08_inr_sr/scripts/stage4_controller.py`，用于远程端按小时 tick 推进 64→128→248 clean-frame full-frame progressive 训练；controller 只做后台启动、pid/log 追踪和 `metrics.json` 数值健康门控，不在 notebook 中启动训练，也不替代人工视觉检查。
 
 ## Stage 1 指标
 

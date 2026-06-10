@@ -31,7 +31,8 @@ RUN_RECORD_DIR = CONTROL_DIR / "runs"
 STATUS_JSON = CONTROL_DIR / "status.json"
 LOCK_PATH = CONTROL_DIR / "tick.lock"
 
-DEFAULT_FRAMES = (64, 128, 255)
+FULL_CLEAN_FRAMES = 248
+DEFAULT_FRAMES = (64, 128, FULL_CLEAN_FRAMES)
 METHOD_SEQUENCE = ("map_tv", "siren", "wire", "deepinv_dip")
 NEURAL_METHODS = {"siren", "wire", "deepinv_dip"}
 METHOD_LABELS = {
@@ -75,7 +76,17 @@ def now_iso() -> str:
 def parse_frame_list(value: str | Sequence[int]) -> list[int]:
     if isinstance(value, str):
         parts = [part.strip() for part in value.split(",") if part.strip()]
-        frames = [int(part) for part in parts]
+        aliases = {
+            "all": FULL_CLEAN_FRAMES,
+            "all_clean": FULL_CLEAN_FRAMES,
+            "clean": FULL_CLEAN_FRAMES,
+            "full": FULL_CLEAN_FRAMES,
+            "full_clean": FULL_CLEAN_FRAMES,
+        }
+        frames = []
+        for part in parts:
+            normalized = part.lower()
+            frames.append(aliases[normalized] if normalized in aliases else int(part))
     else:
         frames = [int(part) for part in value]
     if not frames:
@@ -578,7 +589,11 @@ def command_tick(args: argparse.Namespace) -> int:
 
 
 def add_common_args(parser: argparse.ArgumentParser) -> None:
-    parser.add_argument("--frames", default="64,128,255", help="Comma-separated progressive frame counts.")
+    parser.add_argument(
+        "--frames",
+        default="64,128,all_clean",
+        help="Comma-separated progressive frame counts. Use all_clean for the 248 clean-frame final run.",
+    )
     parser.add_argument("--max-frame", type=int, default=None, help="Only include phases up to this frame count.")
     parser.add_argument("--coord-aspect-mode", choices=["preserve", "stretch"], default="preserve")
     parser.add_argument("--inr-device", default="cuda:1", help="Device for SIREN and WIRE.")

@@ -24,23 +24,15 @@ if not siren_history.empty:
     display(siren_validation_history.round(8))
 
 # %% [markdown]
-# > **数据说明**: 状态表检查 SIREN Stage 1 的正式产物，包括指标、训练历史、收敛曲线、HR highpass、raw-control 参照、split-half 差异图、split 记录、配置和 checkpoint。
-# >
-# > **怎么看**: Hold-out residual、split-half NRMSE 和 artifact score 越小越好；raw-control agreement 越高越好；P95 gradient 只说明边缘响应强度，不能单独证明 SR 成功。训练历史表的 `train_loss` 是 batch loss，`holdout_loss` 和 `train_set_loss` 只在验证间隔写入。
-# >
-# > **正常/异常**: 若训练曲线下降但 hold-out 持续上升，说明可能过拟合；若指标存在但缺少 split/config/history 产物，则结果不可复现。Highpass 图中红/蓝代表相对局部背景的正/负响应，白色通常接近零变化。
-# >
-# > **核心发现**: SIREN 只有同时具备收敛轨迹、hold-out 指标、split-half 稳定性和 raw-control 对照，才可作为 WIRE 的公平基线。
+# 此状态表与评估指标汇总了 SIREN（Stage 1）正弦激活隐式神经网络超分辨率重建的各项产物与特征。
+# 状态校验覆盖了训练指标、收敛历史曲线、高分辨率结构响应、原始控制图像以及子集交叉验证。其中 `train_loss` 为每批次的训练误差，`holdout_loss` 则指示未参与训练相位的泛化残差。在量化评估中，较低的泛化残差与子集 NRMSE 代表重建结果具备较好的泛化稳定性；平均梯度指标则仅指示图像高频细节的丰盈度，需结合伪影评分共同对图像质量进行约束评估。
 
 # %%
 display(show_png_if_exists(siren_dir / "training_curve.png"))
 
 # %% [markdown]
-# > **图表说明**: 收敛曲线展示 SIREN 训练过程中的 batch train loss，以及验证间隔上的 hold-out / train-set loss。
-# >
-# > **数据分布/模式**: 曲线应整体下降；短期震荡是随机抽取帧 batch 的正常现象。hold-out 曲线若长时间反向上升，应优先按泛化风险解释。
-# >
-# > **核心发现**: 收敛曲线是 Stage 1 的中间产物，用来判断训练是否健康，不能替代最终的五项指标。
+# SIREN 收敛曲线图（`training_curve.png`）并列展示了每步迭代的 Batch 训练损失、间隔评估的 Train-Set 损失以及未参与训练帧的 Hold-out 验证损失。
+# 在寻优过程中，损失函数的下降轨迹表征了神经网络对多帧亚像素图像退化模型的逼近状况。当 Hold-out 损失曲线在优化后半程发生持续性抬升，则指示网络对于特定的亚像素位移及噪声产生了过拟合。收敛曲线作为网络优化动力学的诊断工具，其在多帧批量更新中的稳步收敛是确立参数健康度的必要前置条件。
 
 # %%
 display(show_png_if_exists(siren_dir / "hr_highpass.png"))
@@ -48,10 +40,5 @@ display(show_png_if_exists(siren_dir / "hr_raw_control.png"))
 display(show_png_if_exists(siren_dir / "split_half_difference.png"))
 
 # %% [markdown]
-# > **图表说明**: 第一张图是 SIREN 的 HR highpass 结构响应；第二张图是同一 patch 的 raw-control bicubic 参照；第三张图是 split-half 两次重建的差异。
-# >
-# > **怎么看**: Highpass 用来看边缘和内部轮廓是否连贯；raw-control 用来看结构位置是否与普通强度/温度参照一致；split-half 差异越接近零，说明强结构越稳定。
-# >
-# > **正常/异常**: 只在 highpass 中出现、但 raw-control 无对应位置的规则纹理应按 artifact 风险处理。split-half 差异图中的大面积方向性条纹通常不是可靠轮廓证据。
-# >
-# > **核心发现**: SIREN 的 Stage 1 判断必须把视觉结构、训练轨迹和稳定性指标合并看，不能只看单张锐化图。
+# 此三幅诊断图像展示了 SIREN 重建后的高分辨率高通结构图、对应的原始对比通道（Raw Control）以及子集分割一致性差异图（Split-Half Difference）。
+# 图像评估中，高通响应图用以审查局部高频几何边缘的连续性，并与原始温度参照图进行空间位置对齐，以判断轮廓复原是否产生物理错位。子集一致性图定量揭示了由于训练帧随机组合产生的非结构性偏离。若在高通图像中存在显著条纹，但在原始控制通道中无对应结构，或子集一致性差异图表现出空间相关性，则应归因于神经网络的虚假幻觉，其不可作为超分辨率分辨率提升的物理证据。

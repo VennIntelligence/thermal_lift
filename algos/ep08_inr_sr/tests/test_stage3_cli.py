@@ -50,14 +50,28 @@ def test_stage3_dispatch_helpers_do_not_train() -> None:
     deepinv_args = train_stage3.parse_args(["deepinv_dip", "--n-frames", "128", "--patch-shape", "full"])
     train_stage3.dispatch_stage3(deepinv_args, deepinv_runner=lambda args: calls.append(("deepinv_dip", args)))
 
-    map_args = train_stage3.parse_args(["map_tv", "--n-frames", "255", "--patch-shape", "full"])
+    map_args = train_stage3.parse_args(["map_tv", "--n-frames", "248", "--patch-shape", "full"])
     train_stage3.dispatch_stage3(map_args, map_tv_runner=lambda args: calls.append(("ep06_map_tv", args)))
 
     assert [call[0] for call in calls] == ["siren", "deepinv_dip", "ep06_map_tv"]
     assert siren_args.output_dir.name == "siren_032_full_preserve"
     assert deepinv_args.output_dir.name == "deepinv_dip_128_full_preserve"
     assert map_args.method == "ep06_map_tv"
-    assert map_args.output_dir.name == "ep06_map_tv_255_full_preserve"
+    assert map_args.output_dir.name == "ep06_map_tv_248_full_preserve"
+
+
+def test_stage3_siren_args_are_stage1_override_compatible() -> None:
+    train_stage3 = _load_script("train_stage3")
+    from ep08.stage1 import apply_cli_overrides
+
+    args = train_stage3.parse_args(["siren", "--n-frames", "64", "--hidden-features", "32", "--hidden-layers", "1"])
+    cfg = apply_cli_overrides({"model": {"name": "siren"}}, args)
+
+    assert cfg["data"]["default_n_frames"] == 64
+    assert cfg["model"]["hidden_features"] == 32
+    assert cfg["model"]["hidden_layers"] == 1
+    assert "hidden_channels" not in cfg["model"]
+    assert "latent_spatial" not in cfg["model"]
 
 
 def test_map_tv_stage3_patch_shape_parsing() -> None:
