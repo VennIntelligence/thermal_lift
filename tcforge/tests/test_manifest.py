@@ -85,3 +85,53 @@ def test_manifest_write_read_and_validation_round_trip(tmp_path: Path) -> None:
         ),
     )
     assert len(found) == 7
+
+
+def test_manifest_accepts_compact_4x_files() -> None:
+    record = manifest.SceneManifest(
+        scene_id="scene_0042",
+        scene_dir="/tmp/scene_0042",
+        difficulty="medium",
+        seed=2042,
+        split="train",
+        scale=4,
+        lr_shape=(480, 640),
+        hr_shape=(1920, 2560),
+        forward_mode="physical_block_average",
+        drift_model="scalar_offset",
+        files={
+            "hr_mask": "hr_mask_4x.png",
+            "hr_edge": "hr_edge_4x.png",
+            "obs_features": "obs_features_1x.npz",
+            "shifts": "shifts.npy",
+            "metadata": "metadata.json",
+        },
+    )
+
+    data = record.to_dict()
+
+    assert data["scale"] == 4
+    assert data["files"]["obs_features"] == "obs_features_1x.npz"
+    manifest.validate_scene_manifest(record)
+
+
+def test_manifest_rejects_inconsistent_scale_shape() -> None:
+    record = {
+        "scene_id": "scene_bad",
+        "scene_dir": "/tmp/scene_bad",
+        "difficulty": "medium",
+        "seed": 1,
+        "scale": 4,
+        "lr_shape": [480, 640],
+        "hr_shape": [960, 1280],
+        "forward_mode": "physical_block_average",
+    }
+
+    try:
+        manifest.validate_scene_manifest(record)
+    except ValueError as exc:
+        message = str(exc)
+    else:
+        raise AssertionError("expected ValueError")
+
+    assert "hr_shape" in message

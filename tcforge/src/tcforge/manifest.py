@@ -8,6 +8,23 @@ from dataclasses import asdict, dataclass, field
 from pathlib import Path
 from typing import Any
 
+FULL_2X_REQUIRED_FILES: tuple[str, ...] = (
+    "hr_temperature_2x.npy",
+    "hr_mask_2x.npy",
+    "hr_edge_map_2x.npy",
+    "lr_burst_raw.npy",
+    "lr_burst_highpass.npy",
+    "shifts.npy",
+    "metadata.json",
+)
+COMPACT_4X_REQUIRED_FILES: tuple[str, ...] = (
+    "hr_mask_4x.png",
+    "hr_edge_4x.png",
+    "obs_features_1x.npz",
+    "shifts.npy",
+    "metadata.json",
+)
+
 
 @dataclass(slots=True)
 class SceneManifest:
@@ -119,3 +136,8 @@ def validate_scene_manifest(manifest: SceneManifest | dict[str, Any]) -> None:
         shape = data[key]
         if len(shape) != 2 or int(shape[0]) <= 0 or int(shape[1]) <= 0:
             raise ValueError(f"manifest {key} must be a positive (rows, cols) pair")
+    lr_shape = tuple(map(int, data["lr_shape"]))
+    hr_shape = tuple(map(int, data["hr_shape"]))
+    scale = int(data["scale"])
+    if hr_shape != (lr_shape[0] * scale, lr_shape[1] * scale):
+        raise ValueError("manifest hr_shape must equal lr_shape * scale")

@@ -96,10 +96,15 @@ def ideal_phase_grid(
 def load_real_default_contour_refined(
     path: str | Path | None = None,
     *,
-    n_frames: int | None = 255,
+    n_frames: int | None = None,
     strict_success: bool = True,
 ) -> np.ndarray:
-    """Load EP05 refined contour shifts from a CSV file."""
+    """Load EP05 refined contour shifts from a CSV file.
+
+    ``n_frames`` is optional because the real clean input frame count can change
+    after repeat/quality gating. Synthetic profiles that need a fixed burst
+    length should call ``load_shift_profile()``, which repeats/trims explicitly.
+    """
 
     csv_path = Path(path).expanduser() if path is not None else _default_real_shift_csv()
     if not csv_path.exists():
@@ -141,7 +146,11 @@ def load_shift_profile(
     seed: int | None = None,
     jitter_std_px: float = 0.0,
 ) -> tuple[np.ndarray, dict[str, Any]]:
-    """Load or generate a shift profile and return shifts plus metadata."""
+    """Load or generate a shift profile for a synthetic burst.
+
+    The default 255 is the requested synthetic observation count used by P0
+    smoke configs; it is not a claim about the current real clean SR input size.
+    """
 
     if profile == "real_default_contour_refined":
         shifts = _repeat_or_trim(load_real_default_contour_refined(path, n_frames=None), n_frames)

@@ -1,4 +1,4 @@
-"""Locked matrix-free 2x forward model copied from EP06.
+"""Matrix-free EP06-style forward model.
 
 All shifts use the EP05 convention: ``shift=(dx, dy)`` is the LR-pixel
 translation that moves an observed frame into the reference coordinate system.
@@ -17,8 +17,8 @@ from scipy import ndimage
 
 def _validate_scale(scale: int) -> int:
     scale = int(scale)
-    if scale != 2:
-        raise ValueError("EP06 forward model is defined for scale=2 only")
+    if scale <= 0:
+        raise ValueError("scale must be > 0")
     return scale
 
 
@@ -28,7 +28,7 @@ def _sigma_hr(psf_sigma: float, scale: int) -> float:
 
 
 def downsample_block_average(image_hr: np.ndarray, *, scale: int = 2) -> np.ndarray:
-    """Downsample HR to LR with 2x2 block averaging."""
+    """Downsample HR to LR with scale-by-scale block averaging."""
 
     scale = _validate_scale(scale)
     img = np.asarray(image_hr, dtype=np.float64)

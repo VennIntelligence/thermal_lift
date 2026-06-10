@@ -41,3 +41,15 @@ def test_lowfreq_drift_is_seed_reproducible_and_finite() -> None:
     assert np.array_equal(a, b)
     assert np.isfinite(a).all()
     assert float(np.std(a)) > 0.0
+
+
+def test_temporal_trend_drift_is_reproducible_and_changes_frame_mean_over_time() -> None:
+    frames = np.zeros((10, 16, 16), dtype=np.float32)
+    a = physics.apply_drift(frames, model="temporal_trend", amplitude_c=0.25, seed=22)
+    b = physics.apply_drift(frames, model="temporal_trend", amplitude_c=0.25, seed=22)
+    frame_means = a.mean(axis=(1, 2))
+
+    assert a.dtype == np.float32
+    assert np.array_equal(a, b)
+    assert np.isfinite(a).all()
+    assert abs(float(frame_means[-1] - frame_means[0])) > 0.01
