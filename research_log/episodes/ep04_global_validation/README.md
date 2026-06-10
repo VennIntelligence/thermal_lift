@@ -25,30 +25,32 @@
 
 | 指标 | 外轮廓 | 内轮廓 |
 |------|------:|------:|
-| segment 数 | 84 | 386 |
+| segment 数 | 84 | 390 |
 | scanline 数 | 13 | 13 |
-| segment × scanline 评估数 | 1092 | 5018 |
-| A-class segment 数 | 28 | 135 |
-| segment 通过率 | 53.6% | 21.5% |
-| A-class segment 通过率 | 39.3% | 13.3% |
-| row 通过率 | 54.3% | 24.2% |
-| A-class row 通过率 | 45.1% | 16.8% |
-| A-class split-half 中位数 | 0.0265 px | 0.0271 px |
-| A-class split-half P90 | 0.0607 px | 0.0800 px |
-| A-class CRB ratio 中位数 | 1.93× | 2.08× |
-| A-class phase coverage 中位数 | 0.4396 px | 0.3383 px |
-| A-class NCC peak 中位数 | 0.9817 | 0.9861 |
+| segment × scanline 评估数 | 1092 | 5070 |
+| A-class segment 数 | 28 | 139 |
+| segment 通过率 | 54.8% | 22.3% |
+| A-class segment 通过率 | 46.4% | 12.9% |
+| row 通过率 | 52.3% | 24.8% |
+| A-class row 通过率 | 40.7% | 17.1% |
+| A-class split-half 中位数 | 0.0277 px | 0.0273 px |
+| A-class split-half P90 | 0.0622 px | 0.0847 px |
+| A-class CRB ratio 中位数 | 1.89× | 2.03× |
+| A-class phase coverage 中位数 | 0.4401 px | 0.3723 px |
+| A-class NCC peak 中位数 | 0.9825 | 0.9863 |
 
-segment 34 仍是稳定外轮廓 anchor：13 条 scanline 中 12 条通过，段级 split-half 中位数为 0.0149 px，CRB ratio 中位数约 1.05×。它不再被写成终点，而是作为 EP06 anchor/gate 体系中的强样例。
+segment 34 仍是稳定外轮廓 anchor：13 条 scanline 中 11 条通过，段级 split-half 中位数为 0.0240 px，CRB ratio 中位数约 1.58×。它不再被写成终点，而是作为 EP06 anchor/gate 体系中的强样例。
+
+数据契约边界：`session == 2` 的 255 帧是原始主温度段采集事实；当前 SR 默认输入是 `is_sr_usable=True` / `is_main_session=True` 的 248 帧 clean set。EP04 的验证单位是 `segment × complete R=0 X scanline`，本次使用其中 13 条完整 X scanline、208 个唯一帧；它是 clean SR input 的子集，不是 255 帧或 248 帧全集的 SR 验证。
 
 segment × scanline heatmap 结果显示，失败同时存在局部坏段和较弱 scanline：
 
 | contour | row pass rate | weakest scanline | weakest scanline pass rate | zero-pass scanlines | zero-pass segments |
 |---|---:|---:|---:|---:|---:|
-| outer | 54.3% | 24 µm | 44.0% | 0 | 16 |
-| inner | 24.2% | 14 µm | 22.3% | 0 | 190 |
+| outer | 52.3% | 24 µm | 47.6% | 0 | 20 |
+| inner | 24.8% | 12 µm | 22.8% | 0 | 194 |
 
-NCC / ESF 诊断显示内轮廓主要瓶颈不是 NCC peak 低：inner 失败 row 的 median NCC peak 为 0.9868，P10 为 0.9825，100.0% 仍高于 0.85 NCC gate；`ncc_unreliable` 只覆盖 3.1% 失败 row，而 ESF/model/stability 类失败覆盖 99.3%。
+NCC / ESF 诊断显示内轮廓主要瓶颈不是 NCC peak 低：inner 失败 row 的 median NCC peak 为 0.9869，P10 为 0.9827，100.0% 仍高于 0.85 NCC gate；`ncc_unreliable` 只覆盖 3.2% 失败 row，而 ESF/model/stability 类失败覆盖 99.1%。
 
 ---
 
@@ -56,12 +58,12 @@ NCC / ESF 诊断显示内轮廓主要瓶颈不是 NCC peak 低：inner 失败 ro
 
 | contour | EP06 role | segment 数 | split-half 中位数 | CRB ratio 中位数 | pass rate 中位数 |
 |---|---|---:|---:|---:|---:|
-| outer | alignment_input | 26 | 0.0191 px | 1.28× | 1.000 |
-| outer | holdout_validation | 19 | 0.0263 px | 1.79× | 0.769 |
-| outer | sr_target_not_truth | 39 | 0.0524 px | 1.91× | 0.154 |
-| inner | alignment_input | 40 | 0.0192 px | 1.31× | 1.000 |
-| inner | holdout_validation | 43 | 0.0254 px | 1.79× | 0.692 |
-| inner | sr_target_not_truth | 303 | 0.0340 px | 2.39× | 0.000 |
+| outer | alignment_input | 23 | 0.0193 px | 1.39× | 1.000 |
+| outer | holdout_validation | 23 | 0.0250 px | 1.74× | 0.692 |
+| outer | sr_target_not_truth | 38 | 0.0607 px | 2.06× | 0.000 |
+| inner | alignment_input | 42 | 0.0189 px | 1.25× | 1.000 |
+| inner | holdout_validation | 45 | 0.0213 px | 1.52× | 0.692 |
+| inner | sr_target_not_truth | 303 | 0.0375 px | 2.55× | 0.000 |
 
 使用边界：
 
@@ -80,7 +82,7 @@ Role margin audit 显示 `alignment_input` 对 alignment-input 数值阈值有�
 - 外轮廓 anchor coverage 明显优于内轮廓，适合优先支撑 EP06 alignment。
 - 内轮廓通过率低，但通过段的 A-class split-half 中位数仍接近外轮廓；这说明内部结构中存在可用锚点，同时也暴露了 EP06 需要重点改善的形状区域。
 - 内轮廓主要失败原因是 `sigma_out_of_range`、`fit_error:ValueError`、`split_half_high` 和 `low_phase_coverage`，不是简单的 NCC 崩溃。
-- row-level 失败原因是多标签，百分比不可相加为 100%；inner 中 `sigma_out_of_range` 覆盖 53.7% 失败 row，`split_half_high` 覆盖 34.2%，`fit_error:ValueError` 覆盖 27.7%。
+- row-level 失败原因是多标签，百分比不可相加为 100%；inner 中 `sigma_out_of_range` 覆盖 53.3% 失败 row，`split_half_high` 覆盖 34.2%，`fit_error:ValueError` 覆盖 28.2%。
 - normal-angle coverage 是 alignment 几何覆盖诊断，只说明锚点方向分布，不替代 stage-to-pixel 标定，也不证明内部结构真值。
 - localization benchmark 是配准支撑；最终交付仍应看 EP06 的 2x contour-level SR、holdout 一致性和内部结构形状可见性。
 
@@ -88,6 +90,7 @@ Role margin audit 显示 `alignment_input` 对 alignment-input 数值阈值有�
 
 ## 统计口径
 
+- EP04 统计单位是 `segment × scanline` localization row，不是 SR 默认输入帧数；当前 SR 默认输入仍为 248 帧 clean set。
 - `pass_rate` 是 segment 在 13 条 X scanline 上通过质量门控的比例。
 - A-class 表示高 SNR 且 stage-prior 法线投影较好的候选 segment；它仍需 data-driven gate 验证。
 - `phase_coverage_px` 来自 highpass NCC 位移投影后的法线相位覆盖，用于判断 joint ESF 是否有足够相位多样性。

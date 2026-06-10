@@ -6,13 +6,13 @@ EP04 的任务不是证明超分辨率成败，也不是把高精度边缘定位
 
 EP04 在这个链路中的定位是：
 
-> 用真实主 session 数据建立 alignment anchor benchmark，识别哪些外轮廓/内轮廓段可作为稳定配准锚点，哪些段适合做 holdout 验证，哪些区域不能当作真值但仍应作为 EP06 SR 的重点形状目标。
+> 用主 session clean set 中 EP04-local 的完整 `R=0` X-scanline 子集建立 alignment anchor benchmark，识别哪些外轮廓/内轮廓段可作为稳定配准锚点，哪些段适合做 holdout 验证，哪些区域不能当作真值但仍应作为 EP06 SR 的重点形状目标。
 
 因此，本报告中的 pass/fail、split-half、CRB ratio 和通过率只描述“局部定位锚点是否可信”。它们不是 SR 成功率，也不是内部结构是否值得重建的否定证据。stage command 和文件名坐标只作为位移 prior / 初始化 / 约束，不能作为对齐真值。
 
 ## 2. 方法摘要
 
-验证单位为 `contour segment × scanline`。输入默认只使用主扫描 `session=2` 的 `R=0` X scanline。外轮廓和内轮廓使用同一套质量门控，保证可比较：
+验证单位为 `contour segment × scanline`。输入默认只使用主扫描 clean set 内完整的 `session=2` / `R=0` X scanline。这个 EP04-local 子集是 13 条 X scanline、208 个唯一帧，全部属于当前 `is_sr_usable == True` / `is_main_session == True` 的 248 帧 clean SR input；它不是“255 帧 SR 输入”，也不是对 248 帧全集的 SR 重建验证。外轮廓和内轮廓使用同一套质量门控，保证可比较：
 
 1. 在 contour segment 中心提取局部 ROI。
 2. 对相邻帧执行 highpass NCC，获得 data-driven 局部位移。
@@ -28,19 +28,28 @@ EP04 在这个链路中的定位是：
 
 | 指标 | 外轮廓 | 内轮廓 |
 |---|---:|---:|
-| segment 数 | 84 | 386 |
+| segment 数 | 84 | 390 |
 | scanline 数 | 13 | 13 |
-| segment × scanline 评估数 | 1092 | 5018 |
-| A-class segment 数 | 28 | 135 |
-| segment 通过率 | 53.6% | 21.5% |
-| A-class segment 通过率 | 39.3% | 13.3% |
-| row 通过率 | 54.3% | 24.2% |
-| A-class row 通过率 | 45.1% | 16.8% |
-| A-class split-half 中位数 | 0.0265 px | 0.0271 px |
-| A-class split-half P90 | 0.0607 px | 0.0800 px |
-| A-class CRB ratio 中位数 | 1.93× | 2.08× |
-| A-class phase coverage 中位数 | 0.4396 px | 0.3383 px |
-| A-class NCC peak 中位数 | 0.9817 | 0.9861 |
+| segment × scanline 评估数 | 1092 | 5070 |
+| A-class segment 数 | 28 | 139 |
+| segment 通过率 | 54.8% | 22.3% |
+| A-class segment 通过率 | 46.4% | 12.9% |
+| row 通过率 | 52.3% | 24.8% |
+| A-class row 通过率 | 40.7% | 17.1% |
+| A-class split-half 中位数 | 0.0277 px | 0.0273 px |
+| A-class split-half P90 | 0.0622 px | 0.0847 px |
+| A-class CRB ratio 中位数 | 1.89× | 2.03× |
+| A-class phase coverage 中位数 | 0.4401 px | 0.3723 px |
+| A-class NCC peak 中位数 | 0.9825 | 0.9863 |
+
+数据契约边界：
+
+| 项目 | 计数 | 说明 |
+|---|---:|---|
+| raw main session | 255 frames | `session == 2` 的采集事实，保留作诊断 |
+| clean SR input | 248 frames | `is_sr_usable == True` / `is_main_session == True`，当前 SR 默认输入 |
+| EP04 complete X scanlines | 13 scanlines | 固定 Y、完整 16 个 X 坐标的 `R=0` scanline |
+| EP04 localization frames | 208 unique frames | 13 × 16，全部属于 clean SR input |
 
 外轮廓提供了更连续的 anchor coverage；内轮廓通过率明显更低，但通过段的 split-half 和 NCC 仍可接近外轮廓水平。这说明内轮廓不是“不可重建区域”，而是需要 EP06 使用形状先验、SR forward model 和更严格验证来处理的目标区域。
 
@@ -58,8 +67,8 @@ EP04 在这个链路中的定位是：
 
 | contour | row pass rate | weakest scanline | weakest scanline pass rate | zero-pass scanlines | zero-pass segments |
 |---|---:|---:|---:|---:|---:|
-| outer | 54.3% | 24 µm | 44.0% | 0 | 16 |
-| inner | 24.2% | 14 µm | 22.3% | 0 | 190 |
+| outer | 52.3% | 24 µm | 47.6% | 0 | 20 |
+| inner | 24.8% | 12 µm | 22.8% | 0 | 194 |
 
 解释边界：zero-pass segment 表示该段在当前 localization gate 下不能作为强 alignment truth；它不是“没有结构”或“放弃 SR 目标”。weak scanline 表示 EP06 对齐时应考虑 holdout/低权重，而不是把单条线外推为 stage command 真值。
 
@@ -69,12 +78,12 @@ EP04 将 segment 分为三类 EP06 角色：
 
 | contour | EP06 role | segment 数 | split-half 中位数 | CRB ratio 中位数 | pass rate 中位数 |
 |---|---|---:|---:|---:|---:|
-| outer | alignment_input | 26 | 0.0191 px | 1.28× | 1.000 |
-| outer | holdout_validation | 19 | 0.0263 px | 1.79× | 0.769 |
-| outer | sr_target_not_truth | 39 | 0.0524 px | 1.91× | 0.154 |
-| inner | alignment_input | 40 | 0.0192 px | 1.31× | 1.000 |
-| inner | holdout_validation | 43 | 0.0254 px | 1.79× | 0.692 |
-| inner | sr_target_not_truth | 303 | 0.0340 px | 2.39× | 0.000 |
+| outer | alignment_input | 23 | 0.0193 px | 1.39× | 1.000 |
+| outer | holdout_validation | 23 | 0.0250 px | 1.74× | 0.692 |
+| outer | sr_target_not_truth | 38 | 0.0607 px | 2.06× | 0.000 |
+| inner | alignment_input | 42 | 0.0189 px | 1.25× | 1.000 |
+| inner | holdout_validation | 45 | 0.0213 px | 1.52× | 0.692 |
+| inner | sr_target_not_truth | 303 | 0.0375 px | 2.55× | 0.000 |
 
 推荐用法：
 
@@ -86,12 +95,12 @@ EP06 role margin audit 用 alignment-input 数值门槛审计三类 role 距离�
 
 | contour | EP06 role | segment 数 | pass-rate margin | split margin | CRB margin | phase margin | P10 min margin | closest gate |
 |---|---|---:|---:|---:|---:|---:|---:|---|
-| outer | alignment_input | 26 | +30.0 pp | +0.0409 px | +3.72× | +1.838 px | +0.154 | pass rate |
-| outer | holdout_validation | 19 | +6.9 pp | +0.0337 px | +3.21× | +1.807 px | -0.121 | pass rate |
-| outer | sr_target_not_truth | 39 | -54.6 pp | +0.0076 px | +3.09× | +0.366 px | -1.227 | pass rate |
-| inner | alignment_input | 40 | +30.0 pp | +0.0408 px | +3.69× | +1.842 px | +0.209 | pass rate |
-| inner | holdout_validation | 43 | -0.8 pp | +0.0346 px | +3.21× | +1.680 px | -0.231 | pass rate |
-| inner | sr_target_not_truth | 303 | -70.0 pp | +0.0260 px | +2.61× | +0.937 px | -1.172 | pass rate |
+| outer | alignment_input | 23 | +30.0 pp | +0.0407 px | +3.61× | +1.843 px | +0.231 | pass rate |
+| outer | holdout_validation | 23 | -0.8 pp | +0.0350 px | +3.26× | +1.788 px | -0.231 | pass rate |
+| outer | sr_target_not_truth | 38 | -70.0 pp | -0.0007 px | +2.94× | +0.658 px | -1.795 | pass rate |
+| inner | alignment_input | 42 | +30.0 pp | +0.0411 px | +3.75× | +1.824 px | +0.209 | pass rate |
+| inner | holdout_validation | 45 | -0.8 pp | +0.0387 px | +3.48× | +1.679 px | -0.231 | pass rate |
+| inner | sr_target_not_truth | 303 | -70.0 pp | +0.0225 px | +2.45× | +0.812 px | -1.968 | pass rate |
 
 `sr_target_not_truth` 的负 margin 不表示放弃区域，而是表示不能把这些段当作 alignment truth 或 SR 真值。它们仍然应保留为 EP06 内部结构可见性目标。
 
@@ -101,26 +110,26 @@ EP06 role margin audit 用 alignment-input 数值门槛审计三类 role 距离�
 
 | 失败原因 | 外轮廓 segment 数 | 内轮廓 segment 数 |
 |---|---:|---:|
-| `sigma_out_of_range` | 11 | 142 |
-| `fit_error:ValueError` | 3 | 75 |
-| `split_half_high` | 11 | 44 |
-| `low_phase_coverage` | 7 | 17 |
-| `low_delta_t` | 4 | 15 |
-| `low_snr` | 3 | 4 |
-| `ncc_unreliable` | 0 | 3 |
-| `psf_sensitivity_high` | 0 | 3 |
+| `sigma_out_of_range` | 12 | 145 |
+| `fit_error:ValueError` | 6 | 71 |
+| `split_half_high` | 6 | 45 |
+| `low_phase_coverage` | 7 | 18 |
+| `low_delta_t` | 6 | 12 |
+| `low_snr` | 1 | 4 |
+| `ncc_unreliable` | 0 | 6 |
+| `psf_sensitivity_high` | 0 | 2 |
 
 内轮廓的主要瓶颈不是 NCC peak 低，而是表观边缘模型不稳定、局部相位覆盖不足和 split-half 长尾。解释上应写成“这些区域不能直接作为配准真值”，而不是“这些区域不值得 SR”。EP06 应重点检查这些区域是否通过多帧 SR 呈现更稳定的形状轮廓。
 
-row-level 多标签失败诊断进一步支持这一点。内轮廓 3802 个失败 row 中：
+row-level 多标签失败诊断进一步支持这一点。内轮廓 3813 个失败 row 中：
 
 | reason | triggered rows | share of failed rows | strongest co-occurrence |
 |---|---:|---:|---|
-| `sigma_out_of_range` | 2040 | 53.7% | `split_half_high` |
-| `split_half_high` | 1300 | 34.2% | `sigma_out_of_range` |
-| `fit_error:ValueError` | 1055 | 27.7% | n/a |
-| `low_phase_coverage` | 278 | 7.3% | `sigma_out_of_range` |
-| `low_snr` | 224 | 5.9% | `sigma_out_of_range` |
+| `sigma_out_of_range` | 2031 | 53.3% | `split_half_high` |
+| `split_half_high` | 1305 | 34.2% | `sigma_out_of_range` |
+| `fit_error:ValueError` | 1076 | 28.2% | n/a |
+| `low_phase_coverage` | 272 | 7.1% | `sigma_out_of_range` |
+| `low_snr` | 195 | 5.1% | `sigma_out_of_range` |
 
 这些百分比是多标签比例，不可相加为 100%。同一行可能同时触发 sigma、split-half、phase 或 fit gate。
 
@@ -128,8 +137,8 @@ NCC / ESF 诊断表明，失败行的 NCC peak 并未整体崩溃：
 
 | contour | failed rows | median failed NCC peak | P10 failed NCC peak | failed rows above NCC gate | NCC unreliable share | ESF/model/stability share |
 |---|---:|---:|---:|---:|---:|---:|
-| outer | 499 | 0.9845 | 0.9792 | 100.0% | 0.0% | 97.8% |
-| inner | 3802 | 0.9868 | 0.9825 | 100.0% | 3.1% | 99.3% |
+| outer | 521 | 0.9844 | 0.9779 | 100.0% | 0.0% | 97.9% |
+| inner | 3813 | 0.9869 | 0.9827 | 100.0% | 3.2% | 99.1% |
 
 因此当前瓶颈应写成“ESF 表观宽度、拟合、split-half 和 phase coverage 的 localization gate 限制”，而不是“NCC peak 太低”。这保护了 EP06 的正确用法：inner fail 段不能当强锚点，但仍是 SR 目标。
 
@@ -174,6 +183,6 @@ EP04 的高精度定位成果是 EP06 的配准支撑，不是最终交付。通
 
 ## 8. 结论
 
-EP04 给出的是一个正向但有边界的结论：quality-gated, data-driven highpass-NCC / joint-ESF localization 可以在真实 LWIR 主 session 上提供稳定 alignment anchors、holdout validation 段和质量门控指标。
+EP04 给出的是一个正向但有边界的结论：quality-gated, data-driven highpass-NCC / joint-ESF localization 可以在真实 LWIR 主 session clean set 的完整 X-scanline 子集上提供稳定 alignment anchors、holdout validation 段和质量门控指标。
 
 这为 EP06 contour-level SR 提供了配准输入和验证基准。EP04 不承担 SR 成败判定，也不把定位本身当作客户交付。客户目标仍然是通过后续 SR 让芯片内部结构、形状和局部轮廓更清楚、更稳定。

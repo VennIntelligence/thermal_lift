@@ -10,16 +10,17 @@ from pathlib import Path
 
 import pandas as pd
 
-from thermal_core.ep03 import select_main_scan, select_reference_frame_row
 from thermal_core.ep04 import (
     build_ep06_gate_recommendations,
     create_ep04_anchor_gate_figures,
     create_ep04_figures,
+    ep04_data_contract_summary,
     prepare_ep04_segment_inputs,
     run_all_segments,
     run_all_inner_segments,
     save_ep06_gate_outputs,
     save_validation_outputs,
+    select_clean_sr_reference_row,
 )
 from thermal_core.io import load_frame
 from thermal_core.plotting import setup_academic_style
@@ -119,6 +120,15 @@ def main() -> None:
     print(f"data:     {args.data_dir}")
     print(f"output:   {args.output_dir}")
     print(f"n_jobs={args.n_jobs}, theta={theta_deg:.1f} deg, pixel={pixel_size_um:.1f} um, noise={noise_floor_c:.4f} C")
+    audit = pd.read_csv(args.frame_audit_csv)
+    data_contract = ep04_data_contract_summary(audit)
+    print(
+        "data contract: "
+        f"raw session=2 {data_contract['raw_main_session_frame_count']} frames, "
+        f"clean SR input {data_contract['clean_sr_input_frame_count']} frames, "
+        f"EP04 complete X scanlines {data_contract['ep04_scanline_count']} "
+        f"({data_contract['ep04_unique_frame_count']} unique frames)"
+    )
 
     started = time.perf_counter()
     results = run_all_segments(
@@ -154,6 +164,7 @@ def main() -> None:
             "output_dir": str(args.output_dir),
             "limit_segments": args.limit_segments,
             "limit_scanlines": args.limit_scanlines,
+            **data_contract,
         },
     )
 
@@ -197,13 +208,12 @@ def main() -> None:
                 "output_dir": str(inner_output_dir),
                 "limit_segments": args.limit_segments,
                 "limit_scanlines": args.limit_scanlines,
+                **data_contract,
             },
         )
 
     if not args.skip_figures:
-        audit = pd.read_csv(args.frame_audit_csv)
-        main_df = select_main_scan(audit)
-        ref_row = select_reference_frame_row(main_df)
+        ref_row = select_clean_sr_reference_row(audit)
         reference_frame = load_frame(args.data_dir / str(ref_row["file"]))
         create_ep04_figures(results, segment_summary, reference_frame, args.output_dir)
         if not args.outer_only:

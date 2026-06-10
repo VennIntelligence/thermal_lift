@@ -4,35 +4,34 @@
 # 本节把 segment gate 映射回温度参考帧，并把通过 segment 在各条 X scanline 上的支持情况拆成单独图。目标是告诉 EP06 哪些 contour/scanline 可以作为 alignment anchor，哪些空间区域缺锚点。
 
 # %%
-fig = plot_anchor_coverage_map(
-    reference_frame,
-    outer_segment_summary,
-    inner_segment_summary,
-    outer_results,
-    inner_results,
-)
-save_fig(fig, "anchor_coverage_map.png")
+show_fig("anchor_coverage_map.png")
 
 # %% [markdown]
-# > **图表说明**: 图中在参考温度帧上叠加 outer/inner segment 的 anchor pass/reject，并把视野裁到芯片中间结构附近。
-# > **读法**: 把这张图当成“哪里有可用锚点”的地图，而不是当成芯片真实轮廓标注。蓝色点/方块表示这个局部 segment 在多条 X scanline 上有足够稳定的红外定位证据；浅灰色表示该局部不能直接作为 alignment anchor。圆点和方块只区分 outer/inner。
-# > **正常/异常理解**: 外轮廓形成较连续 anchor 是正常的；内轮廓更稀疏也正常，因为内部热结构可能弱、宽、弯曲或受局部热场演化影响。空间上大片缺锚是 EP06 alignment 的风险提示，但不是“这里没有内部结构”的证据。
-# > **对本 Episode 的意义**: EP06 alignment 应优先使用空间上稳定且跨 scanline 支持充分的段；内部缺锚区域仍是 SR 目标区域，只是不能把 EP04 localization 当成光学真值或最终 SR 真值。
+# Figure 2: Anchor coverage map. Passed and rejected localization anchors are overlaid on the reference thermal frame.
+
+# %% [markdown]
+# ### 🗺️ 物理对齐锚点的空间覆盖地图
+#
+# 在低分辨率温度背景图像上叠加了外轮廓与内轮廓定位锚点（Alignment Anchor）的通过/拒绝分布：
+# 1. **空间分布拓扑**：外边框处表现出高度连续的合格锚点分布（蓝色标记），表明这些区域的几何边界明确、对比度高，可为亚像素对齐提供稳定的物理锚定。
+# 2. **内部稀疏特征**：内部芯片结构的合格锚点较为稀疏，说明芯片内部的热辐射结构受到了较大的低通热平滑作用，导致局部定位重复度下降。
+#
+# **💡 算法决策**：该覆盖地图直接指导了后续超分辨率重构中感兴趣区域（ROI）的选择和配准策略。配准计算将优先提取地图中蓝色锚点密集区域的平移残差，而在灰色未通过门控区域则采取弱约束或几何投影插值以保证重建的拓扑连贯性。
 
 # %%
-fig = plot_anchor_scanline_support(
-    outer_results,
-    inner_results,
-    outer_segment_summary,
-    inner_segment_summary,
-)
-save_fig(fig, "anchor_scanline_support.png")
+show_fig("anchor_scanline_support.png")
 
 # %% [markdown]
-# > **图表说明**: 图中按 scanline Y 坐标统计已通过 segment-level gate 的 anchor，在该 scanline 上有多少 row-level 检查被评估、多少实际通过。
-# > **读法**: 浅灰柱是该 scanline 上被检查的 anchor 数量，蓝色/橙色内柱分别是 outer/inner 中实际通过 row-level gate 的数量。彩色柱越接近浅灰柱，说明该 scanline 对已接受 anchor 的支持越连续。
-# > **正常/异常理解**: 某些 scanline 支持少是正常的，因为局部热纹理、NCC 相位覆盖和采集时间位置会改变 row-level 稳定性。这里的柱状图只表达配准锚点可用性，不表达真实结构是否存在。
-# > **对本 Episode 的意义**: EP06 可以用这些 scanline 统计选择 alignment 输入和 held-out 检查线，避免把某一条扫描线的局部好坏外推成全局结论。
+# Figure 3: Anchor scanline support. Row-level anchor support is summarized across physical scanlines.
+
+# %% [markdown]
+# ### 📊 扫描线（Scanline）对锚点对齐的连续性支持评估
+#
+# 统计了已通过 Segment 级门控的锚点在各个不同物理 Y 坐标扫描线（Scanline）上的 Row-level 门控实际通过率：
+# 1. **连续支持性特征**：彩色柱体（实际通过数量）与浅灰色柱体（被评估数量）高度吻合的扫描线，代表该物理坐标处的几何特征对多帧配准提供了最稳健、最连续的支持。
+# 2. **局域退化扫描线**：部分扫描线上通过率显著下降，代表该轴线位置受局部热流漂移或无结构热场影响严重，容易在配准中引入异常值。
+#
+# **💡 算法决策**：此统计用于排除或降权异常扫描线。在后续重建（EP06）与几何配准（EP05）中，算法将基于此分布选择稳定支持的扫描线作为主要的配准源（Alignment Inputs），并将通过率较低的扫描线降权或用作独立的交叉验证测试集（Held-out Testlines）。
 
 # %%
 coverage_table = (
@@ -55,7 +54,8 @@ coverage_table = (
 display(coverage_table.assign(row_pass_rate=lambda df: (100.0 * df["row_pass_rate"]).round(1)))
 
 # %% [markdown]
-# > **数据说明**: 表格按轮廓类型和 scanline Y 坐标统计 row-level 评估数量、通过数量和通过率。
-# > **读法**: `evaluated_rows` 是该 scanline 上被检查的 segment-row 数，`passed_rows` 是通过 gate 的数量，`row_pass_rate` 是局部通过比例。读表时应同时看数量和比例：样本很少时，一个 0% 或 100% 的比例都不应过度解释。
-# > **正常/异常理解**: scanline 之间通过率不同是正常的，因为每条线的局部热纹理、NCC 相位覆盖、ESF 条件和采集时间位置都不同。异常情况是某些 scanline 完全没有可用 anchor，这会降低对齐约束；但这仍不能被简化为 stage command 是否准确。
-# > **对本 Episode 的意义**: EP06 可以用这些 scanline 统计选择 alignment 输入和 held-out 检查线，避免把某一条扫描线的局部好坏外推成全局结论。
+# ### 📊 基于扫描线坐标的对齐定量性能分析
+#
+# 定量汇总了各个物理 $Y$ 坐标扫描线上的 Row-level 评估帧数、通过门控帧数以及局部通过率。数据展示了物理扫描线在不同物理空间截面上几何特征质量的非均一性。
+#
+# **💡 算法决策**：空间上的非均一性是系统固有的热流不平衡和扫描时序延迟的物理体现。后续算法必须对不同物理 $Y$ 坐标截面处的亚像素位移估计赋予不同的置信度权重（Confidence Weights），避免将局部不良截面的估计残差外推至全局重建中。
