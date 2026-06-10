@@ -2,7 +2,7 @@
 
 ## 方案概述
 
-**Hybrid Progressive**: 2x drizzle (无棋盘伪影) + UNet PixelShuffle 2x 上采样 → 4x 输出
+**Hybrid Progressive**: Dataset 从 `lr_burst.npy + shifts.npy` 按需计算 2x drizzle（无棋盘伪影），再由 UNet + PixelShuffle 2x 上采样到 4x 输出。当前主流程不需要预生成 `obs_features_4x.npz`。
 
 ```
 248 LR frames (480×640) ──┬── 2x Drizzle ──→ 3ch @ 960×1280 (coverage 均匀 ✅)
@@ -35,7 +35,7 @@ uv pip install -e ../../tcforge
 cd /home/ujs/mycode/thermal_lift/algos/ep12_4x_sr
 
 CUDA_VISIBLE_DEVICES=0 uv run python -m sr4x.train \
-    --training-pool-dir /home/ujs/mycode/thermal_lift/data/synthetic/training_pool_4x \
+    --training-pool-dir /home/ujs/mycode/thermal_lift/data/synthetic/training_pool_4x_aa_2000 \
     --output-dir outputs/ep12_hybrid_v1 \
     --device cuda:0 \
     --scale 4 \
@@ -90,7 +90,7 @@ CUDA_VISIBLE_DEVICES=0 uv run python -m sr4x.train \
 
 ```bash
 uv run python -m sr4x.train \
-    --training-pool-dir /home/ujs/mycode/thermal_lift/data/synthetic/training_pool_4x \
+    --training-pool-dir /home/ujs/mycode/thermal_lift/data/synthetic/training_pool_4x_aa_2000 \
     --output-dir outputs/ep12_hybrid_v1 \
     --compile \
     --num-workers 8 \

@@ -6,7 +6,7 @@
 cd algos/ep12_4x_sr
 
 CUDA_VISIBLE_DEVICES=0 uv run python -m sr4x.train \
-    --training-pool-dir ../../data/synthetic/training_pool_4x \
+    --training-pool-dir ../../data/synthetic/training_pool_4x_aa_2000 \
     --output-dir outputs/ep12_large_bucketv2 \
     --total-steps 80000 \
     --batch-size 40 \
@@ -52,6 +52,10 @@ CUDA_VISIBLE_DEVICES=0 uv run python -m sr4x.train \
 
 ## What changed from the original EP12
 
+0. **Hybrid 2x drizzle input** (`drizzle_scale=2`): the Dataset computes 2x drizzle
+   from `lr_burst.npy + shifts.npy` on demand. The old same-grid `obs_features_4x.npz`
+   precompute step is no longer part of the main training path.
+
 1. **HF detail loss** (`hf_detail_weight=0.3`): inverse-coverage-weighted HF L1.
    Low-coverage pixels (where fine structures typically live) get **higher** weight,
    forcing the network to preserve detail where drizzle data is sparse.
@@ -67,7 +71,7 @@ CUDA_VISIBLE_DEVICES=0 uv run python -m sr4x.train \
 
 ```bash
 CUDA_VISIBLE_DEVICES=0 uv run python -m sr4x.train \
-    --training-pool-dir ../../data/synthetic/training_pool_4x \
+    --training-pool-dir ../../data/synthetic/training_pool_4x_aa_2000 \
     --output-dir outputs/ep12_large_bucketv2 \
     --total-steps 80000 \
     --batch-size 40 \

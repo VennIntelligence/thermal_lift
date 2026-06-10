@@ -1,8 +1,28 @@
 # EP12 4x SR
 
-Drizzle-informed 4x thermal restoration model. The model consumes sparse 4x
-drizzle features plus 1x context upsampled to the same grid, then predicts a
-4x temperature field and an optional log-variance confidence map.
+Hybrid drizzle-informed 4x thermal restoration model.
+
+Current route:
+
+```text
+248 LR frames + shifts
+  -> 2x drizzle features (computed by Dataset from lr_burst.npy)
+  -> concat with 1x fused features upsampled to 2x
+  -> UNet on 2x grid
+  -> PixelShuffle 2x
+  -> 4x temperature field
+```
+
+Training expects v8 AA compact scene directories from `scripts/generate_training_pool.py`:
+
+- `hr_mask_4x.png`: soft coverage mask, loaded as `[0, 1]`
+- `hr_edge_4x.png`
+- `obs_features_1x.npz`: 5 LR channels
+- `lr_burst.npy`: 248 LR frames, required for on-demand 2x drizzle
+- `shifts.npy`
+- `metadata.json`
+
+`obs_features_4x.npz` is not part of the current training contract.
 
 Smoke command:
 
@@ -10,11 +30,3 @@ Smoke command:
 cd algos/ep12_4x_sr
 uv run pytest
 ```
-
-Training expects scene directories with:
-
-- `obs_features_4x.npz`: 3 channels `(drizzle_mean, coverage, variance)`
-- `obs_features_1x.npz`: 5 channels at LR
-- `hr_mask_4x.png`
-- `hr_edge_4x.png`
-- `metadata.json`

@@ -361,7 +361,7 @@ class ThermalSR4xDataset(Dataset[dict[str, Any]]):
             raise ValueError(f"{root}/obs_features_1x.npz must have shape (C,H,W)")
         with (root / "metadata.json").open("r", encoding="utf-8") as f:
             metadata = json.load(f)
-        hr_mask = (_read_png_gray8(root / "hr_mask_4x.png") > 0).astype(np.uint8)
+        hr_mask = (_read_png_gray8(root / "hr_mask_4x.png").astype(np.float32) / 255.0).astype(np.float32)
         hr_edge = (_read_png_gray8(root / "hr_edge_4x.png") > 0).astype(np.float32)
         hr_target = _reconstruct_target(hr_mask, metadata)
         hr_h, hr_w = map(int, hr_target.shape)

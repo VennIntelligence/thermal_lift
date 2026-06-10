@@ -8,6 +8,41 @@
 
 ## 变更记录
 
+### [ACL-013] 2026-06-10 — 4x v8 AA 训练池入口统一与 EP12 soft mask 接入
+
+**问题诊断**:
+- 4x 训练池文档同时存在旧 full-frame 入口、旧 same-grid drizzle 预计算入口和新 `generate_training_pool.py` compact 入口，容易误导执行流程。
+- 当前 EP12 Hybrid 已改为 `drizzle_scale=2` + PixelShuffle 2x，不再需要离线 `obs_features_4x.npz`；但文档仍把 `build_4x_features.py` 写成训练前必需。
+- EP12 Dataset 读取 `hr_mask_4x.png` 时使用 `>0` 二值化，会把 v8 AA soft coverage mask 重新变硬，导致 HR target 丢失抗锯齿覆盖率语义。
+
+**修改内容**:
+1. 统一 4x pool 生成入口为 `scripts/generate_training_pool.py`，删除旧入口 `generate_thermal_chip_phantom.py`、旧 smoke 检查脚本、旧 drizzle 预计算脚本及对应测试。
+2. 更新 `docs/windows_4x_generation.md`：明确 2000 scenes / 16 workers 命令、metadata 检查字段、当前 EP12 Hybrid 从 `lr_burst.npy + shifts.npy` 按需计算 2x drizzle。
+3. `algos/ep12_4x_sr/src/sr4x/dataset.py`：`hr_mask_4x.png` 改为按 `uint8/255.0` 读取 soft coverage，再用 `reconstruct_hr_temperature()` 重建 target。
+4. 更新 EP12 README、训练命令文档和测试，使训练池契约变为 `obs_features_1x.npz + lr_burst.npy + shifts.npy + soft hr_mask_4x.png + metadata.json`。
+5. 将 EP14 loss-atlas 中旧 same-grid 4x drizzle 文案标记为 legacy，避免与当前 Hybrid 训练路径混淆。
+
+**预期效果**:
+- 4x AA 数据生成只保留一个可复现入口，减少 Windows/Linux 迁移和本地大规模生成时的操作歧义。
+- EP12 Hybrid 训练真正消费 v8 AA soft target，避免把抗锯齿训练池退化回硬边界 target。
+- 风险: Dataset 仍支持旧可选预计算文件的兼容读取；后续若要完全移除 legacy 兼容，需要单独评估历史 checkpoint/notebook 复现需求。
+
+**推荐参数**:
+
+```bash
+uv run python scripts/generate_training_pool.py \
+  --config configs/synthetic/training_pool_4x.json \
+  --output-dir data/synthetic/training_pool_4x_aa_2000 \
+  --pool-size 2000 \
+  --workers 16
+```
+
+**训练结果**: _(EP12 Hybrid 重新训练后填写)_
+
+**涉及文件**: `docs/windows_4x_generation.md`, `algos/ep12_4x_sr/src/sr4x/dataset.py`, `algos/ep12_4x_sr/tests/test_dataset.py`, `algos/ep12_4x_sr/tests/test_train_smoke.py`, `algos/ep12_4x_sr/tests/test_model_losses.py`, `algos/ep12_4x_sr/README.md`, `algos/ep12_4x_sr/run_training.md`, `algos/ep12_4x_sr/scripts/run_training.md`, `scripts/generate_thermal_chip_phantom.py`, `scripts/smoke_test_thermal_chip_phantom.py`, `scripts/build_4x_features.py`, `scripts/precompute_drizzle_2x.py`
+
+---
+
 ### [ACL-012] 2026-06-10 — EP15 M4 GPU MAP-TV 去卷积锚重跑
 
 **问题诊断**:

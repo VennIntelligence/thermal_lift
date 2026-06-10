@@ -11,9 +11,9 @@
 save_fig("03_lr_burst_samples_4x.png")
 
 # %% [markdown]
-# ## A4. 对齐、Drizzle 与融合：8通道输入特征
+# ## A4. 对齐、Drizzle 与融合：旧 8 通道输入特征
 #
-# 将 $N=248$ 帧的 sub-pixel 观测在参考网格上对齐：
+# 本节展示旧 EP12 same-grid loss atlas 的输入特征构造，不是当前 Hybrid 训练池生成契约。旧路线将 $N=248$ 帧的 sub-pixel 观测在参考网格上对齐：
 # 1. 对齐后进行 **Drizzle 4x 散点累加**，生成 3 通道 4x 特征：
 #    - `ch0`: `drizzle_mean_4x` (对齐均值温度)
 #    - `ch1`: `drizzle_coverage_4x` (覆盖度)
@@ -27,6 +27,6 @@ save_fig("03_lr_burst_samples_4x.png")
 save_fig("05_obs_feature_channels_4x.png")
 
 # %% [markdown]
-# > **图表说明**: 上图展示了 $6$ 个退化后的 $1/4$ LR 帧。下图展示了最终送入 4x UNet 的 8 个特征通道。
+# > **图表说明**: 上图展示了 $6$ 个退化后的 $1/4$ LR 帧。下图展示旧 same-grid 路线送入 4x UNet 的 8 个特征通道。
 # >
-# > **怎么看**: `ch1 drizzle_coverage_4x` 是 4x Drizzle 独有的覆盖率。通道 3 至 7 是经典的 1x 融合指标通过插值放大而来的平滑版本。这两者信息的互补为 UNet 在 4x 空间重建超分辨率轮廓提供了绝佳的位移与覆盖保障。
+# > **怎么看**: `ch1 drizzle_coverage_4x` 是旧 4x Drizzle 覆盖率。当前 Hybrid 路线改用 2x drizzle 输入并由 PixelShuffle 输出 4x，以规避 4x same-grid coverage/lattice 伪影。

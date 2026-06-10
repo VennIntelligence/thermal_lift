@@ -88,4 +88,4 @@ if not cache.demo_skipped:
 # >
 # > **怎么看**: `highpass independent allclose` 用 SciPy 重算，不依赖生成器自证；任一 fail 应阻止 benchmark 交付。
 # >
-# > **核心发现**: demo 数据包满足 P0 契约的子集验收，正式全幅数据仍需 CLI `smoke_test_thermal_chip_phantom.py` 门控。
+# > **核心发现**: demo 数据包满足 P0 契约的子集验收；正式全幅训练池应先用 `generate_training_pool.py --num-scenes 2` 做 smoke 生成，并检查 metadata 中真实位移和 soft coverage mask 是否接通。

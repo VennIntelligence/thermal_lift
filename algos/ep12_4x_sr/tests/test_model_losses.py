@@ -54,7 +54,7 @@ def test_thermal_sr4x_loss_is_finite_and_backpropagates() -> None:
     )
     losses["total"].backward()
 
-    assert set(losses) == {"total", "lf", "hf", "edge", "forward", "nll"}
+    assert set(losses) == {"total", "lf", "hf", "hf_detail", "edge", "forward", "nll"}
     assert all(torch.isfinite(value) for value in losses.values())
     assert pred.grad is not None
     assert log_var.grad is not None

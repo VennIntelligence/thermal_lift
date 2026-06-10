@@ -375,7 +375,7 @@ def _plot_compact_storage_4x(output_dir: Path, meta: dict[str, Any]) -> str:
     files = [
         (0.5, 3.8, "hr_mask_4x.png"),
         (0.5, 2.6, "hr_edge_4x.png"),
-        (0.5, 1.4, "obs_features_4x.npz (3ch drizzle)"),
+        (0.5, 1.4, "legacy obs_features_4x.npz (3ch drizzle)"),
         (0.5, 0.2, "obs_features_1x.npz + metadata.json"),
     ]
     for x, y, label in files:

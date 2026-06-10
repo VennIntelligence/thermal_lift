@@ -52,7 +52,7 @@ if not cache.demo_skipped:
 # >
 # > **怎么看**: `iid_gaussian` 是白噪声 baseline；默认 `mixed` 会加入低频 FPN 和列偏置，但总 RMS 仍归一到 0.0724°C。残差图红/蓝不代表升温/降温，只是相对 clean 帧的扰动。
 # >
-# > **核心发现**: 噪声只加在 LR burst 上，与 CLI 生成器 `generate_thermal_chip_phantom.py` 行为一致；大块斑块若来自 `low_freq_amplitude_c`，属于热场低频背景，不是探测器噪声。
+# > **核心发现**: 噪声只加在 LR burst 上，与当前训练池生成器 `generate_training_pool.py` 行为一致；大块斑块若来自 `low_freq_amplitude_c`，属于热场低频背景，不是探测器噪声。
 
 # %% [markdown]
 # ### 3.4 真实 vs 合成残差纹理

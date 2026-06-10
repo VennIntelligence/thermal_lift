@@ -268,11 +268,10 @@ def save_training_demo_bundle(output_dir: Path, demo: dict[str, Any]) -> Path:
         "scene_meta_keys": sorted(demo["scene_meta"].keys()),
         "scene_rotation_deg": demo["rotation_deg"],
         "training_pool_note": (
-            "Mirrors configs/synthetic/training_pool_4x.json defaults: "
+            "Legacy EP14 loss-atlas demo derived from configs/synthetic/training_pool_4x.json: "
             f"{demo['shifts_full_count']} frames/scene, scale=4, "
-            "drizzle features 4x concatenated with 1x features upsampled. "
-            "Compact pool scenes store hr_mask PNG + obs_features_1x.npz + obs_features_4x.npz + metadata; "
-            "LR burst is not kept on disk."
+            "same-grid 4x drizzle features concatenated with 1x features upsampled. "
+            "Current EP12 Hybrid training pools instead store lr_burst.npy and compute 2x drizzle on demand."
         ),
     }
     (output_dir / "training_demo_meta.json").write_text(json.dumps(meta, indent=2), encoding="utf-8")
