@@ -23,7 +23,20 @@ data/
 
 # ===== 生成产物（由 notebook 执行重建） =====
 output/
+outputs/
+algos/*/outputs/
 *.zip
+
+# ===== 临时工作区 / 草稿（不入 Git） =====
+tmp/
+todos/
+**/Untitled
+
+# ===== 训练权重 / 测试缓存 =====
+checkpoints/
+*.pt
+*.pth
+.pytest_cache/
 
 # ===== Notebook 构建产物（从 fragments/ 重建） =====
 # fragments/*.py 是源码，会被 track

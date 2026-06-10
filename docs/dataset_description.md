@@ -2,7 +2,7 @@
 
 > 本文档描述用于超分辨率温度场重建的原始数据集。
 > EP01 已完成数据完整性审计；后续研究应优先采用本文档中标注为“EP01 验证”的结论。
-> 当前数据使用原则：主 session=2 的 255 帧支持 2x contour-level SR POC；stage command 只作位移 prior，不作对齐真值；EP04 localization 用作 alignment anchor / quality gate。
+> 当前数据使用原则：`session=2` 的 255 帧是原始物理主温度段；剔除 `R != 0` 重复帧后，`is_sr_usable == True`（兼容别名 `is_main_session == True`）的 248 帧才是 2x contour-level SR POC 的默认干净输入。stage command 只作位移 prior，不作对齐真值；EP04 localization 用作 alignment anchor / quality gate。
 
 ---
 
@@ -72,6 +72,8 @@ EP02 按 `acquisition_order` 确认主扫描为 raster 路径：行内 X 相邻�
 - 6 个坐标（全部在 Y=0 线上：X=0,2,4,6,8,10）进行了 3 次重复采集（R=0,1,2）
 - 其余 247 个坐标仅有 R=0
 - 总帧数：247 × 1 + 6 × 3 = 265（实际可用 263 帧）
+- 原始主温度段：`session=2` 共 255 帧，其中包含 7 帧 `R != 0` 重复/补采帧
+- 默认 SR 输入：剔除 `R != 0` 后的 `is_sr_usable == True` 共 248 帧，全部为干净 R=0 主扫描帧
 - EP02 repeatability 过滤后，主扫描内 repeat pair 只有 2 对，且都是 NCC 边界峰；不能给出有效 repeat p95
 
 ### 已知缺失
@@ -168,8 +170,9 @@ AVI 是独立的连续扫描诊断数据，不是温度矩阵 SR 输入。EP02 �
 |------|-----|------|
 | 同 session 噪声底 | ~0.0724°C | 旧项目 Ep004，待重新验证 |
 | 采集温度段跳变 | -1.66°C, +4.16°C | EP01，按 `acquisition_order` 检测 |
-| 主扫描相邻帧中位跳变 | 0.008°C | EP01，主扫描 session=2 |
-| 主扫描首尾均温漂移 | -0.60°C | EP01，session=2 首帧到末帧 |
+| 原始主扫描相邻帧中位跳变 | 0.008°C | EP01，session=2 物理温度段 |
+| 原始主扫描首尾均温漂移 | -0.60°C | EP01，session=2 首帧到末帧 |
+| 干净 SR 输入 | 248 frames | EP01，`is_sr_usable == True` |
 | 重复测量差异 | 1-2°C std | 旧项目经验，不应跨 repeat 混合 |
 
 ### Session 结构
@@ -183,7 +186,7 @@ EP01 已确认：必须按真实采集顺序 `acquisition_order`（由文件 mti
 |---:|---:|---:|---:|---|
 | 0 | 0 | 1 | 21.76 | 早期单帧，不属于主扫描 |
 | 1 | 1–7 | 7 | 19.69–20.10 | 早期低温/预热帧，不属于主扫描 |
-| 2 | 8–262 | 255 | 23.23–23.85 | 主扫描 session，后续位移标定和 SR 默认只用这一段 |
+| 2 | 8–262 | 255 | 23.23–23.85 | 原始物理主扫描 session；剔除 `R != 0` 后得到 248 帧干净 SR 输入 |
 
 检测到的两个温度断点为：
 
@@ -192,14 +195,18 @@ EP01 已确认：必须按真实采集顺序 `acquisition_order`（由文件 mti
 | acquisition_order 0 → 1 | `0_0_1.txt` → `0_0_0.txt` | -1.66°C |
 | acquisition_order 7 → 8 | `8_0_0.txt` → `8_0_1.txt` | +4.16°C |
 
-主扫描 session=2 的均温从首帧到末帧约下降 0.60°C；这类缓慢漂移对后续位移标定、
-帧对筛选和 SR 重建都很重要，应作为真实采集过程的一部分保留记录。主扫描内部相邻帧
-跳变很小（中位约 0.008°C，最大约 0.136°C），与前 8 帧到主扫描之间的 4.16°C 跳变
-不是同一类现象。
+原始主扫描 session=2 的均温从首帧到末帧约下降 0.60°C；这类缓慢漂移对后续位移标定、
+帧对筛选和 SR 重建都很重要，应作为真实采集过程的一部分保留记录。但 EP01 的
+`repeat_exclusion_order_comparison.png` 进一步确认：`R != 0` 重复/补采帧会在文件名排序和
+局部时间线中制造非连续采集导致的虚假温度跳变。剔除这些重复帧后，248 帧
+`is_sr_usable == True` 的干净输入具有更平滑、均一、稳定的物理热背景，才是后续位移诊断
+和 SR 重建默认使用的数据集。
 
 > **下游规则**: EP02 及后续研究必须从 `output/ep01_data_processing/frame_audit.csv`
-> 读取 `acquisition_order`、`session`、`is_main_session` 字段。主位移标定和 SR 默认只使用
-> `is_main_session=True` 的 255 帧；早期低温/预热帧可以单独分析，但不应混入主扫描。
+> 读取 `acquisition_order`、`session`、`is_sr_usable` 和 `is_main_session` 字段。`session == 2`
+> 保留为 255 帧原始物理主温度段诊断；主位移标定和 SR 默认只使用 `is_sr_usable=True`
+>（兼容别名 `is_main_session=True`）的 248 帧。早期低温/预热帧和 `R != 0` 重复帧可以单独诊断，
+> 但不应混入默认 SR 重建。
 
 > **重要更正**: 旧项目/早期初稿中的 “22/6/4 sessions” 与文件名排序下的 “13 sessions”
 > 不应作为当前数据集的 session 结构使用。EP01 已确认 13 sessions 是按文件名字母序排序造成的伪影。

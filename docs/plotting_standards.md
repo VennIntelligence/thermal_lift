@@ -74,7 +74,7 @@ ACADEMIC_RCPARAMS = {
     "grid.color":         "#cccccc",
 
     # ── Figure ──
-    "figure.dpi":         150,
+    "figure.dpi":         300,
     "figure.facecolor":   "white",
     "figure.constrained_layout.use": True,
 
@@ -228,7 +228,7 @@ fig.savefig(
 fig.savefig(path, dpi=300, bbox_inches="tight", facecolor="white")
 ```
 
-- **dpi=300** 是论文提交最低要求。notebook 内预览可用 `dpi=200`。
+- **dpi=300** 是论文提交最低要求。Notebook 内嵌预览也保持 300 dpi，避免执行后的 `.ipynb` 图片发糊；如临时调试需要更小文件，可在非提交产物中显式降低。
 - **bbox_inches="tight"** 避免裁掉外置 legend 和 suptitle。
 - **facecolor="white"** 避免透明背景导致 PDF 渲染问题。
 - 保存格式：notebook 展示用 `.png`；论文���稿用 `.pdf`（矢量）。

@@ -25,7 +25,7 @@
 ## 📁 项目概述
 
 **项目名称**: thermal_lift — 红外热像微扫描超分辨率重建  
-**目标**: 面向工业芯片检测，从 255 帧主 session LWIR 温度矩阵中验证 2x contour-level SR POC，用于看清芯片内部结构/形状
+**目标**: 面向工业芯片检测，从原始 255 帧主 session 中筛选出的 248 帧 clean SR-usable LWIR 温度矩阵验证 2x contour-level SR POC，用于看清芯片内部结构/形状
 **前身**: 旧项目经历 19 个 Episode / ~4 天密集工作，已蒸馏结论到 `fresh_start_guide.md`
 
 ---
@@ -55,7 +55,7 @@
 
 通过**主 session 筛选 + localization 锚定 + 亚像素微扫描 SR**，而非更换昂贵硬件（微距镜头），先交付面向客户问题的 contour-level POC：
 
-1. **数据选择**: 263 帧中按 `acquisition_order` 识别 3 个温度段，SR 默认只用主 session=2 的 255 帧
+1. **数据选择**: 263 帧中按 `acquisition_order` 识别 3 个温度段；`session=2` 的 255 帧保留为原始主温度段诊断，SR 默认使用剔除 `R != 0` 后的 248 帧 clean set
 2. **质量门控**: EP04 localization 用作 alignment anchor / quality gate，筛掉不可靠帧对或局部区域
 3. **位移先验**: 将电动台坐标通过旋转角 θ 映射为像素级 command prior；实际 alignment 必须由数据约束修正
 4. **SR POC**: 聚焦 2x contour-level 重建，验证芯片内部结构/形状是否比 LR/bicubic 更清楚
@@ -81,7 +81,8 @@
 | 电动台-像素旋转角 θ | 47.6° | 0.1° 精度；EP02 AVI gradient 独立方向验证 θ≈47.14°，95% CI 覆盖 47.6°，但不替换配置 |
 | 光学 PSF | Gaussian σ ≈ 0.5 px | 可能在 0.2–0.5 区间 |
 | Noise floor | 0.0724°C | smooth adjacent-coord MAE |
-| 主扫描 session | 255 frames | session=2；SR 默认只用这一段 |
+| 原始主扫描 session | 255 frames | session=2；物理温度段诊断，不直接作为默认 SR 输入 |
+| Clean SR 默认输入 | 248 frames | `is_sr_usable=True` / `is_main_session=True`；剔除 `R != 0` 重复/补采帧 |
 | 坐标集合 (X, Y) | {0,2,4,6,8,10,12,14,16,18,20,24,28,32,36,40} μm | 16 值 |
 | 每条扫描线 | 16 个采样点 | |
 | stage command 位移 | 40 μm = 4.0 px（命令向量幅值） | 作为 prior / 初始化 / 约束，不作为对齐真值 |
@@ -94,7 +95,7 @@
 
 **TXT/BMP — 步进停拍 (Step-and-Shoot)**：
 - 263 帧温度矩阵，遵循 raster 扫描路径
-- 按 `acquisition_order` 分为 3 个温度段，其中主扫描 session=2 有 255 帧，是 2x SR POC 的默认输入
+- 按 `acquisition_order` 分为 3 个温度段，其中主扫描 session=2 有 255 帧；剔除 `R != 0` 后的 248 帧 clean set 是 2x SR POC 的默认输入
 - 行内：X 轴连续步进（0→40 µm，16 个坐标点），每步停拍
 - 行间：Y 轴跳一步（2 或 4 µm），然后开始新一行 X 扫描
 - 行内 X 相邻帧 = 真正时间连续（acquisition gap = 1）
@@ -148,6 +149,33 @@ def coordinate_to_shift(x_um, y_um):
 
 ---
 
+## 📝 算法变更日志规则
+
+**每次修改 SR 算法（网络架构、Loss 设计、训练策略、数据管线、TCForge 合成参数），必须在 `research_log/algorithm_changelog.md` 中新增一条变更记录。**
+
+### 必须记录的内容
+
+| 字段 | 说明 |
+|------|------|
+| **编号** | `[ACL-XXX]` 递增编号 |
+| **日期** | 修改日期 |
+| **问题诊断** | 上一版本的什么问题触发了本次修改 |
+| **修改内容** | 具体改了什么（文件、函数、参数）以及原理 |
+| **预期效果** | 预期改善什么、可能的风险 |
+| **推荐参数** | 推荐的 CLI 参数 |
+| **训练结果** | _(训练完成后回填)_ 输出目录、视觉效果、关键指标、结论 |
+| **涉及文件** | 改动的文件列表 |
+
+### 执行规则
+
+1. **先记录再改代码，或改完代码后立即记录** — 绝不允许「改了但没记」
+2. **训练完成后必须回填「训练结果」** — 标记视觉效果好坏、关键指标数值、最终结论
+3. **每条记录独立完整** — 读者只看一条就能理解「为什么改、改了什么、效果如何」
+4. **模板在文件末尾** — 新增条目直接复制模板填写
+5. **日志文件路径**: `research_log/algorithm_changelog.md` [Git ✅]
+
+---
+
 ## 📂 项目结构约定
 
 ```
@@ -175,6 +203,8 @@ thermal_lift/
 ├── docs/                      ← 文档                     [Git ✅]
 ├── reports/                   ← 正式分析报告（.md）      [Git ✅]
 ├── research_log/              ← 研究日志                 [Git ✅]
+│   ├── algorithm_changelog.md ← 算法变更日志（必须维护）  [Git ✅]
+│   └── episodes/              ← Episode 进度记录
 └── paper/                     ← 论文                     [Git ✅]
 ```
 
@@ -186,10 +216,29 @@ thermal_lift/
 - 运行方式: `uv run python scripts/xxx.py` 或 `uv run jupyter notebook`
 
 **算法隔离规则**:
-- **每个 `algos/xxx/` 是完全独立的项目**，有自己的 `pyproject.toml`、`.python-version`、独立 UV venv
-- 不使用 UV workspace — 因为第三方算法可能要求不同 Python 版本
-- 共享代码通过 `core/` 包以 `pip install -e ../core` 方式安装到各 venv
+- **每个 `algos/xxx/` 是完全独立的项目**，有自己的 `pyproject.toml`、`.python-version`、独立 venv
+- **首选 UV**：大多数 algo 使用 `uv sync` 创建 `.venv/`，依赖写在 `pyproject.toml`
+- **UV 解决不了时可用 conda**：当依赖包含 C/C++/CUDA 编译组件且无 pip wheel 时（如 `ccpi-regulariser`），可改用 conda 创建环境。此时在 algo 目录放 `environment.yml` 替代 `pyproject.toml` 的依赖部分，并在 README 中说明
+- 不使用 UV workspace — 因为第三方算法可能要求不同 Python 版本或包管理器
+- 共享代码通过 `core/` 包以 `pip install -e ../../core` 方式安装到各 venv（UV 和 conda 环境均适用）
 - 算法之间**零耦合**，可以独立运行、独立删除
+- **绝不在根目录 venv 中运行算法实验** — 根 venv 只用于全局简单工作（脚本、可视化、Notebook）
+- **创建新 algo 的标准步骤**:
+  ```bash
+  # UV 方式（首选）
+  cd algos/ep10_xxx/
+  uv init --no-workspace
+  uv add numpy scipy matplotlib pandas tqdm
+  uv pip install -e ../../core
+  uv sync
+
+  # Conda 方式（仅当 UV 无法安装所需包时）
+  cd algos/ep10_xxx/
+  conda create -p .venv python=3.11 -y
+  conda activate ./.venv
+  conda install -c conda-forge -c ccpi <packages>
+  pip install -e ../../core
+  ```
 
 ### 代码规范
 
@@ -220,7 +269,61 @@ thermal_lift/
 | `reports/` | ✅ track | 正式 .md 分析报告 |
 | `research_log/` | ✅ track | 研究日志和 Episode 进度 |
 
-**分批提交规则**: 提交最近成果时必须先用 `git status --ignored` 或等价命令检查工作树，分批只 stage 可复现源码、Notebook `fragments/`、构建脚本、配置、正式 Markdown 报告和研究日志；不得提交 `.ipynb` 构建产物、`output/` 下生成的图片/CSV/NPY 等数据、`data/` 原始或处理数据、缓存目录、虚拟环境，或任何只可由脚本重建的中间产物/交付产物。
+**提交频率规则**: **完成一个任务就 commit 一次**；**纯粹的小修改**（ typo、单行注释、局部措辞、无行为变化的微调）可以不单独 commit，攒到下一次任务收尾时一并提交。
+
+| 场景 | 是否 commit | 说明 |
+|------|-------------|------|
+| 一个 EP 子任务完成（如 EP12 4x benchmark 脚本 + fragments + research_log） | ✅ 立即 commit | 任务 = 可独立 review、可 bisect 的最小交付单元 |
+| 跨 EP 基础设施（core cache、tcforge 扩展、`.gitignore`） | ✅ 单独 commit | 与具体 EP 解耦，便于依赖顺序清晰 |
+| 纯 typo / 注释 / 无逻辑改动 | ❌ 可不 commit | 下次任务 commit 时带上即可 |
+| 任务做到一半、notebook 尚不可构建 | ❌ 不 commit | 等该任务闭环后再提交 |
+| 仅本地诊断、brief、smoke 对照 | ❌ 不 commit | 放 `tmp/`，不入 Git |
+
+**任务粒度参考**：一个 algo 子项目初版、一组 notebook fragments 迁移、一份正式 report、一次 cache 基础设施落地、一组对照实验脚本——这些都算「一个任务」，不必等到整个 Episode 全部结束。
+
+**分批提交规则**: 提交前必须先用 `git status --ignored` 或等价命令检查工作树；**按任务/依赖顺序分批** stage 并 commit，每批只含一组逻辑相关的可复现源码。
+
+**每批应包含（按任务类型取子集）**：
+
+| 类别 | 路径示例 | 策略 |
+|------|----------|------|
+| 算法实现 | `algos/epXX_*/` 源码、`pyproject.toml`、`uv.lock`、测试 | ✅ track |
+| 共享核心 | `core/src/thermal_core/`、`scripts/` | ✅ track |
+| Notebook 源码 | `notebooks/epXX_*/fragments/`、`manifest.txt` | ✅ track |
+| 配置 | `configs/`、`algos/*/configs/` | ✅ track |
+| 正式报告 | `reports/`、`research_log/episodes/` | ✅ track |
+| 算法变更日志 | `research_log/algorithm_changelog.md` | ✅ track（SR 算法改动后回填） |
+| 合成引擎 | `tcforge/src/`、`tcforge/tests/`、`tcforge/uv.lock` | ✅ track |
+| Cache 模块 | `core/src/thermal_core/ep*_cache.py`、`scripts/build_*_cache.py` | ✅ track（**源码**，不是产物） |
+
+**每批不得包含**：
+
+| 类别 | 路径示例 | 原因 |
+|------|----------|------|
+| 原始/预处理数据 | `data/` | 太大，手动拷贝 |
+| 实验产物 | `output/`、`outputs/`、`algos/*/outputs/` | 由 notebook/脚本重建 |
+| Notebook 构建物 | `notebooks/**/*.ipynb` | 由 `fragments/` 重建 |
+| 临时工作区 | `tmp/` | brief、smoke 对照 NPY/PNG/CSV |
+| 草稿/提示词 | `todos/`、`notebooks/**/Untitled` | 非正式交付 |
+| 训练权重 | `checkpoints/`、`*.pt`、`*.pth` | 可重新训练 |
+| 虚拟环境 | `.venv/`、`algos/*/.venv/` | `uv sync` 重建 |
+| Python 缓存 | `__pycache__/`、`.pytest_cache/` | 自动生成 |
+
+**推荐分批顺序**（有依赖时按此提交，每步一个 commit）：
+
+1. 项目规范与 `.gitignore`（含 `outputs/`、`tmp/` 等 ignore 规则）
+2. Core 基础设施（`ep01.py`–`ep05.py`、`viz.py`、`plotting.py` + `*_cache.py` + `build_*_cache.py`）
+3. tcforge 扩展（与 EP07/EP12/EP13/EP14 训练池相关的新模块）
+4. 按 EP 顺序：EP09 → EP01–EP08 缓存化迁移 → EP07 UNet → EP10 → EP11 → EP12 → EP13 → EP14 → EP15
+5. `research_log/algorithm_changelog.md`（SR 相关批次完成后回填）
+
+**提交前检查清单**：
+
+```bash
+git status --ignored          # 确认 tmp/output/data/.ipynb 未被 stage
+git diff --cached --stat      # 确认本批只有预期文件
+# 各 algo 若有 uv.lock，必须与源码同批提交
+```
 
 ### 🚀 新机器部署（Git 迁移）
 
@@ -293,6 +396,7 @@ X 和 Y 只能取 `{0,2,4,6,8,10,12,14,16,18,20,24,28,32,36,40}`，R 只能取 `
 - 完整规范: → `docs/plotting_standards.md`
 - Python 模块: → `from thermal_core.plotting import setup_academic_style, savefig_academic`
 - **绝不使用** sans-serif 字体、`"jet"` colormap、`dpi < 300`
+- **Jupyter Notebook 预览清晰度保障**：`setup_academic_style()` 中默认已包含对 IPython `InlineBackend` 的 retina 超分辨率配置（`figure_format = 'retina'`），保证 Notebook 内联渲染清晰无锯齿。在 Notebook 中使用 `IPython.display.Image` 加载并展示磁盘上的 300 dpi 已保存图片时，必须使用 `retina=True` 选项（例如 `NotebookImage(filename=path, retina=True)`），以确保其以高清超采样格式显示且物理大小合适。
 - 解释 detector pitch / spatial resolution / SR output grid 区别时，优先使用 `thermal_core.ep03.plot_sampling_resolution_diagram()` 生成同一物理距离轴示意图；示意图关键物理量注解使用 9 pt，完整用法见 `docs/plotting_standards.md` 的 Resolution-Distinction Diagram Standard。
 
 ---

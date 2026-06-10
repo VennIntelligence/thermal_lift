@@ -13,20 +13,21 @@
 | 项目 | 当前值 / 结论 |
 |---|---|
 | TXT 温度矩阵 | 263 帧，全部 480 x 640 |
-| 主扫描 session | 255 帧，`is_main_session=True`，后续 SR 默认只用这一段 |
+| 原始主扫描 session | 255 帧，`session=2`，保留为物理温度段诊断 |
+| Clean SR 默认输入 | 248 帧，`is_sr_usable=True` / `is_main_session=True`，剔除 `R != 0` 重复/补采帧 |
 | TXT 采样 pitch | 10 um/pixel，BMP mm 标尺确认 |
 | 当前空间分辨率 | 20 um，已校准；不是 TXT 像素 pitch |
 | 目标提升 | 先做 2x contour-level POC，再评估更高倍率 |
 | 坐标集合 | `{0,2,4,6,8,10,12,14,16,18,20,24,28,32,36,40}` um |
 | stage-command 范围 | 40 um = 4.0 px 命令向量幅值，作为 prior / 初始化 / 约束 |
-| 相位覆盖 | 255 主帧在 2x SR 四个相位格中分布均匀，当前采样量足够做 2x POC |
+| 相位覆盖 | 248 clean SR 帧在 2x SR 四个相位格中分布均匀，当前采样量足够做 2x POC |
 | 温度段 | 3 个温度段；跨 session 不混合 |
 | AVI | 只作方向和命名诊断，不作 SR 输入 |
 
 ## 3. 数据使用规则
 
-1. 任何位移、session、时间线分析都必须使用 `output/ep01_data_processing/frame_audit.csv` 中的 `acquisition_order`、`session`、`is_main_session`。
-2. SR 和 contour-level POC 默认只使用 255 帧主 session。
+1. 任何位移、session、时间线分析都必须使用 `output/ep01_data_processing/frame_audit.csv` 中的 `acquisition_order`、`session`、`is_sr_usable`、`is_main_session`。
+2. SR 和 contour-level POC 默认只使用 248 帧 clean SR set；255 帧主 session 只作为原始物理温度段诊断事实。
 3. 文件名 X/Y 坐标是命令坐标和相位 prior，不是最终对齐真值。
 4. 实际对齐必须由数据驱动方法约束：NCC init、filename affine prior、EP04/EP05 contour anchor、held-out edge residual、split-half consistency。
 5. BMP 是配套可视化和定性 overlay 参考；SR 输入以 TXT 温度矩阵为准。
@@ -36,7 +37,7 @@
 ### Phase A: 数据基线
 
 - 确认 EP01 frame audit 可重建。
-- 确认主 session 255 帧、TXT/BMP 配对、缺失坐标和温度漂移。
+- 确认原始主 session 255 帧、clean SR 默认输入 248 帧、TXT/BMP 配对、缺失坐标和温度漂移。
 - 保留 AVI 诊断脚本，但不让 AVI 进入 SR 输入链路。
 
 ### Phase B: Alignment Baseline
