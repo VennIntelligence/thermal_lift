@@ -131,6 +131,8 @@ CRB sensitivity scan 覆盖：
 
 `phase_coverage` 是局部 ESF 理论模型里的抽象已知相位覆盖，不是 stage command 真值，也不是 EP03 的位移标定。
 
+`255 frames` 列保留为 EP03 初始理论敏感性网格中的历史采样量参考；当前真实数据 SR 默认输入仍是剔除 `R != 0` 后的 248 帧 clean set。
+
 代表性 `DeltaT=0.7 C` CRB：
 
 | Sigma | Phase coverage | 1 frame | 4 frames | 16 frames | 64 frames | 255 frames |

@@ -61,6 +61,10 @@ MTF x SNR representative values:
 
 CRB sensitivity representative values for `DeltaT=0.7 C`:
 
+> Note: the `255 frames` column is retained as the original EP03 theoretical
+> sensitivity grid tied to the raw main-session count. Current real-data SR
+> default input remains the 248-frame clean set after repeat exclusion.
+
 | Sigma | Phase coverage | 1 frame | 4 frames | 16 frames | 64 frames | 255 frames |
 |---:|---:|---:|---:|---:|---:|---:|
 | 0.35 px | 0.0 px | 0.1286 | 0.0643 | 0.0321 | 0.0161 | 0.0081 |

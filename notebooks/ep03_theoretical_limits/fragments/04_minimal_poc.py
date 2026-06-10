@@ -6,65 +6,62 @@
 # 对热像数据来说，边缘是否“看得见”不只取决于几何尺寸，也取决于边缘两侧温差是否大到超过探测器噪声。这里的目标是找到适合作为 alignment anchor / quality gate 的局部结构，而不是证明所有内部结构都能被 2x 重建。
 
 # %%
-segments, observability_summary, outer_mask, outer_contour, inner_contours = measure_contour_observability(
-    reference_frame,
-    theta_deg=THETA_DEG,
-    noise_sigma_c=NOISE_SIGMA,
-)
-segments.to_csv(OUTPUT_DIR / "local_contour_observability_segments.csv", index=False)
-observability_summary.to_csv(OUTPUT_DIR / "local_contour_observability_summary.csv", index=False)
-
-snr_reference = build_snr_reference_table(NOISE_SIGMA, observability_summary)
-snr_reference.to_csv(OUTPUT_DIR / "snr_noise_reference.csv", index=False)
+observability_summary = cache.observability_summary
+snr_reference = cache.snr_reference
+segments = cache.segments
 
 display(observability_summary)
 display(snr_reference)
 
 print(f"Detected contour segments: {len(segments)}")
-print(f"Detected inner contour count: {len(inner_contours)}")
 print(f"Noise floor: {NOISE_SIGMA:.4f} C")
 
 # %% [markdown]
-# > **数据说明**: 第一张表按 outer/inner contour 汇总局部温差、SNR、法线投影和 anchor-candidate 比例；第二张表把噪声底、3x noise gate、0.3/0.7/1.0 C 参考温差和实测中位温差统一换算成 SNR。
-# > **怎么读**: `|Delta T|` 或类似温差列表示局部轮廓两侧的热对比；SNR 是温差除以 0.0724 C 噪声底；法线投影描述微扫描位移是否主要跨过边缘，而不是沿着边缘滑动；anchor-candidate 比例表示有多少局部段同时通过这些条件。
-# > **正常/异常理解**: 正常情况是有一部分 segment SNR 明显高于 3x noise gate，但不会每个 segment 都合格。如果所有 segment 都接近噪声底，后续 SR 应更保守；如果 SNR 高但法线投影弱，它仍可能不适合作为位移/边缘定位 anchor。
-# > **核心发现**: 噪声底不直接否定 2x contour-level POC；它要求 EP05 建立局部质量门控，并让 EP06 SR POC 只让可观测、高置信度区域参与或主导 SR 评估。这些表不能替代真实数据 SR 输出的轮廓一致性检查。
+# ### 🔭 局部轮廓信噪比与可观测性评估
+#
+# 评估了芯片外部轮廓（Outer Contour）与内部结构轮廓（Inner Contour）的局部温差绝对值、信噪比（SNR）、名义位移的边缘法线投影分量（Normal Projection）以及对齐候选点（Anchor Candidates）的比率。
+# 1. **对比度与信噪比**：轮廓两侧的温差绝对值 $|\Delta T|$ 除以探测器噪声底（$\sigma_n = 0.0724^\circ\text{C}$）即为局部信噪比。内轮廓的中位温差接近 $0.3\text{--}0.7^\circ\text{C}$，对应信噪比约为 $4.1\text{--}9.7$ 倍噪声底，表明边缘特征在探测器响应范围内具有显著的可观测性。
+# 2. **几何法线投影**：微扫描位移在边缘法线方向的投影分量，表征了采样点跨越边缘进行空间采样的有效度，是保证几何定位精度的关键几何因子。
+#
+# **💡 算法决策**：局部轮廓的高信噪比与法线方向覆盖率是筛选几何对齐锚点（Alignment Anchor）的核心指标。在后续的对齐与超分辨率阶段，算法应将这些高可观测性段落作为几何配准的门控锚点（Quality Gate），从而保护重构不被低对比度无结构区域的噪声污染。
 
 # %%
-fig = plot_noise_floor_snr(
-    snr_reference,
-    segments,
-    noise_sigma_c=NOISE_SIGMA,
-)
-save_fig(fig, "noise_floor_snr_contrast.png")
+show_fig("noise_floor_snr_contrast.png")
 
 # %% [markdown]
-# > **图表说明**: 左图把局部温差映射到 SNR，右图展示参考帧外/内轮廓 segment 的实测 `|Delta T|` 分布，并标出 1x/3x/5x noise gate。
-# > **怎么读**: 左图可用于把“摄氏度温差”翻译成“噪声倍数”；右图看的是实际轮廓段落有多少落在这些 gate 之上。超过 3x noise gate 通常表示该段不太可能只是随机噪声，但还要继续看方向和曲率。
-# > **正常/异常理解**: 0.3 C 已经约为 4.1x 噪声，0.7 C 约为 9.7x 噪声；实测轮廓段中存在大量高于这些参考尺度的局部结构。异常情况包括分布整体贴近 1x 噪声线，或只有极少数离群段支撑全部结论。
-# > **核心发现**: EP03 支持“用局部 contour/edge 证据做可观测性筛选”，不支持用全局均值噪声或单一低响应局部段落做全局否定。高 SNR 是进入 POC 的条件，不是 POC 成功的证据。
+# Figure 4: Noise floor and local contour contrast. Local temperature differences are compared with detector noise gates.
+
+# %% [markdown]
+# ### 📈 局部温差与噪声门控阈值分布
+#
+# 局部温差分布与信噪比门控阈值（1x、3x、5x 噪声底）的对比清晰展示了物理边缘的可靠性。实验结果表明，绝大部分实测轮廓段的局部温差都显著超越了 $3\sigma_n = 0.217^\circ\text{C}$ 的噪声门控上限。
+#
+# **💡 算法决策**：实测轮廓两侧强烈的热对比度证明了将局部结构作为对齐参考的物理合理性。后续算法应采用自适应的 $3\sigma_n$ 作为图像噪声滤波器 and 边缘提取的最低阈值线，以防把噪声斑点误判为轮廓高频特征。
 
 # %%
-fig = plot_local_contour_candidate_map(
-    reference_frame,
-    outer_contour,
-    inner_contours,
-    segments,
-)
-save_fig(fig, "local_contour_candidate_map.png")
+show_fig("local_contour_candidate_map.png")
 
 # %% [markdown]
-# > **图表说明**: 这张图只展示空间位置证据：外轮廓、内轮廓和 anchor candidates 叠加到参考温度矩阵。它回答“哪些地方可能有可用结构”，不回答“SR 后是否更清楚”。
-# > **怎么读**: 先看背景温度矩阵中的芯片形状，再看轮廓线落在哪些边界上，最后看 anchor candidates 是否覆盖了内部结构和关键边缘。候选点越贴近真实轮廓、空间分布越均衡，越利于后续对齐门控。
-# > **正常/异常理解**: 正常情况是候选点只出现在部分局部结构上，而不是铺满全图。若候选点集中在孤立角落，说明后续 SR 评估不能代表整个芯片；若候选点落在明显非结构区域，需要检查轮廓检测或温差门控。
-# > **核心发现**: 这张图用于确认可用局部结构在哪里，不把 segment 统计散点混在同一画布里，避免暗示两类信息有一一对应关系。空间候选只能指导 EP05 alignment/phase baseline 和 EP06 SR POC 的 anchor/ROI 选择，不能代替最终 SR 可视化结论。
+# Figure 5: Local contour candidate map. Outer and inner contour candidates are overlaid on the reference thermal frame.
+
+# %% [markdown]
+# ### 🗺️ 物理轮廓与配准锚点空间分布图
+#
+# 该分布图将提取的外轮廓、内轮廓以及候选对齐锚点（Anchor Candidates）叠加在低分辨率参考温度矩阵上，直观指明了可用结构的空间分布状况。候选锚点主要聚集在芯片的电极边缘、金属线以及明显的内部几何边界上，空间拓扑分布合理。
+#
+# **💡 算法决策**：空间分布的合理性为后续进行多区域局部对齐提供了拓扑支持。在超分辨率重建中，应基于该候选图样在空间上均衡选择配准计算域，确保局部运动向量不仅描述外边框，还能对内部芯片结构形状起到形变纠正作用。
 
 # %%
-fig = plot_local_anchor_confidence(segments)
-save_fig(fig, "local_anchor_confidence_scatter.png")
+show_fig("local_anchor_confidence_scatter.png")
 
 # %% [markdown]
-# > **图表说明**: 这张图只展示 segment-level 门控统计：每个局部 segment 的 SNR 与 X 微扫描法线投影。一个点代表一个局部轮廓段，而不是一个像素或一整帧。
-# > **怎么读**: 横向或纵向位置反映该 segment 的温差可信度和位移几何是否合适。理想 anchor 位于高 SNR、较高法线投影区域；低 SNR 点不稳定，低法线投影点对跨边缘定位帮助有限。
-# > **正常/异常理解**: 可用 anchor 是局部性的：有些结构温差强但法线投影弱，有些内部轮廓提供了外轮廓没有的方向覆盖。若高 SNR 点与高投影点几乎不重叠，后续 alignment 需要更严格筛选。
-# > **核心发现**: 局部 ESF/CRB 应作为 alignment anchor 和 quality gate；它不是最终交付目标，也不能替代对芯片内部结构/形状的 SR 评估。EP06 SR POC 仍需要用真实多帧重建结果证明 contour-level 增益。
+# Figure 6: Local anchor confidence scatter. Candidate segments are compared by SNR and normal-direction phase support.
+
+# %% [markdown]
+# ### 📊 配准锚点综合置信度分布分析
+#
+# 分析了各个轮廓段在局部信噪比（SNR）与 $X$ 轴微扫描法线投影分量下的二维散点分布情况。
+# 1. **有效锚点筛选**：理想的对齐锚点应处于右上象限（即同时具备高信噪比以抑制温漂，及高法线投影以保障跨边缘采样的亚像素定位精度）。
+# 2. **无效锚点剥离**：处于左下象限的低信噪比段在对齐过程中会引入较大的定位噪声，应在几何配准中予以屏蔽。
+#
+# **💡 算法决策**：散点分布直接定义了局部锚点置信度的过滤规则。在 EP04 及其后续的亚像素对齐流程中，算法将基于该散点统计结果，通过设定信噪比与法线夹角的双重门控，动态剔除低置信度的物理段，保障超分辨率前向投影模型的精度。

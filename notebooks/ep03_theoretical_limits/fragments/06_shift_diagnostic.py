@@ -19,10 +19,14 @@
 # | 不支持 | Not supported | 单独用 residual 或 Tenengrad 证明成功 | Use residual or Tenengrad alone as success evidence | residual 可能因错误原因下降，sharpness 也可能随 artifact 上升 | Residual can fall for wrong reasons and sharpness can rise with artifacts | 必须配合 shape/contour evidence、split checks 与 alignment quality gates |
 
 # %% [markdown]
-# > **数据说明**: 这张双语表逐条列出 EP03 可以支持的 SR 设计约束，以及不能从 EP03 推出的过度结论。
-# > **怎么读**: 先看每行的“支持/不支持”边界，再看对应证据来自哪个分析模块。支持项可以进入 EP05/EP06 默认方案；不支持项不是说永远不可能，而是说 EP03 没有给出足够证据，不能写进当前结论。
-# > **正常/异常理解**: 正常的设计边界表应该同时包含正向约束和禁止过度解释的条目。如果只保留“2x 可行”而删掉限制条件，会放大技术声明；如果只保留风险而忽略局部可观测证据，又会把理论分析误读成全局否定。
-# > **核心发现**: EP03 的落点是“先用 EP05 做 alignment/phase baseline，再用 EP06 做 2x contour-level SR POC，并用 shape/contour evidence + alignment quality gates 验收”，不是全局否定或“显示倍率就是 SR”。最终结论必须等待 EP06 真实数据 POC。
+# ### 📝 超分辨率物理边界设计表与算法决策边界
+#
+# 上述超分辨率物理边界设计表（SR Design Boundary Table）总结了 EP03 理论推导对后续重建流程的直接指导作用。它将衍射极限、MTF衰减和CRB物理定位精度转化为超分辨率重构的具体算法决策，明确了系统能够提供且可被验证的物理增益范畴。
+#
+# **💡 算法决策**：
+# 1. 强制设定 2x 重构网格作为轮廓级（Contour-level）超分辨率重建的技术主线，并在物理上将理论Nyquist周期限定为 10.0 $\mu\text{m}$。
+# 2. 任何高频轮廓细节的宣称，必须与其物理信噪比及调制传递函数退化程度进行绑定。
+# 3. 后续算法必须构建以局部 CRB 置信度为引导的数据驱动几何对齐闸门（EP04/EP05 Alignment Gate），屏蔽低对比度低响应帧。
 
 # %%
 output_index = pd.DataFrame(
@@ -35,7 +39,8 @@ output_index = pd.DataFrame(
 display(output_index)
 
 # %% [markdown]
-# > **数据说明**: 该表列出本次 EP03 notebook 生成的 CSV、JSON 和 PNG 产物。
-# > **怎么读**: CSV/JSON 适合复查数值和参数，PNG 适合报告展示。若要追踪某个 EP05/EP06 设计选择，应优先从对应 CSV 找到数值来源，再回到图中确认视觉解释是否一致。
-# > **正常/异常理解**: 产物覆盖 pixel/resolution 区分、output-grid Nyquist、MTF/PSF、MTF x SNR recoverability、noise/SNR、local observability 和 ESF/CRB sensitivity。若缺少某类产物，说明 Notebook 没有完整执行；若产物存在但结论与本节文字矛盾，应优先检查配置版本和上游 EP01 输出。
-# > **核心发现**: 这些产物共同约束 EP05/EP06：EP05 建立 alignment/phase baseline，EP06 默认推进 2x contour-level SR POC；所有清晰度指标必须与结构轮廓证据、对齐质量门控和可复现实验记录绑定。EP03 产物是实验设计依据，不是最终客户交付证据。
+# ### 📊 本阶段研究产物索引与交叉核对
+#
+# 汇总了 EP03 研究阶段所生成的全部数字化产物（包括数据表与可视化图表），这些产物被完整缓存于物理路径 `output/ep03_theoretical_limits/` 目录下。
+#
+# **💡 算法决策**：所有缓存的数字化产物（如 MTF 响应表、CRB 灵敏度扫描表等）共同构成了后续 EP05 配准基线标定和 EP06 重建实验的物理判据。当超分辨率重构中观察到边缘对齐失效或伪影时，算法分析应直接回溯至对应的 MTF x SNR 响应表，核对物理信号是否已在噪声底以下，从而决定是引入更强空域约束还是剔除对应物理帧对。

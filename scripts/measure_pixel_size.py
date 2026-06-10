@@ -287,6 +287,27 @@ def contour_to_mm(contour: np.ndarray, *, pixel_size_um: float, detector_rows: i
     return x_mm, y_mm
 
 
+def find_corners(contour: np.ndarray, theta_deg: float = 47.6) -> list[int]:
+    """Find indices of the 4 outer corner points of the rotated square contour."""
+    contour_cartesian = contour.copy()
+    contour_cartesian[:, 1] = -contour_cartesian[:, 1]
+    
+    theta_rad = np.radians(theta_deg)
+    angles = [
+        theta_rad - np.pi / 4,
+        theta_rad + np.pi / 4,
+        theta_rad + 3 * np.pi / 4,
+        theta_rad - 3 * np.pi / 4,
+    ]
+    
+    corners_idx = []
+    for angle in angles:
+        d = np.array([np.cos(angle), np.sin(angle)])
+        proj = contour_cartesian[:, 0] * d[0] + contour_cartesian[:, 1] * d[1]
+        corners_idx.append(np.argmax(proj))
+    return corners_idx
+
+
 def make_visualization(
     bmp_rgb: np.ndarray,
     frame: np.ndarray,
@@ -307,7 +328,6 @@ def make_visualization(
 
     ax = axes[0]
     ax.imshow(bmp_rgb, origin="upper")
-    ax.set_title("BMP export with mm axes")
     ax.set_axis_off()
     rect = patches.Rectangle(
         (raster.x0 - 0.5, raster.y0 - 0.5),
@@ -315,14 +335,14 @@ def make_visualization(
         raster.height,
         fill=False,
         edgecolor="#C44E52",
-        linewidth=1.1,
+        linewidth=2.0,
     )
     ax.add_patch(rect)
     ax.plot(
         bmp_contour[:, 0] + raster.x0,
         bmp_contour[:, 1] + raster.y0,
         color="#55A868",
-        linewidth=0.8,
+        linewidth=1.5,
     )
     ax.scatter(scale.x_ticks_px, np.full_like(scale.x_ticks_px, raster.bottom_spine_y + 3.0), s=8, c="#4C72B0")
     ax.scatter(np.full_like(scale.y_ticks_px, raster.left_spine_x - 4.0), scale.y_ticks_px, s=8, c="#4C72B0")
@@ -336,13 +356,48 @@ def make_visualization(
         aspect="equal",
     )
     x_mm, y_mm = contour_to_mm(txt_contour, pixel_size_um=pixel_size_um, detector_rows=detector_rows)
-    ax.plot(x_mm, y_mm, color="#55A868", linewidth=0.8)
-    ax.set_title(f"TXT matrix, {pixel_size_um:.3f} um/pixel")
+    ax.plot(x_mm, y_mm, color="#55A868", linewidth=1.5)
     ax.set_xlabel("X (mm)")
     ax.set_ylabel("Y (mm)")
     ax.set_xlim(0.0, fov_x_mm)
     ax.set_ylim(0.0, fov_y_mm)
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02, label="Temperature (Celsius)")
+
+    # Find matching corner points to show correspondence
+    bmp_corners_idx = find_corners(bmp_contour, theta_deg=47.6)
+    txt_corners_idx = find_corners(txt_contour, theta_deg=47.6)
+
+    # Plot connecting lines and highlight points on both axes
+    for b_idx, t_idx in zip(bmp_corners_idx, txt_corners_idx):
+        p_bmp = bmp_contour[b_idx]
+        p_txt = txt_contour[t_idx]
+        
+        # Left subplot (pixel coords)
+        x_left = p_bmp[0] + raster.x0
+        y_left = p_bmp[1] + raster.y0
+        
+        # Right subplot (mm coords)
+        x_right = (p_txt[0] + 0.5) * pixel_size_mm
+        y_right = fov_y_mm - (p_txt[1] + 0.5) * pixel_size_mm
+        
+        # Draw red dot markers
+        axes[0].scatter(x_left, y_left, color="#C44E52", s=18, zorder=5)
+        axes[1].scatter(x_right, y_right, color="#C44E52", s=18, zorder=5)
+        
+        # Connect the points across subplots
+        con = patches.ConnectionPatch(
+            xyA=(x_left, y_left),
+            xyB=(x_right, y_right),
+            coordsA="data",
+            coordsB="data",
+            axesA=axes[0],
+            axesB=axes[1],
+            color="#C44E52",
+            linestyle="--",
+            linewidth=0.9,
+            alpha=0.6,
+        )
+        fig.add_artist(con)
 
     return savefig_academic(fig, output_path)
 
