@@ -29,7 +29,30 @@
 
 ## M2 结论（FRC 信息截止）
 
-（由下游 agent 回填）
+**结论**: 负面结果 / RISK。phase-stratified split-half FRC 的 1/7 截止周期为 **17.03 µm**（3 seeds std **0.50 µm**），half-bit 截止同为 **17.03 µm**；这大于 16 µm，说明实测可相干信息少于 11-14 µm 理论预期。10 µm 孔径零点没有形成可信下陷（10 µm FRC 反而约 0.935，dip margin = -0.390），因此本轮 FRC 不支持把 4x/5x 表达网格解释为 10-14 µm 真实物理信息。按该 cutoff 给后续训练的去卷积目标建议为 `sigma_target_02=0.486 LR px`（MTF=0.2）和 `sigma_target_03=0.421 LR px`（MTF=0.3）。
+
+关键频带读数（主 FRC）：
+
+| 周期 | FRC |
+|---:|---:|
+| 20 µm | 0.348 |
+| 16 µm | 0.138 |
+| 14 µm | 0.098 |
+| 12 µm | 0.593 |
+| 11 µm | 0.877 |
+| 10 µm | 0.935 |
+| 9 µm | 0.816 |
+| 8 µm | 0.545 |
+
+对照组没有完全符合预期，必须视为本次测量的风险信号而不是美化掉：bicubic 阳性对照没有表现为预期的更低频截止（以周期表示反而为 13.58 µm，小于主曲线 17.03 µm）；shift-shuffle 阴性对照在 8-12 µm 的 median FRC 为 0.504，没有崩到 0；按采集顺序前后半的 drift control cutoff 为 26.20 µm，明显差于分层版。结合 M1 中 `contour_refined` detector-axis 5x bin 只覆盖 11/25，以及本次 drizzle 平均 zero coverage 约 27.18%，高频回升更可能混入了 coverage/lattice artifacts 和热漂移，而不是稳健的物理孔径零点证据。
+
+产物：
+
+- `output/ep15_info_limit/m2_frc/frc_curve.png`
+- `output/ep15_info_limit/m2_frc/frc_curve.csv`
+- `output/ep15_info_limit/m2_frc/frc_controls.png`
+- `output/ep15_info_limit/m2_frc/frc_summary.json`
+- `output/ep15_info_limit/m2_frc/frc_band_table.csv`
 
 ## M3 结论（σ 仲裁）
 

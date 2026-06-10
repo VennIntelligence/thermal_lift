@@ -17,3 +17,11 @@ uv run python scripts/run_m1_phase_structure.py
 ```
 
 Outputs are written to `output/ep15_info_limit/m1_phase_structure/`.
+
+## M2 FRC Information Cutoff
+
+```bash
+uv run python scripts/run_m2_frc.py
+```
+
+Outputs are written to `output/ep15_info_limit/m2_frc/`.
