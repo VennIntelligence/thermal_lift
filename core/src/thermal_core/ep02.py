@@ -11,7 +11,7 @@ import pandas as pd
 from matplotlib.collections import LineCollection
 
 from thermal_core.displacement import coordinate_to_shift
-from thermal_core.plotting import METHOD_COLOR_LIST, make_figure, savefig_academic
+from thermal_core.plotting import METHOD_COLOR_LIST, make_figure, savefig_academic, setup_academic_style
 
 
 EP02_DIRNAME = "ep02_displacement_calibration"
@@ -41,7 +41,18 @@ def ep02_output_dir(project_root: Path) -> Path:
     return path
 
 
-def main_session(frame_audit: pd.DataFrame, session_id: int = 2) -> pd.DataFrame:
+def _bool_mask(series: pd.Series) -> pd.Series:
+    if series.dtype == bool:
+        return series
+    if pd.api.types.is_bool_dtype(series):
+        return series.astype(bool)
+    if pd.api.types.is_numeric_dtype(series):
+        return series.astype(float).ne(0.0)
+    return series.astype(str).str.lower().isin({"true", "1", "yes", "y"})
+
+
+def raw_main_session(frame_audit: pd.DataFrame, session_id: int = 2) -> pd.DataFrame:
+    """Return the raw physical main temperature segment before repeat exclusion."""
     return (
         frame_audit[frame_audit["session"].eq(session_id)]
         .sort_values("acquisition_order")
@@ -49,13 +60,33 @@ def main_session(frame_audit: pd.DataFrame, session_id: int = 2) -> pd.DataFrame
     )
 
 
-def main_raster_r0(frame_audit: pd.DataFrame, session_id: int = 2) -> pd.DataFrame:
+def clean_sr_input(frame_audit: pd.DataFrame, session_id: int = 2) -> pd.DataFrame:
+    """Return the repeat-excluded default SR input set.
+
+    EP01 defines `is_sr_usable` as the primary downstream gate.  The older
+    `is_main_session` flag is now a compatibility alias for the same clean set.
+    """
+    for column in ("is_sr_usable", "is_clean_main_session", "is_main_session"):
+        if column in frame_audit.columns:
+            return (
+                frame_audit[_bool_mask(frame_audit[column])]
+                .sort_values("acquisition_order")
+                .reset_index(drop=True)
+            )
     return (
-        main_session(frame_audit, session_id=session_id)
-        .query("R == 0")
+        frame_audit[frame_audit["session"].eq(session_id) & frame_audit["R"].astype(int).eq(0)]
         .sort_values("acquisition_order")
         .reset_index(drop=True)
     )
+
+
+def main_session(frame_audit: pd.DataFrame, session_id: int = 2) -> pd.DataFrame:
+    """Compatibility wrapper: EP02's default main input is clean SR input."""
+    return clean_sr_input(frame_audit, session_id=session_id)
+
+
+def main_raster_r0(frame_audit: pd.DataFrame, session_id: int = 2) -> pd.DataFrame:
+    return clean_sr_input(frame_audit, session_id=session_id)
 
 
 def add_stage_prior(
@@ -92,88 +123,15 @@ def plot_raster_acquisition_path(
     frame_audit: pd.DataFrame,
     output_path: Path,
 ) -> plt.Figure:
-    """Plot the main-session raster path and coordinate timelines."""
+    """Plot the main-session raster coordinate timelines."""
     raster = main_raster_r0(frame_audit)
     if raster.empty:
-        raise ValueError("No session=2, R=0 raster frames found.")
+        raise ValueError("No clean SR raster frames found; expected is_sr_usable == True.")
 
-    fig, axes = make_figure("double_col", nrows=2, ncols=2, height=4.2)
-    ax_path, ax_cov, ax_x, ax_y = np.asarray(axes).ravel()
+    fig, axes = make_figure("double_col", nrows=1, ncols=2, height=2.8)
+    ax_x, ax_y = np.asarray(axes).ravel()
 
-    points = raster[["X", "Y"]].to_numpy(float)
     orders = raster["acquisition_order"].to_numpy(float)
-    segments = np.stack([points[:-1], points[1:]], axis=1)
-    same_row = raster["Y"].to_numpy()[:-1] == raster["Y"].to_numpy()[1:]
-    seg_order = (orders[:-1] + orders[1:]) / 2.0
-
-    for mask, linewidth, linestyle, label in [
-        (same_row, 1.2, "-", "within-row X step"),
-        (~same_row, 1.0, "--", "row transition"),
-    ]:
-        if np.any(mask):
-            collection = LineCollection(
-                segments[mask],
-                cmap="viridis",
-                linewidths=linewidth,
-                linestyles=linestyle,
-                alpha=0.92,
-                label=label,
-            )
-            collection.set_array(seg_order[mask])
-            collection.set_clim(orders.min(), orders.max())
-            ax_path.add_collection(collection)
-
-    sc = ax_path.scatter(
-        raster["X"],
-        raster["Y"],
-        c=orders,
-        cmap="viridis",
-        s=15,
-        zorder=3,
-        edgecolor="none",
-    )
-    ax_path.scatter(raster.iloc[0]["X"], raster.iloc[0]["Y"], marker="*", s=95, color="#222222", zorder=4)
-    ax_path.scatter(raster.iloc[-1]["X"], raster.iloc[-1]["Y"], marker="X", s=60, color=METHOD_COLOR_LIST[2], zorder=4)
-    ax_path.plot([], [], color="#555555", ls="-", lw=1.2, label="X step")
-    ax_path.plot([], [], color="#555555", ls="--", lw=1.0, label="row jump")
-    ax_path.set_title("Raster Path by Acquisition Order")
-    ax_path.set_xlabel("Stage X [um]")
-    ax_path.set_ylabel("Stage Y [um]")
-    ax_path.set_xlim(-2, 42)
-    ax_path.set_ylim(-2, 42)
-    ax_path.set_aspect("equal", adjustable="box")
-    ax_path.grid(alpha=0.22)
-    ax_path.legend(loc="lower right", fontsize=7)
-    cbar = fig.colorbar(sc, ax=ax_path, fraction=0.045, pad=0.02)
-    cbar.set_label("Acquisition order", fontsize=8)
-
-    x_vals = sorted(raster["X"].unique())
-    y_vals = sorted(raster["Y"].unique())
-    coverage = (
-        raster.pivot_table(index="Y", columns="X", values="file", aggfunc="count")
-        .reindex(index=y_vals, columns=x_vals)
-        .fillna(0)
-    )
-    ax_cov.imshow(coverage.to_numpy(), origin="lower", cmap="Greys", vmin=0, vmax=1.2, aspect="auto")
-    missing = np.argwhere(coverage.to_numpy() == 0)
-    for yi, xi in missing:
-        ax_cov.scatter(xi, yi, marker="x", s=35, color=METHOD_COLOR_LIST[2], lw=1.1)
-    ax_cov.set_title("R=0 Grid Coverage")
-    ax_cov.set_xlabel("Stage X [um]")
-    ax_cov.set_ylabel("Stage Y [um]")
-    ax_cov.set_xticks(np.arange(len(x_vals))[::3])
-    ax_cov.set_xticklabels([int(v) for v in x_vals[::3]])
-    ax_cov.set_yticks(np.arange(len(y_vals))[::3])
-    ax_cov.set_yticklabels([int(v) for v in y_vals[::3]])
-    ax_cov.text(
-        0.03,
-        0.96,
-        f"{int(coverage.to_numpy().sum())}/{coverage.size} R=0 points",
-        transform=ax_cov.transAxes,
-        va="top",
-        fontsize=8,
-        bbox={"boxstyle": "round,pad=0.22", "facecolor": "white", "edgecolor": "#dddddd", "alpha": 0.95},
-    )
 
     ax_x.plot(orders, raster["X"], color=METHOD_COLOR_LIST[0], marker="o", ms=2.0, lw=1.0)
     ax_x.set_title("X Timeline")
@@ -188,13 +146,13 @@ def plot_raster_acquisition_path(
     ax_y.set_ylabel("Y [um]")
     ax_y.grid(axis="y", alpha=0.3)
 
-    fig.suptitle("EP02 Raster Acquisition Path", fontsize=11, fontweight="bold")
     savefig_academic(fig, output_path)
     return fig
 
 
 def raster_summary(frame_audit: pd.DataFrame) -> pd.DataFrame:
-    main = main_session(frame_audit)
+    raw_main = raw_main_session(frame_audit)
+    main = clean_sr_input(frame_audit)
     raster = main_raster_r0(frame_audit)
     x_transitions = (
         (raster["Y"].to_numpy()[:-1] == raster["Y"].to_numpy()[1:])
@@ -203,11 +161,13 @@ def raster_summary(frame_audit: pd.DataFrame) -> pd.DataFrame:
     row_transitions = raster["Y"].to_numpy()[:-1] != raster["Y"].to_numpy()[1:]
     return pd.DataFrame(
         [
-            ("main session frames", len(main), "session=2 only"),
-            ("R=0 raster frames", len(raster), "primary step-and-shoot grid"),
+            ("default main input frames", len(main), "is_sr_usable=True clean input"),
+            ("raw main session frames", len(raw_main), "session=2 before repeat exclusion"),
+            ("clean SR input frames", len(main), "is_sr_usable=True after repeat exclusion"),
+            ("R=0 raster frames", len(raster), "clean primary step-and-shoot grid"),
             ("within-row X transitions", int(np.sum(x_transitions)), "time-adjacent motion"),
             ("row transitions", int(np.sum(row_transitions)), "Y advance plus X reset"),
-            ("unique coordinates", main[["X", "Y"]].drop_duplicates().shape[0], "filename coordinate coverage"),
+            ("unique coordinates", main[["X", "Y"]].drop_duplicates().shape[0], "clean coordinate coverage"),
         ],
         columns=["metric", "value", "interpretation"],
     )
@@ -250,9 +210,12 @@ def plot_stage_prior_coverage(
     cbar.set_label("Acquisition order", fontsize=8)
 
     image = ax_bins.imshow(bins.to_numpy(), origin="lower", cmap="viridis", vmin=0)
+    max_val = bins.to_numpy().max()
     for y in range(2):
         for x in range(2):
-            ax_bins.text(x, y, int(bins.loc[y, x]), ha="center", va="center", color="white", fontweight="bold")
+            val = int(bins.loc[y, x])
+            text_color = "black" if val > max_val * 0.5 else "white"
+            ax_bins.text(x, y, val, ha="center", va="center", color=text_color, fontweight="bold")
     ax_bins.set_title("2x Phase Bin Coverage")
     ax_bins.set_xlabel("phase-x bin")
     ax_bins.set_ylabel("phase-y bin")
@@ -262,11 +225,6 @@ def plot_stage_prior_coverage(
     ax_bins.set_yticklabels(["[0, 0.5)", "[0.5, 1)"])
     fig.colorbar(image, ax=ax_bins, fraction=0.045, pad=0.02, label="frame count")
 
-    fig.suptitle(
-        f"Stage-Command Prior: theta={theta_deg:.1f} deg, pitch={pixel_size_um:.1f} um/pixel",
-        fontsize=11,
-        fontweight="bold",
-    )
     savefig_academic(fig, output_path)
     return fig, bins
 
@@ -388,8 +346,22 @@ def plot_small_step_diagnostics(output_dir: Path, output_path: Path) -> tuple[pl
     ).copy()
     y_hp = y_summary.query("method_label == 'highpass_ncc'").copy()
 
-    fig, axes = make_figure("double_col", nrows=1, ncols=3, height=3.3)
+    # Disable constrained layout temporarily so we can manually adjust wspace
+    setup_academic_style()
+    _cl_backup = plt.rcParams.get("figure.constrained_layout.use", False)
+    plt.rcParams["figure.constrained_layout.use"] = False
+
+    fig, axes = make_figure("double_col", nrows=1, ncols=3, height=3.0, constrained_layout=False)
+    if not isinstance(axes, np.ndarray):
+        axes = np.array([axes])
+
+    plt.rcParams["figure.constrained_layout.use"] = _cl_backup
+
     ax_gap, ax_x, ax_y = np.asarray(axes).ravel()
+
+    # Set box aspect to 1 for all subplots to make them square
+    for ax in [ax_gap, ax_x, ax_y]:
+        ax.set_box_aspect(1)
 
     rng = np.random.default_rng(12)
     for idx, (axis, label, color) in enumerate(
@@ -403,11 +375,14 @@ def plot_small_step_diagnostics(output_dir: Path, output_path: Path) -> tuple[pl
     ax_gap.set_xticks([0, 1])
     ax_gap.set_xticklabels(["X", "Y"])
     ax_gap.set_ylabel("Acquisition gap [frames]")
-    ax_gap.set_title("Coordinate Neighbor Time Gap")
+    ax_gap.set_title("(a) Coordinate Neighbor Time Gap")
     ax_gap.set_ylim(0, max(32, gap["order_gap"].max() + 2))
     ax_gap.grid(axis="y", alpha=0.3)
 
-    for delta, color, marker in [(2.0, METHOD_COLOR_LIST[0], "o"), (4.0, METHOD_COLOR_LIST[1], "s"), (6.0, METHOD_COLOR_LIST[3], "^")]:
+    # Filter to only planned design steps (2um and 4um)
+    x_hp = x_hp[x_hp["delta_um"].isin([2.0, 4.0])].copy()
+
+    for delta, color, marker in [(2.0, METHOD_COLOR_LIST[0], "o"), (4.0, METHOD_COLOR_LIST[1], "s")]:
         subset = x_hp[x_hp["delta_um"].eq(delta)]
         if subset.empty:
             continue
@@ -415,11 +390,12 @@ def plot_small_step_diagnostics(output_dir: Path, output_path: Path) -> tuple[pl
         y = subset["parallel_px"].to_numpy(float)
         ax_x.scatter(x, y, s=13, color=color, marker=marker, alpha=0.42, edgecolor="none", label=f"{delta:.0f} um")
         ax_x.scatter(np.median(x), np.median(y), s=55, color=color, marker=marker, edgecolor="#222222", linewidth=0.5)
-    lim = max(0.7, float(x_hp["ref_mag_px"].max()) * 1.1)
+    data_max = max(float(x_hp["ref_mag_px"].max()), float(x_hp["parallel_px"].max()))
+    lim = max(data_max * 1.15, 0.05)
     ax_x.plot([0, lim], [0, lim], color="#222222", ls="--", lw=0.9, label="nominal")
     ax_x.set_xlim(0, lim)
     ax_x.set_ylim(0, lim)
-    ax_x.set_title("X Time-Adjacent NCC Projection")
+    ax_x.set_title("(b) X Time-Adjacent NCC Projection")
     ax_x.set_xlabel("stage-prior magnitude [px]")
     ax_x.set_ylabel("visible projection [px]")
     ax_x.grid(alpha=0.25)
@@ -442,43 +418,52 @@ def plot_small_step_diagnostics(output_dir: Path, output_path: Path) -> tuple[pl
     ax_y.set_xticks(xpos)
     ax_y.set_xticklabels(labels)
     ax_y.set_ylabel("projection / 2um nominal")
-    ax_y.set_title("Y Coordinate-Pair Smoke Test")
+    ax_y.set_title("(c) Y Coordinate-Pair Smoke Test")
     ax_y.set_ylim(0, 2.35)
     ax_y.grid(axis="y", alpha=0.3)
     ax_y.legend(loc="upper right", fontsize=7)
 
-    fig.suptitle("Small-Step Diagnostics Are Local Smoke Tests, Not SR Feasibility Proofs", fontsize=11, fontweight="bold")
+    # Adjust spacing and margins with larger horizontal spacing (wspace) for y-axis labels
+    fig.subplots_adjust(left=0.08, right=0.98, bottom=0.15, top=0.85, wspace=0.38)
+
     savefig_academic(fig, output_path)
     return fig, metrics
 
 
 def load_alignment_comparison(project_root: Path) -> tuple[pd.DataFrame, str]:
-    """Load EP05 alignment scores if present, otherwise return an EP02 proxy."""
+    """Load compatible EP05 alignment scores if present, otherwise return an EP02 proxy."""
     ep05_path = project_root / "output" / "ep05_alignment_sr_capacity" / "alignment_method_summary.csv"
+    expected_frames = len(clean_sr_input(load_frame_audit(project_root)))
     if ep05_path.exists():
         df = pd.read_csv(ep05_path)
-        labels = {
-            "no_alignment": "No alignment",
-            "old_stage_model": "Stage prior only",
-            "filename_affine_fit": "Filename affine prior",
-            "data_driven_ncc_init": "Data-driven NCC init",
-            "data_driven_contour_refined": "Data-driven contour refined",
-        }
-        order = {
-            "no_alignment": 0,
-            "old_stage_model": 1,
-            "filename_affine_fit": 2,
-            "data_driven_ncc_init": 3,
-            "data_driven_contour_refined": 4,
-        }
-        out = df.copy()
-        out["display_label"] = out["method"].map(labels).fillna(out["method"])
-        out["plot_order"] = out["method"].map(order).fillna(99)
-        out = out.sort_values("plot_order").reset_index(drop=True)
-        return out, "ep05_alignment_sr_capacity"
+        frame_counts = set(df["n_frames"].dropna().astype(int)) if "n_frames" in df.columns else set()
+        if frame_counts == {expected_frames}:
+            labels = {
+                "no_alignment": "No alignment",
+                "old_stage_model": "Stage prior only",
+                "filename_affine_fit": "Filename affine prior",
+                "data_driven_ncc_init": "Data-driven NCC init",
+                "data_driven_contour_refined": "Data-driven contour refined",
+            }
+            order = {
+                "no_alignment": 0,
+                "old_stage_model": 1,
+                "filename_affine_fit": 2,
+                "data_driven_ncc_init": 3,
+                "data_driven_contour_refined": 4,
+            }
+            out = df.copy()
+            out["display_label"] = out["method"].map(labels).fillna(out["method"])
+            out["plot_order"] = out["method"].map(order).fillna(99)
+            out = out.sort_values("plot_order").reset_index(drop=True)
+            return out, "ep05_alignment_sr_capacity"
 
     output_dir = ep02_output_dir(project_root)
     metrics = small_step_metrics(output_dir)
+    source = "ep02_lightweight_proxy"
+    if ep05_path.exists():
+        stale_counts = ",".join(str(v) for v in sorted(frame_counts)) if frame_counts else "missing"
+        source = f"ep02_lightweight_proxy_ep05_n_frames_{stale_counts}_expected_{expected_frames}"
     prior_error = float(metrics.query("metric == 'X 2um nominal prior'")["value"].iloc[0] - metrics.query("metric == 'X 2um visible projection'")["value"].iloc[0])
     proxy = pd.DataFrame(
         [
@@ -506,7 +491,7 @@ def load_alignment_comparison(project_root: Path) -> tuple[pd.DataFrame, str]:
             },
         ]
     )
-    return proxy, "ep02_lightweight_proxy"
+    return proxy, source
 
 
 def plot_alignment_comparison(
@@ -514,8 +499,23 @@ def plot_alignment_comparison(
     output_path: Path,
 ) -> tuple[plt.Figure, pd.DataFrame, str]:
     summary, source = load_alignment_comparison(project_root)
-    fig, axes = make_figure("double_col", nrows=1, ncols=2, height=3.4)
+
+    # Disable constrained layout temporarily so we can manually adjust wspace
+    setup_academic_style()
+    _cl_backup = plt.rcParams.get("figure.constrained_layout.use", False)
+    plt.rcParams["figure.constrained_layout.use"] = False
+
+    fig, axes = make_figure("double_col", nrows=1, ncols=2, height=3.4, constrained_layout=False)
+    if not isinstance(axes, np.ndarray):
+        axes = np.array([axes])
+
+    plt.rcParams["figure.constrained_layout.use"] = _cl_backup
+
     ax_chamfer, ax_corr = np.asarray(axes).ravel()
+
+    # Set box aspect to 1 for both subplots to make them square
+    for ax in [ax_chamfer, ax_corr]:
+        ax.set_box_aspect(1)
 
     labels = summary["display_label"].to_numpy()
     y = np.arange(len(summary))
@@ -531,7 +531,7 @@ def plot_alignment_comparison(
     ax_chamfer.set_yticklabels(labels)
     ax_chamfer.invert_yaxis()
     ax_chamfer.set_xlabel("median holdout Chamfer [px]")
-    ax_chamfer.set_title("Contour Holdout Error")
+    ax_chamfer.set_title("(a) Contour Holdout Error")
     ax_chamfer.grid(axis="x", alpha=0.3)
 
     corr = summary["gradient_corr_median"].to_numpy(float)
@@ -544,10 +544,12 @@ def plot_alignment_comparison(
     ax_corr.invert_yaxis()
     ax_corr.set_xlim(0, 1.03 if np.isfinite(corr).any() else 1)
     ax_corr.set_xlabel("median gradient correlation")
-    ax_corr.set_title("Contour/Gradient Agreement")
+    ax_corr.set_title("(b) Contour/Gradient Agreement")
     ax_corr.grid(axis="x", alpha=0.3)
 
-    fig.suptitle(f"Data-Driven Alignment Evidence ({source})", fontsize=11, fontweight="bold")
+    # Adjust spacing and margins with larger horizontal spacing (wspace) and enough left margin for labels
+    fig.subplots_adjust(left=0.24, right=0.96, bottom=0.15, top=0.85, wspace=0.32)
+
     savefig_academic(fig, output_path)
 
     csv_path = output_path.with_suffix(".csv")
@@ -727,6 +729,10 @@ def y_coordinate_failure_table(output_dir: Path) -> pd.DataFrame:
 
 def avi_theta_compact_table(output_dir: Path, *, reference_theta_deg: float = 47.6) -> pd.DataFrame:
     """Format AVI theta estimates as auxiliary validation evidence."""
+    if not (output_dir / "avi_theta_summary.csv").exists():
+        return pd.DataFrame(
+            [{"note": "AVI theta artifacts not available; raw TXT EP02 cache is still valid."}]
+        )
     summary = _read_required_csv(output_dir, "avi_theta_summary.csv")
     method_order = {"gradient": 0, "highpass": 1}
     source_order = {"x-only": 0, "y-only": 1, "combined": 2}
@@ -767,6 +773,12 @@ def avi_theta_compact_table(output_dir: Path, *, reference_theta_deg: float = 47
 
 def avi_txt_line_match_table(output_dir: Path) -> pd.DataFrame:
     """Summarize AVI filename-to-TXT line mapping checks for X and Y scans."""
+    if not (output_dir / "avi_txt_xline_match_summary.csv").exists() or not (
+        output_dir / "avi_txt_yline_match_summary.csv"
+    ).exists():
+        return pd.DataFrame(
+            [{"note": "AVI-TXT line-match artifacts not available; skipped optional naming check."}]
+        )
     specs = [
         ("X-scan AVI", "avi_txt_xline_match_summary.csv", "fixed_y", "xN.avi -> TXT fixed Y=N", "expected"),
         ("X-scan AVI", "avi_txt_xline_match_summary.csv", "fixed_x", "xN.avi -> TXT fixed X=N", "rejected"),
@@ -800,47 +812,56 @@ def avi_txt_line_match_table(output_dir: Path) -> pd.DataFrame:
 
 
 def historical_ncc_failure_audit(output_dir: Path) -> pd.DataFrame:
-    """Record the old coordinate-adjacent NCC failure as a bounded diagnostic."""
-    theta = load_json(output_dir / "theta_estimate.json")
-    linearity = _read_required_csv(output_dir, "linearity.csv")
-    repeat = _read_required_csv(output_dir, "repeatability.csv")
+    """Record why coordinate-adjacent NCC remains bounded diagnostic evidence.
+
+    This intentionally uses the current rebuildable EP02 cache, not obsolete
+    early coordinate-adjacent outputs such as theta_estimate.json or linearity.csv.
+    """
+    gap = _read_required_csv(output_dir, "coordinate_pair_time_gap_audit.csv")
+    time_summary = _read_required_csv(output_dir, "time_adjacent_method_summary.csv")
+    x_fit = _read_required_csv(output_dir, "time_adjacent_x_step_fit.csv")
     y_failure = y_coordinate_failure_table(output_dir)
 
-    projection = linearity.set_index("component").loc["projection"]
-    valid_repeat = repeat.query("fit_ok == True and edge_peak == False")
+    y_gap_median = float(gap.query("scan_axis == 'y'")["order_gap"].median())
     hp_ratio = float(
         y_failure.loc[y_failure["method"].eq("high-pass NCC"), "visible 4um/2um"].iloc[0]
     )
+    phase = time_summary[
+        time_summary["method_label"].eq("phase_corr") & time_summary["move_type"].eq("x_step")
+    ]
+    phase_ratio = float(phase["median_projection_ratio"].iloc[0]) if not phase.empty else np.nan
+    hp_fit = x_fit[x_fit["method_label"].eq("highpass_ncc")]
+    hp_pairs = int(hp_fit["n_pairs"].iloc[0]) if not hp_fit.empty else 0
     rows = [
         {
-            "old diagnostic": "coordinate-adjacent NCC theta",
-            "value": f"{theta['theta_deg_y_up_diagnostic']:.2f} deg, CI {_format_ci(theta['ci_lower_y_up'], theta['ci_upper_y_up'], 2)}",
-            "current interpretation": "failure audit; does not update theta",
+            "diagnostic boundary": "clean input contract",
+            "value": "is_sr_usable=True; no R!=0 repeat frames",
+            "current interpretation": "EP02 displacement diagnostics now run on the repeat-excluded 248-frame input",
         },
         {
-            "old diagnostic": "reference theta in old CI",
-            "value": "yes" if theta["reference_in_y_up_ci"] else "no",
-            "current interpretation": "evidence that coordinate-adjacent NCC was contaminated",
+            "diagnostic boundary": "Y coordinate-neighbor acquisition gap",
+            "value": f"median {y_gap_median:.0f} frames",
+            "current interpretation": "fixed-X Y neighbors are not time-adjacent and remain contaminated by thermal evolution",
         },
         {
-            "old diagnostic": "single-rotation RMS residual",
-            "value": f"{theta['rms_error_px_y_up']:.4f} px",
-            "current interpretation": "local registration residual, not an SR threshold",
-        },
-        {
-            "old diagnostic": "projection linearity R2",
-            "value": f"{float(projection['r2']):.4f}",
-            "current interpretation": "old coordinate-neighbor model failed globally",
-        },
-        {
-            "old diagnostic": "valid repeat pairs",
-            "value": f"{len(valid_repeat)} / {len(repeat)}",
-            "current interpretation": "no usable repeatability calibration from these pairs",
-        },
-        {
-            "old diagnostic": "Y high-pass visible 4um/2um",
+            "diagnostic boundary": "Y high-pass visible 4um/2um",
             "value": f"{hp_ratio:.3f} (expected about 2)",
-            "current interpretation": "Y-only coordinate neighbors fail monotonicity",
+            "current interpretation": "Y-only coordinate neighbors fail monotonicity even after repeat exclusion",
+        },
+        {
+            "diagnostic boundary": "phase correlation on X tiny steps",
+            "value": f"visible/prior projection {phase_ratio:.3f}",
+            "current interpretation": "phase correlation degenerates on this subpixel local diagnostic",
+        },
+        {
+            "diagnostic boundary": "high-pass X-step fit pairs",
+            "value": f"{hp_pairs} clean time-adjacent X pairs",
+            "current interpretation": "usable only as local direction/linearity smoke test, not alignment truth",
+        },
+        {
+            "diagnostic boundary": "obsolete coordinate-adjacent outputs",
+            "value": "removed from current cache",
+            "current interpretation": "old theta/linearity/repeatability files are not required to rebuild EP02",
         },
     ]
     return pd.DataFrame(rows)

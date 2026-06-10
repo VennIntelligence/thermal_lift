@@ -11,8 +11,14 @@
     依次调用 build_notebook.py 构建（并可选执行）每个 notebook。
 
 典型场景:
-    - Git 迁移到新机器后，一键重建所有 .ipynb 和 output/ 产物
+    - Git 迁移到新机器后，先 `uv run python scripts/build_all_caches.py`，
+      再 `uv run python scripts/build_all_notebooks.py --execute`
     - 修改 core/ 库后，批量验证所有 notebook 仍可正常运行
+
+前置建议:
+    Notebook 展示层只读缓存 PNG/CSV，重计算在 cache 脚本中完成。
+    首次迁移或数据/逻辑变更后请先运行:
+        uv run python scripts/build_all_caches.py
 """
 
 import subprocess

@@ -72,7 +72,7 @@ ACADEMIC_RCPARAMS: dict = {
 
     # ── Axes ──
     "axes.titlesize":    10,
-    "axes.titleweight":  "bold",
+    "axes.titleweight":  "normal",
     "axes.labelsize":    9,
     "axes.labelweight":  "normal",
     "axes.linewidth":    0.8,
@@ -109,7 +109,7 @@ ACADEMIC_RCPARAMS: dict = {
     "grid.color":    "#cccccc",
 
     # ── Figure ──
-    "figure.dpi":       150,
+    "figure.dpi":       300,
     "figure.facecolor": "white",
     "figure.constrained_layout.use": True,
 
@@ -134,6 +134,15 @@ def setup_academic_style() -> None:
     """
     plt.rcParams.update(ACADEMIC_RCPARAMS)
 
+    # Enable retina displays in Jupyter notebooks for crisp figures
+    try:
+        from IPython import get_ipython
+        ipy = get_ipython()
+        if ipy is not None:
+            ipy.run_line_magic("config", "InlineBackend.figure_format = 'retina'")
+    except Exception:
+        pass
+
 
 def savefig_academic(
     fig: plt.Figure,
@@ -141,6 +150,7 @@ def savefig_academic(
     *,
     dpi: int = 300,
     close: bool = True,
+    inline_dpi: int = 300,
 ) -> Path:
     """Save a figure following the project saving conventions.
 
@@ -155,6 +165,12 @@ def savefig_academic(
         Resolution in dots per inch.  Must be ≥ 300 for paper figures.
     close : bool, optional
         If *True* (default), close the figure after saving to free memory.
+    inline_dpi : int, optional
+        DPI to assign to ``fig.dpi`` **after** saving.  When the caller
+        returns the figure as the last cell expression, Jupyter's
+        ``_repr_png_()`` uses ``fig.dpi`` to render the inline preview.
+        The default is 300 so executed notebooks show the same high-resolution
+        figure that is saved to disk.
 
     Returns
     -------
@@ -164,6 +180,9 @@ def savefig_academic(
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     fig.savefig(path, dpi=dpi, bbox_inches="tight", facecolor="white")
+    # Keep notebook inline display at publication DPI. This increases executed
+    # .ipynb size, but avoids blurred embedded figures.
+    fig.dpi = inline_dpi
     if close:
         plt.close(fig)
     return path

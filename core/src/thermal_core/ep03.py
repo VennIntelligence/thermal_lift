@@ -747,7 +747,6 @@ def plot_sampling_resolution_diagram(
         color=METHOD_COLOR_LIST[3],
     )
 
-    ax.set_title("Pixel Pitch, Resolution, and SR Grid Are Different Quantities")
     ax.grid(axis="x", alpha=0.15)
     ax.spines["left"].set_visible(False)
     return fig
@@ -792,7 +791,6 @@ def plot_mtf_psf_curves(
     ax.set_xlim(0.0, 2.05)
     ax.set_xlabel("Spatial frequency [cycles / detector pixel]")
     ax.set_ylabel("MTF amplitude")
-    ax.set_title("Gaussian PSF MTF at 1x/2x/4x Grid Frequencies")
     ax.grid(axis="y", alpha=0.25)
     ax.legend(loc="upper left", fontsize=8)
     return fig
@@ -847,7 +845,6 @@ def plot_mtf_snr_recoverability_heatmap(
     ax.set_xticklabels(pivot.columns, rotation=0, ha="center")
     ax.set_yticks(np.arange(len(pivot.index)))
     ax.set_yticklabels(pivot.index)
-    ax.set_title("MTF x SNR Recoverability Risk at Grid Nyquist")
     ax.set_xlabel("Output grid and assumed Gaussian PSF")
     ax.set_ylabel("Local contrast scale")
 
@@ -881,54 +878,68 @@ def plot_noise_floor_snr(
     ax0, ax1 = axes
     x = np.linspace(0.0, max(3.0, float(snr_table["delta_t_c"].max()) * 1.1), 300)
     ax0.plot(x, x / float(noise_sigma_c), color=METHOD_COLOR_LIST[0], linewidth=1.4)
-    fixed_label_positions = {
-        "Noise floor": (0.08, 1.8),
-        "3x noise gate": (0.26, 3.8),
-        "Weak local contrast": (0.36, 5.8),
-        "Nominal edge contrast": (0.76, 7.0),
-        "Strong local contrast": (1.05, 11.0),
-    }
     for _, row in snr_table.iterrows():
         color = METHOD_COLOR_LIST[1] if row["source"] == "measured" else METHOD_COLOR_LIST[2]
         label = str(row["label"])
         ax0.scatter(row["delta_t_c"], row["snr"], s=28, color=color, zorder=3)
-        if label in fixed_label_positions:
-            ax0.text(
-                *fixed_label_positions[label],
-                label,
-                ha="left",
-                va="bottom",
-                fontsize=8,
-            )
-        else:
-            ax0.annotate(
-                label,
-                xy=(row["delta_t_c"], row["snr"]),
-                xytext=(10, -6),
-                textcoords="offset points",
-                ha="left",
-                va="top",
-                fontsize=8,
-            )
+        ax0.annotate(
+            label,
+            xy=(row["delta_t_c"], row["snr"]),
+            xytext=(8, 0),
+            textcoords="offset points",
+            ha="left",
+            va="center",
+            fontsize=8,
+        )
     ax0.axhline(1.0, color="#666666", linestyle=":", linewidth=0.9)
     ax0.axhline(5.0, color="#666666", linestyle="--", linewidth=0.9)
+    ax0.text(
+        0.98,
+        1.0,
+        "1x noise",
+        transform=ax0.get_yaxis_transform(),
+        ha="right",
+        va="bottom",
+        fontsize=8,
+        color="#666666",
+    )
+    ax0.text(
+        0.98,
+        5.0,
+        "5x noise",
+        transform=ax0.get_yaxis_transform(),
+        ha="right",
+        va="bottom",
+        fontsize=8,
+        color="#666666",
+    )
     ax0.set_xlabel("Local temperature contrast [C]")
     ax0.set_ylabel("SNR = contrast / 0.0724 C")
-    ax0.set_title("Noise Floor vs Local Contrast")
+    ax0.set_title("(a) Noise Floor vs Local Contrast")
     ax0.grid(axis="y", alpha=0.25)
 
     if segments.empty:
         ax1.text(0.5, 0.5, "No measured segments", transform=ax1.transAxes, ha="center", va="center")
     else:
         bins = np.linspace(0.0, max(3.0, float(segments["abs_delta_t_c"].quantile(0.98)) * 1.05), 32)
-        for i, (source, group) in enumerate(segments.groupby("source")):
+        for source, group in segments.groupby("source"):
+            color = METHOD_COLOR_LIST[0] if source == "inner" else METHOD_COLOR_LIST[2]
+            # Fill with low alpha
             ax1.hist(
                 group["abs_delta_t_c"],
                 bins=bins,
                 histtype="stepfilled",
-                alpha=0.35,
-                color=METHOD_COLOR_LIST[i % len(METHOD_COLOR_LIST)],
-                label=f"{source} segments",
+                alpha=0.25,
+                color=color,
+            )
+            # Outline with high alpha for contrast
+            ax1.hist(
+                group["abs_delta_t_c"],
+                bins=bins,
+                histtype="step",
+                alpha=0.9,
+                color=color,
+                linewidth=1.2,
             )
     for multiple, label in [(1, "1x noise"), (3, "3x noise"), (5, "5x noise")]:
         x_noise = multiple * noise_sigma_c
@@ -936,7 +947,7 @@ def plot_noise_floor_snr(
         ax1.annotate(
             label,
             xy=(x_noise, ax1.get_ylim()[1] * 0.85),
-            xytext=(8, 0),
+            xytext=(3, 0),
             textcoords="offset points",
             ha="left",
             va="center",
@@ -946,8 +957,14 @@ def plot_noise_floor_snr(
         )
     ax1.set_xlabel("Measured local |Delta T| [C]")
     ax1.set_ylabel("Segment count")
-    ax1.set_title("Measured Contour Contrast Scales")
-    ax1.legend(loc="upper right", fontsize=8)
+    ax1.set_title("(b) Measured Contour Contrast Scales")
+
+    # Custom legend with higher contrast
+    handles = [
+        patches.Patch(facecolor=METHOD_COLOR_LIST[0], edgecolor=METHOD_COLOR_LIST[0], alpha=0.9, label="inner segments"),
+        patches.Patch(facecolor=METHOD_COLOR_LIST[2], edgecolor=METHOD_COLOR_LIST[2], alpha=0.9, label="outer segments"),
+    ]
+    ax1.legend(handles=handles, loc="upper right", fontsize=8)
     return fig
 
 
@@ -960,14 +977,21 @@ def plot_local_contour_candidate_map(
     """Plot contour locations and local anchor candidates on the temperature frame."""
     fig, ax = make_figure("single_col", height=3.25)
     im = ax.imshow(frame, cmap=COLORMAPS["temperature"], origin="upper")
-    ax.plot(outer_contour[:, 0], outer_contour[:, 1], color="#6CC4C4", linewidth=0.8, label="outer contour")
+    ax.plot(outer_contour[:, 0], outer_contour[:, 1], color=METHOD_COLOR_LIST[2], linewidth=0.8, label="outer contour")
     for i, contour in enumerate(inner_contours[:40]):
         label = "inner contours" if i == 0 else None
-        ax.plot(contour[:, 0], contour[:, 1], color="#BDBDBD", linewidth=0.45, alpha=0.8, label=label)
+        ax.plot(contour[:, 0], contour[:, 1], color=METHOD_COLOR_LIST[0], linewidth=0.45, alpha=0.8, label=label)
     if not segments.empty:
         good = segments[segments["anchor_candidate"]]
         ax.scatter(good["x_px"], good["y_px"], s=10, color=METHOD_COLOR_LIST[1], label="anchor candidates")
-    ax.set_title("Local Contour and Anchor Candidates")
+
+    # 2X Zoom ROI Crop: Center around outer contour with 30px padding
+    x_min, x_max = np.min(outer_contour[:, 0]), np.max(outer_contour[:, 0])
+    y_min, y_max = np.min(outer_contour[:, 1]), np.max(outer_contour[:, 1])
+    pad = 30
+    ax.set_xlim(max(0, x_min - pad), min(frame.shape[1], x_max + pad))
+    ax.set_ylim(min(frame.shape[0], y_max + pad), max(0, y_min - pad))
+
     ax.set_axis_off()
     cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
     format_colorbar(cbar, "Temperature [C]")
@@ -979,7 +1003,7 @@ def plot_local_anchor_confidence(segments: pd.DataFrame) -> plt.Figure:
     """Plot segment-level SNR versus X micro-scan normal projection."""
     fig, ax = make_figure("single_col", height=3.0)
     if not segments.empty:
-        for source, color in [("outer", METHOD_COLOR_LIST[0]), ("inner", METHOD_COLOR_LIST[1])]:
+        for source, color in [("outer", METHOD_COLOR_LIST[2]), ("inner", METHOD_COLOR_LIST[0])]:
             group = segments[segments["source"].eq(source)]
             if group.empty:
                 continue
@@ -998,7 +1022,6 @@ def plot_local_anchor_confidence(segments: pd.DataFrame) -> plt.Figure:
     ax.set_xlabel("Normal projection onto X micro-scan")
     ax.set_ylabel("Local SNR")
     ax.set_yscale("log")
-    ax.set_title("Local Anchor Confidence")
     ax.grid(axis="y", alpha=0.25)
     ax.legend(loc="lower right", fontsize=7)
     return fig
@@ -1014,12 +1037,20 @@ def plot_local_observability_map(
     fig, axes = make_figure("double_col", nrows=1, ncols=2, height=3.5)
     ax0, ax1 = axes
     im = ax0.imshow(frame, cmap=COLORMAPS["temperature"], origin="upper")
-    ax0.plot(outer_contour[:, 0], outer_contour[:, 1], color="#6CC4C4", linewidth=0.8, label="outer")
+    ax0.plot(outer_contour[:, 0], outer_contour[:, 1], color=METHOD_COLOR_LIST[2], linewidth=0.8, label="outer")
     for contour in inner_contours[:40]:
-        ax0.plot(contour[:, 0], contour[:, 1], color="#BDBDBD", linewidth=0.45, alpha=0.8)
+        ax0.plot(contour[:, 0], contour[:, 1], color=METHOD_COLOR_LIST[0], linewidth=0.45, alpha=0.8)
     if not segments.empty:
         good = segments[segments["anchor_candidate"]]
         ax0.scatter(good["x_px"], good["y_px"], s=10, color=METHOD_COLOR_LIST[1], label="anchor candidates")
+
+    # 2X Zoom ROI Crop: Center around outer contour with 30px padding
+    x_min, x_max = np.min(outer_contour[:, 0]), np.max(outer_contour[:, 0])
+    y_min, y_max = np.min(outer_contour[:, 1]), np.max(outer_contour[:, 1])
+    pad = 30
+    ax0.set_xlim(max(0, x_min - pad), min(frame.shape[1], x_max + pad))
+    ax0.set_ylim(min(frame.shape[0], y_max + pad), max(0, y_min - pad))
+
     ax0.set_title("Contour-Level Local Edge Candidates")
     ax0.set_axis_off()
     cbar = fig.colorbar(im, ax=ax0, fraction=0.046, pad=0.02)
@@ -1027,7 +1058,7 @@ def plot_local_observability_map(
     ax0.legend(loc="lower right", fontsize=7)
 
     if not segments.empty:
-        colors = segments["source"].map({"outer": METHOD_COLOR_LIST[0], "inner": METHOD_COLOR_LIST[1]}).fillna("#777777")
+        colors = segments["source"].map({"outer": METHOD_COLOR_LIST[2], "inner": METHOD_COLOR_LIST[0]}).fillna("#777777")
         sizes = np.where(segments["anchor_candidate"], 26, 10)
         ax1.scatter(segments["normal_projection"], segments["snr"], s=sizes, c=colors, alpha=0.65, edgecolors="none")
     ax1.axvline(0.5, color="#666666", linestyle="--", linewidth=0.9)
@@ -1063,7 +1094,7 @@ def plot_crb_esf_localization(
     ax0.axvline(0.0, color="#333333", linestyle="--", linewidth=0.9, label="edge position")
     ax0.set_xlabel("Normal coordinate [px]")
     ax0.set_ylabel("Temperature + offset [C]")
-    ax0.set_title("ESF Edge Position Is a Local Anchor")
+    ax0.set_title("(a) ESF Edge Position Is a Local Anchor")
     ax0.legend(loc="lower right", fontsize=7)
     ax0.grid(axis="y", alpha=0.2)
 
@@ -1096,7 +1127,7 @@ def plot_crb_esf_localization(
     ax1.set_yscale("log")
     ax1.set_xlabel("Local edge contrast [C]")
     ax1.set_ylabel("CRB for edge position [px]")
-    ax1.set_title("CRB Supports Quality Gates, Not Shape Proof")
+    ax1.set_title("(b) CRB Supports Quality Gates, Not Shape Proof")
     ax1.grid(axis="y", alpha=0.25)
 
     sigma_handles = [

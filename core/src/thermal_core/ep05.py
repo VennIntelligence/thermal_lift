@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import json
 from pathlib import Path
 
@@ -35,6 +36,209 @@ GROUP_LABELS = {
     "column_x10": "Column X=10",
     "column_x20": "Column X=20",
 }
+
+
+@dataclass(frozen=True)
+class FilenameAffineFit:
+    """Robust filename-coordinate affine fit for EP05 alignment shifts."""
+
+    beta_dx: np.ndarray
+    beta_dy: np.ndarray
+    baseline_beta_dx: np.ndarray
+    baseline_beta_dy: np.ndarray
+    excluded_files: tuple[str, ...]
+    median_residual_px: float
+    outlier_threshold_px: float
+    fit_count: int
+    clean_count: int
+
+
+def _boolish(series: pd.Series) -> pd.Series:
+    return series.astype(str).str.lower().isin({"true", "1", "yes"})
+
+
+def _filename_affine_fit_rows(alignment: pd.DataFrame, repeat: int = 0) -> pd.DataFrame:
+    required = ["success", "R", "X", "Y", "refined_align_dx_px", "refined_align_dy_px"]
+    missing = [col for col in required if col not in alignment]
+    if missing:
+        raise ValueError(f"Alignment table is missing required columns: {missing}")
+
+    rows = alignment[_boolish(alignment["success"]) & alignment["R"].eq(repeat)].copy()
+    numeric_cols = ["X", "Y", "refined_align_dx_px", "refined_align_dy_px"]
+    for col in numeric_cols:
+        rows[col] = pd.to_numeric(rows[col], errors="coerce")
+    finite = np.isfinite(rows[numeric_cols].to_numpy(dtype=float)).all(axis=1)
+    return rows.loc[finite].copy()
+
+
+def affine_design(frame_rows: pd.DataFrame) -> np.ndarray:
+    """Return the [1, X, Y] design matrix used by filename affine fits."""
+
+    return np.column_stack(
+        [
+            np.ones(len(frame_rows), dtype=float),
+            pd.to_numeric(frame_rows["X"], errors="coerce").to_numpy(dtype=float),
+            pd.to_numeric(frame_rows["Y"], errors="coerce").to_numpy(dtype=float),
+        ]
+    )
+
+
+def affine_predict(frame_rows: pd.DataFrame, beta_dx: np.ndarray, beta_dy: np.ndarray) -> tuple[np.ndarray, np.ndarray]:
+    """Predict dx/dy shifts from frame X/Y columns and affine coefficients."""
+
+    design = affine_design(frame_rows)
+    return design @ np.asarray(beta_dx, dtype=float), design @ np.asarray(beta_dy, dtype=float)
+
+
+def affine_shift(row: pd.Series, beta_dx: np.ndarray, beta_dy: np.ndarray) -> tuple[float, float]:
+    """Predict one filename-affine shift for a metadata row."""
+
+    coord = np.array([1.0, float(row["X"]), float(row["Y"])], dtype=float)
+    return float(coord @ np.asarray(beta_dx, dtype=float)), float(coord @ np.asarray(beta_dy, dtype=float))
+
+
+def fit_filename_affine(
+    alignment: pd.DataFrame,
+    *,
+    robust: bool = True,
+    outlier_threshold: float = 3.0,
+    repeat: int = 0,
+) -> FilenameAffineFit:
+    """Fit X/Y filename coordinates to refined contour-alignment shifts.
+
+    The baseline fit uses all successful ``R=repeat`` frames.  Robust mode
+    removes frames whose baseline residual norm exceeds
+    ``outlier_threshold * median_residual`` and refits the same three-parameter
+    model.  The returned baseline coefficients are always the all-frame OLS
+    result, which keeps diagnosis and coefficient-delta reporting reproducible.
+    """
+
+    valid = _filename_affine_fit_rows(alignment, repeat=repeat)
+    if len(valid) < 3:
+        raise ValueError(f"Need at least 3 successful R={repeat} rows for affine fit; got {len(valid)}")
+
+    design = affine_design(valid)
+    if np.linalg.matrix_rank(design) < 3:
+        raise ValueError("Filename affine design matrix is rank deficient")
+
+    target_dx = valid["refined_align_dx_px"].to_numpy(dtype=float)
+    target_dy = valid["refined_align_dy_px"].to_numpy(dtype=float)
+    baseline_beta_dx = np.linalg.lstsq(design, target_dx, rcond=None)[0]
+    baseline_beta_dy = np.linalg.lstsq(design, target_dy, rcond=None)[0]
+
+    res_dx = target_dx - design @ baseline_beta_dx
+    res_dy = target_dy - design @ baseline_beta_dy
+    res_norm = np.hypot(res_dx, res_dy)
+    median_residual = float(np.median(res_norm))
+    threshold_px = float(outlier_threshold * median_residual)
+
+    excluded_mask = np.zeros(len(valid), dtype=bool)
+    clean_mask = np.ones(len(valid), dtype=bool)
+    beta_dx = baseline_beta_dx
+    beta_dy = baseline_beta_dy
+    if robust and np.isfinite(threshold_px) and threshold_px > 0.0:
+        excluded_mask = res_norm > threshold_px
+        clean_mask = ~excluded_mask
+        if int(clean_mask.sum()) >= 3 and np.linalg.matrix_rank(design[clean_mask]) >= 3:
+            beta_dx = np.linalg.lstsq(design[clean_mask], target_dx[clean_mask], rcond=None)[0]
+            beta_dy = np.linalg.lstsq(design[clean_mask], target_dy[clean_mask], rcond=None)[0]
+        else:
+            excluded_mask = np.zeros(len(valid), dtype=bool)
+            clean_mask = np.ones(len(valid), dtype=bool)
+
+    excluded_files = tuple(valid.loc[excluded_mask, "file"].astype(str).tolist()) if "file" in valid else tuple()
+    return FilenameAffineFit(
+        beta_dx=np.asarray(beta_dx, dtype=float),
+        beta_dy=np.asarray(beta_dy, dtype=float),
+        baseline_beta_dx=np.asarray(baseline_beta_dx, dtype=float),
+        baseline_beta_dy=np.asarray(baseline_beta_dy, dtype=float),
+        excluded_files=excluded_files,
+        median_residual_px=median_residual,
+        outlier_threshold_px=threshold_px,
+        fit_count=int(len(valid)),
+        clean_count=int(clean_mask.sum()),
+    )
+
+
+def _percentile_rank(values: pd.Series) -> np.ndarray:
+    numeric = pd.to_numeric(values, errors="coerce")
+    ranks = numeric.rank(pct=True, method="average").to_numpy(dtype=float)
+    return np.where(np.isfinite(ranks), ranks, 0.5)
+
+
+def filename_affine_diagnostics(
+    alignment: pd.DataFrame,
+    fit: FilenameAffineFit | None = None,
+    *,
+    robust: bool = True,
+    outlier_threshold: float = 3.0,
+    repeat: int = 0,
+) -> pd.DataFrame:
+    """Return per-frame baseline residuals and multi-metric outlier scores."""
+
+    affine_fit = fit or fit_filename_affine(
+        alignment,
+        robust=robust,
+        outlier_threshold=outlier_threshold,
+        repeat=repeat,
+    )
+    required = ["success", "X", "Y", "refined_align_dx_px", "refined_align_dy_px"]
+    missing = [col for col in required if col not in alignment]
+    if missing:
+        raise ValueError(f"Alignment table is missing required columns: {missing}")
+
+    rows = alignment[_boolish(alignment["success"])].copy()
+    numeric_cols = ["X", "Y", "refined_align_dx_px", "refined_align_dy_px"]
+    for col in numeric_cols:
+        rows[col] = pd.to_numeric(rows[col], errors="coerce")
+    finite = np.isfinite(rows[numeric_cols].to_numpy(dtype=float)).all(axis=1)
+    rows = rows.loc[finite].copy()
+
+    pred_dx, pred_dy = affine_predict(rows, affine_fit.baseline_beta_dx, affine_fit.baseline_beta_dy)
+    robust_pred_dx, robust_pred_dy = affine_predict(rows, affine_fit.beta_dx, affine_fit.beta_dy)
+    rows["pred_dx_px"] = pred_dx
+    rows["pred_dy_px"] = pred_dy
+    rows["res_dx_px"] = rows["refined_align_dx_px"].to_numpy(dtype=float) - pred_dx
+    rows["res_dy_px"] = rows["refined_align_dy_px"].to_numpy(dtype=float) - pred_dy
+    rows["res_norm_px"] = np.hypot(rows["res_dx_px"].to_numpy(dtype=float), rows["res_dy_px"].to_numpy(dtype=float))
+    rows["robust_pred_dx_px"] = robust_pred_dx
+    rows["robust_pred_dy_px"] = robust_pred_dy
+    rows["robust_res_dx_px"] = rows["refined_align_dx_px"].to_numpy(dtype=float) - robust_pred_dx
+    rows["robust_res_dy_px"] = rows["refined_align_dy_px"].to_numpy(dtype=float) - robust_pred_dy
+    rows["robust_res_norm_px"] = np.hypot(
+        rows["robust_res_dx_px"].to_numpy(dtype=float),
+        rows["robust_res_dy_px"].to_numpy(dtype=float),
+    )
+
+    if "refined_shift_norm_px" not in rows:
+        rows["refined_shift_norm_px"] = np.hypot(
+            rows["refined_align_dx_px"].to_numpy(dtype=float),
+            rows["refined_align_dy_px"].to_numpy(dtype=float),
+        )
+    if "refined_holdout_chamfer_px" not in rows:
+        rows["refined_holdout_chamfer_px"] = np.nan
+    if "gradient_corr_refined" not in rows:
+        rows["gradient_corr_refined"] = np.nan
+
+    rows["res_norm_rank"] = _percentile_rank(rows["res_norm_px"])
+    rows["holdout_chamfer_rank"] = _percentile_rank(rows["refined_holdout_chamfer_px"])
+    rows["gradient_corr_low_rank"] = _percentile_rank(-pd.to_numeric(rows["gradient_corr_refined"], errors="coerce"))
+    rows["refined_shift_norm_rank"] = _percentile_rank(rows["refined_shift_norm_px"])
+    rows["outlier_score"] = (
+        0.45 * rows["res_norm_rank"]
+        + 0.25 * rows["holdout_chamfer_rank"]
+        + 0.20 * rows["gradient_corr_low_rank"]
+        + 0.10 * rows["refined_shift_norm_rank"]
+    )
+
+    excluded = set(affine_fit.excluded_files)
+    rows["used_for_affine_fit"] = rows["R"].eq(repeat) if "R" in rows else False
+    rows["excluded_from_robust_fit"] = rows["file"].astype(str).isin(excluded) if "file" in rows else False
+    rows["residual_gate_outlier"] = rows["res_norm_px"] > affine_fit.outlier_threshold_px
+    rows["recommended_exclude_from_fit"] = rows["used_for_affine_fit"] & rows["residual_gate_outlier"]
+    rows["recommended_exclude_from_affine_application"] = rows["residual_gate_outlier"]
+    rows["suspicious_all_frames"] = rows["residual_gate_outlier"] | (rows["outlier_score"] >= 0.85)
+    return rows
 
 
 def load_capacity_outputs(output_dir: Path) -> dict:
@@ -610,7 +814,7 @@ def alignment_tuning_status_table(outputs: dict) -> pd.DataFrame:
             "artifact": "full_candidate_eval93_summary.csv",
             "status": "available" if outputs["full_path"] is not None else "missing",
             "path": str(outputs["full_path"]) if outputs["full_path"] is not None else "",
-            "use": "255-frame finalist comparison re-scored at edge percentile 93",
+            "use": "clean-main finalist comparison re-scored at edge percentile 93",
         },
     ]
     artifacts = outputs.get("capacity_artifacts", pd.DataFrame())
@@ -737,7 +941,7 @@ def alignment_tuning_conclusion_table(
                     f"refined median={best_limit['refined_med']:.4f} px, "
                     f"P90={best_limit['refined_p90']:.4f} px"
                 ),
-                "boundary": "Fast sweep is a screening step; it does not replace full 255-frame validation.",
+                "boundary": "Fast sweep is a screening step; it does not replace full clean-input validation.",
             }
         )
     if not full_summary.empty:

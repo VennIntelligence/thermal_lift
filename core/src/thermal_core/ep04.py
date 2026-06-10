@@ -27,8 +27,6 @@ from thermal_core.ep03 import (
     detect_outer_contour,
     measure_contour_observability,
     normal_cdf,
-    select_main_scan,
-    select_reference_frame_row,
 )
 from thermal_core.io import load_frame, parse_filename
 from thermal_core.plotting import METHOD_COLORS, METHOD_COLOR_LIST, format_colorbar, make_figure, savefig_academic
@@ -343,13 +341,23 @@ def build_x_scanlines(
     session: int = 2,
     r_value: int = 0,
     expected_x: Iterable[int] = EXPECTED_X_UM,
+    require_sr_usable: bool = True,
 ) -> list[pd.DataFrame]:
-    """Build complete fixed-Y X scanlines from the frame audit table."""
+    """Build complete fixed-Y X scanlines for EP04 localization validation.
+
+    EP04 validates X-scanline localization anchors, not the full multi-frame SR
+    input.  When the clean SR contract columns are present, the scanline subset
+    is constrained to `is_sr_usable`/`is_main_session` in addition to
+    `session=2, R=0`.
+    """
     expected = set(int(v) for v in expected_x)
-    subset = audit_df[
-        audit_df["session"].astype(int).eq(int(session))
-        & audit_df["R"].astype(int).eq(int(r_value))
-    ].copy()
+    mask = audit_df["session"].astype(int).eq(int(session)) & audit_df["R"].astype(int).eq(int(r_value))
+    if require_sr_usable:
+        if "is_sr_usable" in audit_df.columns:
+            mask &= _bool_series(audit_df["is_sr_usable"])
+        elif "is_main_session" in audit_df.columns:
+            mask &= _bool_series(audit_df["is_main_session"])
+    subset = audit_df[mask].copy()
 
     scanlines: list[pd.DataFrame] = []
     for _, group in subset.groupby("Y", sort=True):
@@ -361,6 +369,66 @@ def build_x_scanlines(
         if len(line) == len(expected):
             scanlines.append(line)
     return scanlines
+
+
+def _bool_series(series: pd.Series) -> pd.Series:
+    """Parse bool-like audit columns without treating the string 'False' as true."""
+    if pd.api.types.is_bool_dtype(series):
+        return series.fillna(False).astype(bool)
+    if pd.api.types.is_numeric_dtype(series):
+        return series.fillna(0).astype(int).astype(bool)
+    return series.astype(str).str.strip().str.lower().isin({"1", "true", "yes", "y"})
+
+
+def ep04_data_contract_summary(audit_df: pd.DataFrame) -> dict:
+    """Summarize how EP04's scanline subset relates to the clean SR input."""
+    scanlines = build_x_scanlines(audit_df)
+    scanline_files = [str(v) for line in scanlines for v in line["file"].tolist()]
+    unique_scanline_files = set(scanline_files)
+
+    raw_main_mask = audit_df["session"].astype(int).eq(2) if "session" in audit_df.columns else None
+    if "is_sr_usable" in audit_df.columns:
+        clean_mask = _bool_series(audit_df["is_sr_usable"])
+    elif "is_clean_main_session" in audit_df.columns:
+        clean_mask = _bool_series(audit_df["is_clean_main_session"])
+    elif "is_main_session" in audit_df.columns:
+        clean_mask = _bool_series(audit_df["is_main_session"])
+    elif raw_main_mask is not None:
+        clean_mask = raw_main_mask
+    else:
+        clean_mask = pd.Series(False, index=audit_df.index)
+
+    scanline_mask = audit_df["file"].astype(str).isin(unique_scanline_files)
+    scanline_y_values = [int(line["Y"].iloc[0]) for line in scanlines]
+    scanline_lengths = sorted({int(len(line)) for line in scanlines})
+    return {
+        "ep04_validation_unit": "contour segment x complete R=0 X scanline",
+        "raw_main_session_frame_count": int(raw_main_mask.sum()) if raw_main_mask is not None else None,
+        "clean_sr_input_frame_count": int(clean_mask.sum()),
+        "ep04_scanline_count": int(len(scanlines)),
+        "ep04_scanline_frame_count": int(len(scanline_files)),
+        "ep04_unique_frame_count": int(len(unique_scanline_files)),
+        "ep04_clean_unique_frame_count": int((scanline_mask & clean_mask).sum()),
+        "ep04_scanline_y_um": scanline_y_values,
+        "ep04_scanline_lengths": scanline_lengths,
+        "ep04_scanline_filter": "session=2, R=0, is_sr_usable=True when available",
+    }
+
+
+def select_clean_sr_reference_row(audit_df: pd.DataFrame) -> pd.Series:
+    """Select a representative reference frame from the clean SR input contract."""
+    if "is_sr_usable" in audit_df.columns:
+        subset = audit_df[_bool_series(audit_df["is_sr_usable"])].copy()
+    elif "is_main_session" in audit_df.columns:
+        subset = audit_df[_bool_series(audit_df["is_main_session"])].copy()
+    elif "session" in audit_df.columns:
+        subset = audit_df[audit_df["session"].astype(int).eq(2)].copy()
+    else:
+        raise ValueError("frame audit must include is_sr_usable, is_main_session, or session")
+    if subset.empty:
+        raise ValueError("No clean SR reference frames found")
+    subset = subset.sort_values(["acquisition_order", "file"]).reset_index(drop=True)
+    return subset.iloc[len(subset) // 2]
 
 
 def preload_frames(data_dir: Path, filenames: Iterable[str]) -> dict[str, np.ndarray]:
@@ -1085,7 +1153,6 @@ def plot_split_half_distribution(
     ax.axvline(segment34_value, color=METHOD_COLOR_LIST[2], linestyle="-.", linewidth=1.0, label="EP03 seg34=0.022 px")
     ax.set_xlabel("Median split-half difference [px]")
     ax.set_ylabel("A-class segment count")
-    ax.set_title("A-Class Split-Half Repeatability")
     ax.grid(axis="y", alpha=0.25)
     ax.legend(loc="upper right", fontsize=7)
     return fig
@@ -1110,7 +1177,6 @@ def plot_crb_ratio_scatter(segment_summary: pd.DataFrame) -> plt.Figure:
         ax.text(float(data["segment_id"].min()), value * 1.03, label, fontsize=7, color="#444444", va="bottom")
     ax.set_xlabel("Segment ID")
     ax.set_ylabel("Median split-half / CRB")
-    ax.set_title("CRB Consistency by Segment")
     ax.set_yscale("log")
     ax.grid(axis="y", alpha=0.25)
     ax.scatter([], [], c=METHOD_COLOR_LIST[1], s=24, label="pass")
@@ -1157,7 +1223,6 @@ def plot_pass_fail_contour_map(
     format_colorbar(cbar, "Temperature [C]")
     ax.set_xlabel("Column [px]")
     ax.set_ylabel("Row [px]")
-    ax.set_title("EP04 Pass/Fail Map on Outer Contour")
     ax.legend(loc="upper right", fontsize=7)
     return fig
 
@@ -1180,7 +1245,6 @@ def plot_phase_coverage_vs_precision(segment_summary: pd.DataFrame) -> plt.Figur
     ax.axhline(QUALITY_GATES["max_split_half_a"], color="#444444", linestyle=":", linewidth=1.0, label="A split gate")
     ax.set_xlabel("Median normal phase coverage [px]")
     ax.set_ylabel("Median split-half difference [px]")
-    ax.set_title("Phase Coverage vs Repeatability")
     ax.grid(alpha=0.25)
     ax.legend(loc="upper right", fontsize=7)
     return fig
@@ -1201,7 +1265,6 @@ def plot_failure_taxonomy(segment_summary: pd.DataFrame) -> plt.Figure:
     ax.set_xticks(np.arange(len(labels)))
     ax.set_xticklabels(labels, rotation=35, ha="right")
     ax.set_ylabel("Segment count")
-    ax.set_title("Primary Failure Taxonomy")
     ax.grid(axis="y", alpha=0.25)
     return fig
 
@@ -1247,7 +1310,6 @@ def plot_cross_scanline_consistency(
     ax.axhline(0.0, color="#555555", linewidth=0.8)
     ax.set_xlabel(r"Scanline Y [$\mu$m]")
     ax.set_ylabel("Joint edge position minus segment median [px]")
-    ax.set_title("Cross-Scanline Edge-Position Consistency")
     ax.grid(axis="y", alpha=0.25)
     ax.legend(loc="best", fontsize=7, ncol=2)
     return fig
@@ -1309,8 +1371,7 @@ def prepare_ep04_segment_inputs(
         return {"outer_segments_csv": outer_path, "inner_segments_csv": inner_path}
 
     audit = pd.read_csv(frame_audit_csv)
-    main_df = select_main_scan(audit)
-    reference_row = select_reference_frame_row(main_df)
+    reference_row = select_clean_sr_reference_row(audit)
     reference_frame = load_frame(data_dir / str(reference_row["file"]))
 
     all_segments, contour_summary, outer_mask, outer_contour, inner_contours = measure_contour_observability(
@@ -1476,9 +1537,9 @@ def plot_global_segment_quality_distribution(
     colors = [EP04_OUTER_COLOR, "#AFC3DE", EP04_INNER_COLOR, "#E4B991"]
 
     for ax, column, ylabel, title, log_y in [
-        (axes[0], "split_half_median_px", "Median split-half [px]", "Localization precision", True),
-        (axes[1], "crb_ratio_median", "Median split-half / CRB", "CRB consistency", True),
-        (axes[2], "snr", "SNR", "Thermal contrast", False),
+        (axes[0], "split_half_median_px", "Median split-half [px]", "(a) Localization precision", True),
+        (axes[1], "crb_ratio_median", "Median split-half / CRB", "(b) CRB consistency", True),
+        (axes[2], "snr", "SNR", "(c) Thermal contrast", False),
     ]:
         values = [_box_values(combined, column, mask) for mask in masks]
         box = ax.boxplot(values, labels=labels, patch_artist=True, showfliers=False)
@@ -1542,9 +1603,9 @@ def plot_global_segment_quality_distribution(
     ax.set_xticks(x)
     ax.set_xticklabels(x_labels)
     ax.set_ylabel("Segment count")
-    ax.set_title("Pass/fail by contour class")
+    ax.set_title("(d) Pass/fail by contour class")
     ax.grid(axis="y", alpha=0.25)
-    ax.legend(loc="upper right", fontsize=7)
+    ax.legend(loc="upper left", fontsize=7)
     return fig
 
 
@@ -1664,7 +1725,7 @@ def plot_anchor_coverage_map(
             edgecolor="white",
             linewidth=0.25,
             alpha=0.70,
-            label=f"{contour} reject",
+            label=f"{contour.capitalize()} Reject",
         )
         ax_map.scatter(
             data.loc[passed, "x_px"],
@@ -1675,7 +1736,7 @@ def plot_anchor_coverage_map(
             edgecolor="white",
             linewidth=0.35,
             alpha=0.94,
-            label=f"{contour} anchor",
+            label=f"{contour.capitalize()} Anchor",
         )
     cbar = fig.colorbar(im, ax=ax_map, fraction=0.046, pad=0.02)
     format_colorbar(cbar, "Temperature [C]")
@@ -1684,10 +1745,9 @@ def plot_anchor_coverage_map(
     ax_map.set_ylim(y_bottom, y_top)
     ax_map.set_xlabel("Column [px]")
     ax_map.set_ylabel("Row [px]")
-    ax_map.set_title("Zoomed spatial anchor coverage")
     legend = ax_map.legend(
-        loc="upper right",
-        fontsize=7,
+        loc="upper left",
+        fontsize=8,
         ncol=2,
         frameon=True,
         facecolor="#241038",
@@ -1744,7 +1804,7 @@ def plot_anchor_scanline_support(
             color=EP04_TOTAL_COLOR,
             edgecolor=EP04_TOTAL_EDGE,
             linewidth=0.45,
-            label="evaluated anchor checks" if contour == "outer" else None,
+            label="Evaluated Anchor Checks" if contour == "outer" else None,
             zorder=1,
         )
         ax.bar(
@@ -1754,7 +1814,7 @@ def plot_anchor_scanline_support(
             color=colors[contour],
             edgecolor="white",
             linewidth=0.35,
-            label=f"{contour} passing checks",
+            label=f"{contour.capitalize()} Passing Checks",
             zorder=2,
         )
 
@@ -1762,9 +1822,8 @@ def plot_anchor_scanline_support(
     ax.set_xticklabels([f"{int(v)}" for v in scanlines])
     ax.set_xlabel("Scanline Y [um]")
     ax.set_ylabel("Anchor checks per scanline")
-    ax.set_title("Anchor support by scanline")
     ax.grid(axis="y", alpha=0.25)
-    ax.legend(loc="upper right", fontsize=7)
+    ax.legend(loc="upper center", bbox_to_anchor=(0.5, 1.15), ncol=3, frameon=False, fontsize=8)
     return fig
 
 
@@ -2093,13 +2152,14 @@ def plot_inner_failure_reasons(
     x = np.arange(len(rate))
     ax_rate.bar(x, 100.0 * rate["pass_rate"].to_numpy(dtype=float), color=METHOD_COLOR_LIST[0], alpha=0.82)
     for i, row in rate.iterrows():
-        ax_rate.text(i, 100.0 * float(row["pass_rate"]) + 1.0, f"n = {int(row['n_segments'])}", ha="center", fontsize=7)
+        ax_rate.text(i, 100.0 * float(row["pass_rate"]) + 1.0, f"n = {int(row['n_segments'])}", ha="center", fontsize=8)
     ax_rate.set_xticks(x)
     ax_rate.set_xticklabels([str(v).split("_")[0] for v in rate["quality_label"]])
     ax_rate.set_ylim(0.0, min(105.0, max(20.0, 100.0 * float(rate["pass_rate"].max()) + 15.0)))
     ax_rate.set_ylabel("Segment anchor pass rate [%]")
-    ax_rate.set_title("Segment-level anchor pass rate")
+    ax_rate.set_title("(a) Segment-level anchor pass rate")
     ax_rate.grid(axis="y", alpha=0.25)
+    ax_rate.tick_params(axis="both", labelsize=8)
 
     reasons = failure_reason_table(inner_results, contour="inner").head(8)
     if reasons.empty:
@@ -2115,10 +2175,11 @@ def plot_inner_failure_reasons(
         x_max = max(10.0, float(np.nanmax(shares)) * 1.28)
         ax_reason.set_xlim(0.0, x_max)
         for yi, share, count in zip(y, shares, counts, strict=False):
-            ax_reason.text(share + 0.015 * x_max, yi, f"{share:.1f}% (n = {count})", va="center", fontsize=7)
+            ax_reason.text(share + 0.015 * x_max, yi, f"{share:.1f}% (n = {count})", va="center", fontsize=8)
         ax_reason.set_xlabel("Share of failed row evaluations [%]")
-        ax_reason.set_title("Row-level gate rejection reasons")
+        ax_reason.set_title("(b) Row-level gate rejection reasons")
         ax_reason.grid(axis="x", alpha=0.25)
+        ax_reason.tick_params(axis="both", labelsize=8)
     return fig
 
 
@@ -2262,7 +2323,6 @@ def plot_ep06_gate_recommendations(recommendations: pd.DataFrame) -> plt.Figure:
     ax.set_xticks(x)
     ax.set_xticklabels([value.title() for value in contours])
     ax.set_ylabel("Segment count")
-    ax.set_title("EP06 Use Recommendation from EP04 Gates")
     ax.grid(axis="y", alpha=0.25)
     ax.legend(
         loc="upper left",
@@ -2408,7 +2468,6 @@ def plot_combined_pass_fail_contour_map(
     format_colorbar(cbar, "Temperature [C]")
     ax.set_xlabel("Column [px]")
     ax.set_ylabel("Row [px]")
-    ax.set_title("Combined Inner/Outer Pass-Fail Coverage")
     ax.legend(loc="upper right", fontsize=6, ncol=2)
     return fig
 
@@ -2439,7 +2498,6 @@ def plot_combined_split_half_distribution(
     ax.axvline(p90, color=METHOD_COLOR_LIST[4], linestyle=":", linewidth=1.1, label=f"combined P90={p90:.3f} px")
     ax.set_xlabel("Median split-half difference [px]")
     ax.set_ylabel("Passed segment count")
-    ax.set_title("Combined Passed-Segment Split-Half Distribution")
     ax.grid(axis="y", alpha=0.25)
     ax.legend(loc="upper right", fontsize=7)
     return fig
@@ -2470,7 +2528,6 @@ def plot_normal_angle_coverage_comparison(
     ax.set_thetamax(180)
     ax.set_theta_zero_location("E")
     ax.set_theta_direction(-1)
-    ax.set_title("Passed-Segment Normal Direction Coverage")
     ax.set_rlabel_position(135)
     ax.set_ylabel("Relative count")
     ax.legend(loc="upper right", bbox_to_anchor=(1.30, 1.08), fontsize=7)
@@ -3694,7 +3751,6 @@ def plot_uncertainty_map(
     format_colorbar(cbar2, "Split-half diff [px]")
     ax.set_xlabel("Column [px]")
     ax.set_ylabel("Row [px]")
-    ax.set_title("Apparent Thermal Boundary Uncertainty Map")
     ax.legend(loc="upper right", fontsize=7)
     return fig
 
