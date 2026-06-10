@@ -1,0 +1,24 @@
+[project]
+name = "ep10-drizzle"
+version = "0.1.0"
+description = "EP10 CPU Drizzle 2x micro-scan super-resolution"
+requires-python = ">=3.11"
+dependencies = [
+    "drizzle>=2.2",
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "pytest>=8.0",
+    "scipy>=1.12",
+    "thermal-core",
+    "tqdm>=4.66",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+thermal-core = { path = "../../core", editable = true }
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../ep06_sr_poc/src"]

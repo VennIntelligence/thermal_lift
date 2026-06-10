@@ -1,0 +1,8 @@
+01_setup.py
+02_synthetic_validation.py
+03_sweep_results.py
+04_top_params_visuals.py
+04b_temperature_comparison.py
+05_intermediate_diagnostics.py
+06_drizzle_4x.py
+05_conclusions.py

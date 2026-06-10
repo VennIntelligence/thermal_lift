@@ -1,0 +1,18 @@
+name: ep10_tgv_sr
+# EP10 uses conda rather than UV because ccpi-regulariser is distributed as a
+# conda package with compiled CPU/CUDA components on the conda-forge/ccpi
+# channels. This avoids unreproducible local C/C++/CUDA builds for the TGV
+# backend while keeping this algorithm isolated from the root project env.
+channels:
+  - conda-forge
+  - ccpi
+dependencies:
+  - python=3.11
+  - ccpi-regulariser=24.0.1
+  - numpy
+  - scipy
+  - matplotlib
+  - pandas
+  - pytest
+  - tqdm
+  - pip

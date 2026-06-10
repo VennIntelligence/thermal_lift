@@ -1,0 +1,23 @@
+[project]
+name = "ep10-map-tv-sweep"
+version = "0.1.0"
+description = "EP10 MAP-TV lambda and PSF sigma joint sweep"
+requires-python = ">=3.11"
+dependencies = [
+    "numpy>=1.26",
+    "scipy>=1.12",
+    "matplotlib>=3.8",
+    "pandas>=2.1",
+    "pytest>=8.0",
+    "tqdm>=4.66",
+    "thermal-core",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+thermal-core = { path = "../../core", editable = true }
+
+[tool.pytest.ini_options]
+pythonpath = ["src", "../ep06_sr_poc/src", "../../core/src"]
