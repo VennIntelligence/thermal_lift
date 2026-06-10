@@ -68,7 +68,6 @@ def plot_axis_match(summary: pd.DataFrame, output_path: Path) -> None:
     ax.set_xticklabels([f"{int(v)}" for v in pivot.index])
     ax.set_xlabel("N in xNum.avi [um]")
     ax.set_ylabel("Axis difference to AVI [deg]")
-    ax.set_title("Which TXT Line Matches x-scan AVI?")
     ax.axhline(10, color="#444444", ls=":", lw=0.9)
     ax.legend(loc="best")
     savefig_academic(fig, output_path)
@@ -90,7 +89,6 @@ def plot_fixed_y_projection(paths: pd.DataFrame, output_path: Path) -> None:
         ax.plot(group["coordinate_value"], projection, marker="o", ms=2.5, lw=0.9, label=f"Y={int(fixed_um)}")
     ax.set_xlabel("TXT X coordinate [um]")
     ax.set_ylabel("Contour projection along row [px]")
-    ax.set_title("TXT Fixed-Y X Rows Are Monotonic")
     ax.legend(fontsize=6, ncols=2, loc="best")
     savefig_academic(fig, output_path)
 

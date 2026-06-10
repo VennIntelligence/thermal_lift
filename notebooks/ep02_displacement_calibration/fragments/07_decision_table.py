@@ -16,19 +16,19 @@
 # | AVI 连续扫描 | AVI continuous scans | 辅助方向验证与命名 sanity check | auxiliary direction and naming sanity check | SR 输入或高精度 theta 替代 | SR input or high-precision theta replacement | AVI 是渲染 8-bit 视频且有大量重复帧，不是 raw 温度矩阵 |
 
 # %% [markdown]
-# > **数据说明**: 这张表列出 EP02/后续重建中每类证据的用途、禁止用途和原因。
-# > **怎么读表**: 先看“allowed/use”列，确认某类证据能支持什么；再看“forbidden/use”或原因列，确认它不能支持什么。尤其要区分 command prior、局部 NCC/ESF 响应和最终 alignment evidence / anchor / quality gate。
-# > **正常/异常理解**: 正常的证据链应是 stage/filename 坐标提供 prior，X 小步提供短时方向/线性诊断，Y 坐标相邻 pair 标记为不适合定量标定，data-driven alignment 承担质量门控。若某一行把 prior 写成 truth，或把 Y-only NCC 写成标定来源，就是需要修正的过度外推。
-# > **数据分布**: stage/filename 坐标、X 小步、Y 坐标相邻 pair、AVI 连续扫描和 data-driven alignment 分别落在不同证据层级。
-# > **核心发现**: EP02 提供 raster 路径、坐标 prior 和相邻小步诊断；后续 EP06 需要在主 session 上做 data-driven 对齐与质量门控后，再进入 2x contour-level SR。
+# ### 📝 物理证据边界与算法决策准则
+#
+# 上述证据使用边界表（Evidence-Use Table）明确了各物理数据在超分辨率重建算法体系中的角色与限制。它将标定先验、图像相似性、时序关系以及辅助视频流划分为不同的应用能级，确立了“因果匹配、严防越界”的数据处理准则。
+#
+# **💡 算法决策**：
+# 1. 严格限制电机指令的定位能级，仅将其作为优化计算的全局几何先验（Prior），避免将其误判为对齐真值导致累积偏差。
+# 2. 封禁 $Y$ 轴空间相邻帧对的直接标定功能，转由全局对齐锚点（EP04 Localization Gate）接管。
+# 3. 将连续视频 AVI 作为辅助方向验证的第二信源，保持系统物理参数的稳定性。
 
 # %% [markdown]
-# ## EP02 Conclusion
+# ## 🏁 EP02 研究结论与后续算法指导
 #
-# - 主 session 是 raster 采集：X 行内连续，Y 行间跳转。
-# - `stage_calibration.json` 的 theta/pitch 提供 detector-space prior 和 2x phase 覆盖，不提供 alignment truth。
-# - X 行内小步 NCC 是局部方向/线性 smoke test，不能外推成多帧 SR 结论。
-# - Y-only 坐标相邻 pair 受 acquisition gap 和热场演化污染，不能做定量 Y 位移标定。
-# - 当前可用的 alignment score 显示 data-driven contour/NCC 对齐比 filename/stage prior 更适合支撑 alignment anchor 和质量门控。
-#
-# 换句话说，EP02 的结论是“如何使用位移证据”，不是“已经完成了 SR 重建”。stage prior 给出合理起点，NCC/ESF 等局部指标帮助诊断可见响应，最终是否进入 2x contour-level SR 还需要依赖主 session 内的 data-driven alignment 质量门控和重建后一致性检查。
+# 1. **光栅扫描时序拓扑**：确认主 Session 采用 Step-and-Shoot 逐行光栅扫描模式。行内 $X$ 轴平移属于时序连续帧，而行间 $Y$ 轴平移受限于约 16 帧的时序延迟。
+# 2. **物理先验有效性**：验证了由标定旋转角 $\theta = 47.6^\circ$ 和探测器间距 $10.0\,\mu\text{m}$ 构成的几何转换矩阵在 $2 \times 2$ 超分辨率子网格上具有完整的半像素空间相位覆盖。
+# 3. **失效机理与规避**：阐明了 Y-only 空间相邻帧对因热场演化造成的互相关单调性失效，为后续几何配准算法排除了“局部标定 $Y$ 位移”的错误路线。
+# 4. **对齐策略定位**：确立了“位移先验提供初始化分布，数据驱动提供最终配准锚点”的分工模式。后续的 2x contour-level 超分辨率重建流程应基于此对齐架构设计质量控制闸门。

@@ -11,13 +11,13 @@
 旋转角 θ = 47.6° 和 stage 命令坐标仍是后续重建的重要先验，但 EP02 的职责不是给出 SR 成败判决，也不是把命令位移当作对齐真值。
 本 Episode 的核心任务是把 TXT/BMP raster 采集顺序、坐标 prior 覆盖、相邻小步诊断和 data-driven 对齐证据分层讲清楚。
 
-当前结论：EP02 提供采集路径、坐标 prior 和局部 smoke test；后续 EP06 需要在主 session 上做 data-driven 对齐与质量门控后，再进入 2x contour-level SR。
+当前结论：EP02 提供采集路径、坐标 prior 和局部 smoke test；这些诊断必须基于 EP01 剔除 `R != 0` 后的 `is_sr_usable=True` 干净 248 帧输入。后续 EP06 需要在干净主扫描输入上做 data-driven 对齐与质量门控后，再进入 2x contour-level SR。
 
 ---
 
 ## 📋 当前交付任务清单
 
-- [x] Raster acquisition path 图：按 `acquisition_order` 连线，显示 X 行内连续、Y 行间跳转。
+- [x] Raster coordinate timelines 图：左右展示 X Timeline 与 Y Timeline 随采集顺序的变化。
 - [x] Stage prior 位移覆盖图：读取 `configs/stage_calibration.json`，映射 X/Y 到 detector dx/dy，并统计 2x phase bin 覆盖。
 - [x] 小步诊断图：保留 X 行内时间相邻方向/线性 smoke test，明确 Y-only 坐标相邻 pair 不能标定。
 - [x] Data-driven vs filename/stage 对齐比较：读取已有 EP05 alignment score，证明 data-driven contour/NCC 更适合作 alignment quality gate。
@@ -128,7 +128,7 @@
 ### 决策记录
 
 - **不更新** `configs/stage_calibration.json`。
-- EP01 已确认旧版 13 sessions 是文件名排序伪影；EP02 已改为只使用主扫描 session=2 的 255 帧数据。
+- EP01 已确认旧版 13 sessions 是文件名排序伪影；EP02 已改为只使用剔除 `R != 0` 重复帧后的 `is_sr_usable=True` 248 帧干净主扫描数据。
 - 当前 NCC 测量仍不能独立验证 θ=47.6°，也不能给出可直接采用的新 θ。
 - 主要失败模式仍是 Y-scan：2 µm 与 4 µm 命令步长的实测位移不呈线性倍增，说明问题不是早期低温/补采帧污染。
 - 主扫描内 X-scan 方向约 -35° 到 -32°，Y-scan 方向约 52° 到 54°；更大的异常是 Y-scan 4 µm 的实测幅值小于 2 µm。
@@ -296,12 +296,12 @@
 
 ## 2026-05-18 Notebook/Report 重写
 
-- EP02 notebook 已重写为“raster path / stage prior / data-driven alignment evidence”版本。
-- 新叙事顺序：raster acquisition path → stage prior detector coverage and 2x phase bins → small-step smoke tests → data-driven vs filename/stage alignment comparison → evidence-use decision table。
-- 核心图包括：`ep02_raster_acquisition_path.png`、`ep02_stage_prior_coverage.png`、`ep02_small_step_smoke_tests.png`、`ep02_data_driven_alignment_comparison.png`。
-- 关键数值：主 session 255 帧、R=0 raster 248 帧、X 行内时间相邻转移 232 对、Y 坐标相邻 gap 中位数 16 帧；stage prior 四个 2x phase bin 均非空。
+- EP02 notebook 已重写为“raster timeline / stage prior / data-driven alignment evidence”版本。
+- 新叙事顺序：raster coordinate timelines → stage prior detector coverage and 2x phase bins → small-step smoke tests → data-driven vs filename/stage alignment comparison → evidence-use decision table。
+- 核心图包括：`ep02_raster_acquisition_path.png`（仅包含 X/Y Timeline）、`ep02_stage_prior_coverage.png`、`ep02_small_step_smoke_tests.png`、`ep02_data_driven_alignment_comparison.png`。
+- 关键数值：原始主 session=2 为 255 帧；剔除 `R != 0` 后的 `is_sr_usable=True` 干净输入为 248 帧；X 行内时间相邻转移 232 对；Y 坐标相邻 gap 中位数 16 帧；stage prior 四个 2x phase bin 均非空。
 - alignment 口径：已有 EP05 score 显示 data-driven contour refined 相对 stage-prior-only 的 holdout Chamfer 中位误差下降 44.2%，因此 stage/filename 坐标只作为 prior，alignment evidence / anchor / quality gate 由 data-driven contour/NCC 质量指标支撑。
-- 正式结论：EP02 不把 stage command 当成位移真值，也不从 2 um 小步外推多帧 SR 成败；EP06 应在主 session 上做 data-driven 对齐与质量门控后进入 2x contour-level SR。
+- 正式结论：EP02 不把 stage command 当成位移真值，也不从 2 um 小步外推多帧 SR 成败；EP06 应在 `is_sr_usable=True` 的 248 帧干净主扫描输入上做 data-driven 对齐与质量门控后进入 2x contour-level SR。
 
 ### 产物
 

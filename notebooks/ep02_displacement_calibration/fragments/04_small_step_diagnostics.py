@@ -8,25 +8,30 @@
 # 所以这里不会把小步 NCC 或 ESF 局部响应外推为全局 SR 成功/失败结论。
 
 # %%
-fig, small_metrics = plot_small_step_diagnostics(
-    OUTPUT_DIR,
-    OUTPUT_DIR / "ep02_small_step_smoke_tests.png",
-)
-fig
+from thermal_core.ep02 import small_step_metrics
+
+show_fig("ep02_small_step_smoke_tests.png")
 
 # %% [markdown]
-# > **图表说明**: 左图比较 X/Y 坐标相邻 pair 的采集时间间隔；中图把 X 时间相邻 high-pass NCC 可见投影和 stage-prior 名义幅值放在同一尺度；右图显示 Y 坐标相邻 pair 的 2 um/4 um 投影比例。
-# > **怎么读图**: acquisition gap 越小，两帧越接近“只差一个 stage 小步”；visible projection 越接近 nominal prior，说明局部 NCC 响应与命令方向越一致。右图的 4 um/2 um 比例应接近 2 才符合简单线性位移预期。
-# > **正常/异常理解**: X pair 的 gap 中位数为 1，是可用的短时 smoke test；4 um/2 um 可见投影保持接近线性，说明方向和数量级有响应。Y pair 的 gap 中位数约 16，且 4 um 组没有达到 2 um 组的两倍，这是时间污染和 raster 路径共同导致的失败诊断。
-# > **数据分布**: X 和 Y 的差异主要不是“轴本身好坏”，而是采集路径造成的 pair 质量差异。固定 X 的 Y 坐标相邻点往往隔了一整行，热场演化会污染 NCC。
-# > **核心发现**: X 小步是方向和短时线性的 smoke test；Y-only 坐标相邻 NCC 不能作为 Y 位移标定。这个结果也不能反向证明多帧 contour-level SR 不可行。
+# Figure 3: Small-step displacement diagnostics. Local NCC responses compare time-adjacent X steps with delayed Y-adjacent pairs.
+
+# %% [markdown]
+# ### 🔍 局部位移响应与时序稳定性诊断
+#
+# 局部位移互相关（NCC）投影分析主要用于验证步进指令在探测器空间内的方向响应性及线性特征：
+# 1. **时序相邻帧对的有效性**：$X$ 轴相邻帧对的物理采集间隔中位数仅为 $1$（即时序连续帧），这为排除热场演化干扰、评估短时位移线性响应提供了理想的基准。
+# 2. **方向与线性相应性**：在 $X$ 轴方向上，随着名义位移从 $2\,\mu\text{m}$ 增至 $4\,\mu\text{m}$，基于高通滤波后图像提取的可见 NCC 投影量呈现出合理的单调递增规律（比值接近 2.0），验证了运动阶段方向的局部稳定性。
+# 3. **光栅扫描时序污染**：相反，物理空间中 $Y$ 轴相邻帧对（位移 nominal prior 分别为 $2\,\mu\text{m}$ 和 $4\,\mu\text{m}$）的采集时间间隔中位数高达 16 帧，受温漂与背景演化干扰严重，导致其 $4\,\mu\text{m}$ 与 $2\,\mu\text{m}$ 投影比值严重偏离线性（甚至低于 1.0），违反了物理位移的单调性规律。
+#
+# **💡 算法决策**：鉴于 $Y$ 轴相邻帧对存在严重的时序滞后污染，不能将其用于定量的位移标定。后续的多帧超分辨率几何配准必须依赖基于主 Session 的全局或区域数据驱动对齐（如 EP04 localization 门控），而非仅从小步长相邻帧对的局部 NCC 结果进行外推。
 
 # %%
+small_metrics = small_step_metrics(OUTPUT_DIR)
 display(small_metrics)
 
 # %% [markdown]
-# > **数据说明**: 表中数值来自 EP02 重新计算的 pair 表，`visible projection` 是局部 high-pass NCC 投影，`nominal prior` 是 47.6 deg、10 um/pixel stage prior 的期望量级。
-# > **怎么读表**: `visible projection` 是图像数据里 NCC 能“看见”的局部投影，不等于完整真实位移；`nominal prior` 是命令位移按配置换算出的预期值；比例项用于检查 2 um 到 4 um 是否呈现合理单调性。
-# > **正常/异常理解**: 小步投影低于 nominal prior 并不自动说明 stage 或 theta 错了，因为 PSF 模糊、噪声、高通窗口和局部纹理都会影响 NCC 可见响应。真正危险的是 Y 的 4/2 比例低于 1，它违反了更大 command 应产生更大投影的基本单调性。
-# > **数据分布**: X 2 um 的可见投影小于名义 prior，但 X 的 4/2 比例保留短时线性；Y 的 4/2 比例低于 1，说明这组 pair 不适合做定量标定。
-# > **核心发现**: 这些结果用于筛选可用诊断 pair，而不是给出 SR 成败判决。后续重建应把 stage prior 作为初始化/正则项，再用 data-driven alignment 作为质量门控。
+# ### 📊 小步长位移定量响应特征
+#
+# 定量指标表明，$X$ 轴方向上互相关估计的局部分量虽然受到物理孔径、点扩散函数（PSF）平滑及热背景起伏的压制（导致绝对投影值略小于名义先验），但仍保留了良好的比例单调性。而 $Y$ 轴方向因长采集间隙受到噪声和物理热场畸变的严重干扰，其尺度比例呈现非物理的衰减。
+#
+# **💡 算法决策**：此定量结果支撑了将 $X$ 轴时序连续帧用作局部对齐“哨兵帧”（Diagnostic Pair）的决策，同时指明了 $Y$ 轴空间相邻帧在无时序对齐约束下的失效机制。在超分辨率重构中，名义位移先验应作为非凸优化的初始迭代种子或正则项，并通过数据本身的结构特征自适应校正。

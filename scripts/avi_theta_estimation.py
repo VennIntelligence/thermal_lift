@@ -20,6 +20,7 @@ from pathlib import Path
 
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 
 PROJECT_ROOT = Path(__file__).resolve().parent.parent
 OUTPUT_DIR = PROJECT_ROOT / "output" / "ep02_displacement_calibration"
@@ -27,6 +28,7 @@ REFERENCE_THETA_DEG = 47.6
 
 sys.path.insert(0, str(PROJECT_ROOT / "core" / "src"))
 from thermal_core.plotting import METHOD_COLORS, make_figure, savefig_academic, setup_academic_style
+from thermal_core.viz import plot_avi_theta_bracket_summary
 
 
 def wrap_angle_180(angle_deg: float | np.ndarray) -> float | np.ndarray:
@@ -235,17 +237,30 @@ def plot_forest(estimates: pd.DataFrame, output_path: Path) -> None:
     setup_academic_style()
     methods = ["highpass", "gradient"]
     titles = {"highpass": "High-pass NCC", "gradient": "Gradient NCC"}
-    colors = {"x": METHOD_COLORS["primary"], "y": METHOD_COLORS["accent_1"]}
+    colors = {
+        "x": METHOD_COLORS["primary"],
+        "y": METHOD_COLORS["accent_1"],
+        "combined": METHOD_COLORS["secondary"]
+    }
 
-    fig, axes = make_figure("double_col", nrows=1, ncols=2, height=4.8, sharex=True)
+    # Disable constrained layout temporarily so we can manually adjust subplots_adjust
+    _cl_backup = plt.rcParams.get("figure.constrained_layout.use", False)
+    plt.rcParams["figure.constrained_layout.use"] = False
+
+    fig, axes = make_figure("double_col", nrows=1, ncols=2, height=4.5, sharex=True, constrained_layout=False)
     if not isinstance(axes, np.ndarray):
         axes = np.array([axes])
+
+    plt.rcParams["figure.constrained_layout.use"] = _cl_backup
 
     for ax, method in zip(axes.ravel(), methods, strict=True):
         subset = estimates[estimates["method"] == method].copy()
         subset = subset.sort_values(["scan_axis", "avi_name"]).reset_index(drop=True)
-        y_pos = np.arange(len(subset))
+        
+        n_individual = len(subset)
+        y_pos = np.arange(n_individual)
 
+        # Plot individual files
         for axis in ["x", "y"]:
             axis_subset = subset[subset["scan_axis"] == axis]
             idx = axis_subset.index.to_numpy()
@@ -258,25 +273,98 @@ def plot_forest(estimates: pd.DataFrame, output_path: Path) -> None:
                 y_pos[idx],
                 xerr=xerr,
                 fmt="o",
-                ms=4.5,
-                capsize=2.5,
-                lw=0.9,
+                ms=4.0,
+                capsize=2.0,
+                lw=0.8,
                 color=colors[axis],
                 ecolor=colors[axis],
-                label=f"{axis.upper()}-scan",
+                label=f"{axis.upper()}-scan study",
                 zorder=3,
             )
 
-        ax.axvline(REFERENCE_THETA_DEG, color="#333333", ls="--", lw=1.0, label="47.6 deg")
+        # Draw separation line between individual estimates and pooled summaries
+        ax.axhline(n_individual - 0.5, color="#888888", linestyle="-", linewidth=0.7, alpha=0.6)
+
+        # Calculate and plot pooled summaries
+        # 1. X-scan Pooled
+        x_vals = subset[subset["scan_axis"] == "x"]["theta_est_deg"].to_numpy(dtype=float)
+        x_mean = np.mean(x_vals)
+        x_lo, x_hi = normal_ci(x_vals)
+        y_x = n_individual + 0.5
+        ax.errorbar(
+            [x_mean],
+            [y_x],
+            xerr=[[x_mean - x_lo], [x_hi - x_mean]],
+            fmt="D",
+            ms=5.5,
+            capsize=3.0,
+            lw=1.2,
+            color=colors["x"],
+            ecolor=colors["x"],
+            label="X-scan Pooled",
+            zorder=4,
+        )
+
+        # 2. Y-scan Pooled
+        y_vals = subset[subset["scan_axis"] == "y"]["theta_est_deg"].to_numpy(dtype=float)
+        y_mean = np.mean(y_vals)
+        y_lo, y_hi = normal_ci(y_vals)
+        y_y = n_individual + 1.5
+        ax.errorbar(
+            [y_mean],
+            [y_y],
+            xerr=[[y_mean - y_lo], [y_hi - y_mean]],
+            fmt="D",
+            ms=5.5,
+            capsize=3.0,
+            lw=1.2,
+            color=colors["y"],
+            ecolor=colors["y"],
+            label="Y-scan Pooled",
+            zorder=4,
+        )
+
+        # 3. Overall Combined Pooled
+        all_vals = subset["theta_est_deg"].to_numpy(dtype=float)
+        comb_mean = np.mean(all_vals)
+        comb_lo, comb_hi = normal_ci(all_vals)
+        y_comb = n_individual + 2.5
+        ax.errorbar(
+            [comb_mean],
+            [y_comb],
+            xerr=[[comb_mean - comb_lo], [comb_hi - comb_mean]],
+            fmt="D",
+            ms=6.5,
+            capsize=4.0,
+            lw=1.5,
+            color=colors["combined"],
+            ecolor=colors["combined"],
+            label="Combined Pooled",
+            zorder=4,
+        )
+
+        # Vertical reference line
+        ax.axvline(REFERENCE_THETA_DEG, color="#333333", ls="--", lw=1.0, label=f"Ref ({REFERENCE_THETA_DEG:.1f} deg)")
+        
+        # Shade Combined Pooled 95% CI to show how it covers the reference
+        ax.axvspan(comb_lo, comb_hi, color=colors["combined"], alpha=0.08, zorder=0, label="Combined 95% CI")
+
+        # Layout setup
         ax.set_title(titles[method])
         ax.set_xlabel("Theta estimate [deg]")
-        ax.set_yticks(y_pos)
-        ax.set_yticklabels(subset["avi_name"].tolist(), fontsize=7)
+        
+        all_y_pos = list(y_pos) + [y_x, y_y, y_comb]
+        all_y_labels = subset["avi_name"].tolist() + ["X-scan Pooled", "Y-scan Pooled", "Combined Pooled"]
+        
+        ax.set_yticks(all_y_pos)
+        ax.set_yticklabels(all_y_labels, fontsize=7)
         ax.grid(axis="x", alpha=0.25, linewidth=0.5)
         ax.set_xlim(39.0, 54.0)
         ax.invert_yaxis()
-        ax.legend(loc="lower right", fontsize=7)
-    axes[0].set_ylabel("AVI")
+        ax.legend(loc="upper left", fontsize=6.5, frameon=False)
+        
+    axes[0].set_ylabel("AVI Source")
+    fig.subplots_adjust(left=0.14, right=0.98, bottom=0.12, top=0.88, wspace=0.22)
     savefig_academic(fig, output_path)
 
 
@@ -285,11 +373,18 @@ def write_outputs(estimates: pd.DataFrame, summary: pd.DataFrame, output_dir: Pa
 
     estimates_path = output_dir / "avi_theta_estimates.csv"
     summary_path = output_dir / "avi_theta_summary.csv"
+    bracket_path = output_dir / "avi_theta_bracket_plot.png"
     figure_path = output_dir / "avi_theta_forest_plot.png"
     result_path = output_dir / "avi_theta_result.json"
 
     estimates.to_csv(estimates_path, index=False)
     summary.to_csv(summary_path, index=False)
+    plot_avi_theta_bracket_summary(
+        summary,
+        method="gradient",
+        reference_deg=REFERENCE_THETA_DEG,
+        output_path=bracket_path,
+    )
     plot_forest(estimates, figure_path)
 
     best_row = summary[(summary["method"] == "gradient") & (summary["source"] == "combined")]
@@ -310,6 +405,7 @@ def write_outputs(estimates: pd.DataFrame, summary: pd.DataFrame, output_dir: Pa
         "outputs": {
             "estimates_csv": str(estimates_path),
             "summary_csv": str(summary_path),
+            "bracket_plot": str(bracket_path),
             "forest_plot": str(figure_path),
         },
     }

@@ -22,6 +22,7 @@ from thermal_core.displacement import (
     fit_rotation_angle,
     measure_frame_pairs,
 )
+from thermal_core.ep02 import clean_sr_input
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[1]
@@ -35,6 +36,9 @@ METHODS = [
     ("highpass_ncc", "ncc", "highpass"),
     ("gradient_ncc", "ncc", "gradient"),
 ]
+
+# Planned within-row X steps for small-step smoke tests (exclude path anomalies such as 6 um).
+PLANNED_X_STEP_UM = {2, 4}
 
 
 def add_order_gap(pairs: pd.DataFrame, audit_df: pd.DataFrame) -> pd.DataFrame:
@@ -207,7 +211,9 @@ def main() -> None:
     theta_deg = float(stage_config["theta_deg"])
     pixel_size_um = float(stage_config["pixel_size_um"])
 
-    main_df = audit_df[audit_df["session"].eq(2)].copy()
+    main_df = clean_sr_input(audit_df)
+    if main_df.empty:
+        raise RuntimeError("No EP02 clean input frames found; expected is_sr_usable == True.")
 
     time_pairs = build_time_adjacent_pairs(
         main_df,
@@ -215,6 +221,9 @@ def main() -> None:
         session_col="session",
         max_order_gap=1,
     )
+    time_pairs = time_pairs[
+        (time_pairs["move_type"] != "x_step") | time_pairs["delta_X_um"].isin(PLANNED_X_STEP_UM)
+    ].copy()
     time_pairs.to_csv(OUTPUT_DIR / "time_adjacent_registration_pairs.csv", index=False)
     time_pairs.to_csv(OUTPUT_DIR / "time_adjacent_pairs_r0.csv", index=False)
 
@@ -250,6 +259,7 @@ def main() -> None:
     ).to_csv(OUTPUT_DIR / "y_coordinate_monotonic_summary.csv", index=False)
 
     print(f"Recomputed EP02 displacement tables with pixel_size_um={pixel_size_um:.1f}")
+    print(f"Clean EP02 input frames: {len(main_df)}")
 
 
 if __name__ == "__main__":

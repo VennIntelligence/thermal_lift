@@ -2,7 +2,7 @@
 
 ## Scope
 
-EP02 reconstructs the main-session raster acquisition path, maps filename/stage coordinates into detector-space stage priors, and records which displacement evidence can be used for downstream alignment. It does not treat stage command as alignment truth and does not use small 2 um adjacent-step diagnostics to judge multi-frame SR feasibility.
+EP02 reconstructs the repeat-excluded main raster acquisition path, maps filename/stage coordinates into detector-space stage priors, and records which displacement evidence can be used for downstream alignment. The raw physical main temperature segment is `session=2` with 255 frames, but the EP02/SR input contract is `is_sr_usable=True` after excluding `R != 0` repeat frames, giving 248 clean frames. EP02 does not treat stage command as alignment truth and does not use small 2 um adjacent-step diagnostics to judge multi-frame SR feasibility.
 
 The downstream contract is: EP02 provides acquisition path plus coordinate prior; EP04/EP05-style data-driven contour/NCC alignment provides the alignment anchor and quality gate before EP06 2x contour-level SR.
 
@@ -10,22 +10,23 @@ The downstream contract is: EP02 provides acquisition path plus coordinate prior
 
 | Item | Result | Interpretation |
 |---|---:|---|
-| Main session frames | 255 | session=2 only |
-| R=0 raster frames | 248 | primary step-and-shoot grid |
+| Raw main session frames | 255 | session=2 before repeat exclusion |
+| Clean SR input frames | 248 | is_sr_usable=True after repeat exclusion |
+| R=0 raster frames | 248 | clean primary step-and-shoot grid |
 | Within-row X transitions | 232 | acquisition-time adjacent |
 | Row transitions | 15 | Y advance plus X reset |
-| Unique coordinates | 253 | filename coordinate coverage |
+| Unique coordinates | 248 | clean coordinate coverage |
 | Stage prior theta | 47.6 deg | configured prior |
 | Detector pitch | 10.0 um/pixel | detector sampling pitch |
-| Stage-prior dx/dy span | 5.65 px / 5.65 px | global detector-space prior coverage |
+| Stage-prior dx/dy span | 5.50 px / 5.65 px | clean detector-space prior coverage |
 | 2x phase bins | 4/4 non-empty | prior covers all half-pixel bins |
 
 2x phase-bin frame counts from the configured prior:
 
 | phase-y bin \\ phase-x bin | 0 | 1 |
 |---|---:|---:|
-| 0 | 66 | 63 |
-| 1 | 64 | 62 |
+| 0 | 65 | 60 |
+| 1 | 61 | 62 |
 
 ## Small-Step Diagnostics
 
@@ -89,18 +90,18 @@ This supports the configured 47.6 deg direction, but does not replace `configs/s
 
 The naming rule is therefore consistent: AVI prefix names the moving axis, and the number is the fixed orthogonal coordinate. This rules out a broad x/y naming inversion. The Y-only TXT failure is primarily explained by raster acquisition gap and thermal-field evolution.
 
-### Historical NCC Failure Audit
+### Current Coordinate-Neighbor Failure Audit
 
-The original coordinate-adjacent NCC result is preserved only as a failure audit:
+The old coordinate-adjacent NCC outputs are no longer required cache artifacts. The current rebuildable failure audit is:
 
 | Diagnostic | Value | Current interpretation |
 |---|---:|---|
-| Coordinate-adjacent NCC theta | 34.05 deg y-up, CI [33.23, 34.83] deg | contaminated coordinate-neighbor model |
-| 47.6 deg inside old CI | No | do not update theta from this fit |
-| Single-rotation RMS residual | 0.1567 px | local residual, not an SR threshold |
-| Projection linearity R2 | 0.0001 | old global coordinate-neighbor model failed |
-| Valid repeat pairs | 0 / 2 | no usable repeatability calibration |
-| Y high-pass visible 4um/2um | 0.638 | Y-only coordinate neighbors fail monotonicity |
+| Clean input contract | is_sr_usable=True; no R!=0 repeat frames | EP02 displacement diagnostics now run on the repeat-excluded 248-frame input |
+| Y coordinate-neighbor acquisition gap | median 16 frames | fixed-X Y neighbors are not time-adjacent and remain contaminated by thermal evolution |
+| Y high-pass visible 4um/2um | 0.638 | Y-only coordinate neighbors fail monotonicity even after repeat exclusion |
+| Phase correlation on X tiny steps | visible/prior projection 0.000 | phase correlation degenerates on this subpixel local diagnostic |
+| High-pass X-step fit pairs | 232 clean time-adjacent X pairs | usable only as local direction/linearity smoke test, not alignment truth |
+| Obsolete coordinate-adjacent outputs | removed from current cache | old theta/linearity/repeatability files are not required to rebuild EP02 |
 
 These values do not reinstate the old theta-success/failure storyline, do not update theta, and do not constitute a no-go conclusion for contour-level SR.
 
@@ -152,4 +153,4 @@ Primary tables:
 
 ## Conclusion
 
-EP02 provides raster path reconstruction, detector-space coordinate prior coverage, bounded small-step diagnostics, and auxiliary AVI/TXT consistency checks. The correct next step is data-driven alignment on the main session, followed by quality-gated 2x contour-level SR.
+EP02 provides raster path reconstruction, detector-space coordinate prior coverage, bounded small-step diagnostics, and auxiliary AVI/TXT consistency checks on the 248-frame clean SR input. The correct next step is data-driven alignment on `is_sr_usable=True` frames, followed by quality-gated 2x contour-level SR.

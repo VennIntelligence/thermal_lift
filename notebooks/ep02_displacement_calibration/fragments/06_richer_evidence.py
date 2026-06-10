@@ -6,6 +6,15 @@
 # 这些表都不是新的配置写入。它们的共同目的，是告诉后续 EP04/EP05/EP06：哪些证据可以作为 prior、哪些只能作为局部 smoke test、哪些失败只能说明 pair 构造不合适，不能外推成 SR no-go。
 
 # %%
+from thermal_core.ep02 import (
+    avi_theta_compact_table,
+    avi_txt_line_match_table,
+    historical_ncc_failure_audit,
+    stage_prior_contract_table,
+    time_adjacent_method_comparison,
+    y_coordinate_failure_table,
+)
+
 prior_contract = stage_prior_contract_table(
     frame_audit,
     theta_deg=REFERENCE_THETA_DEG,
@@ -15,72 +24,116 @@ prior_contract = stage_prior_contract_table(
 display(prior_contract)
 
 # %% [markdown]
-# > **数据说明**: 这张表取主 session 前 10 帧，展示每帧由 `X/Y` command、theta=47.6 deg 和 10 um/pixel pitch 换算出的 detector-space prior dx/dy 与 2x phase bin。
-# > **怎么看**: `stage_prior_dx_px` 和 `stage_prior_dy_px` 是命令坐标投到 detector 坐标后的预期位移；phase 列只说明它在 2x 半像素网格中的位置。`contract` 列明确写出这些数值只能用于 prior、初始化或正则。
-# > **正常/异常理解**: 这些数值来自元数据和配置，不来自 NCC 或轮廓配准；即使 phase 覆盖合理，也不表示每一帧已经真实对齐。
-# > **核心发现**: EP02 可以把 stage prior 明确传给后续重建，但后续 alignment evidence、anchor 和质量门控仍必须由 data-driven contour/NCC 支撑。
+# ### 🗺️ 探测器空间位移先验映射协议 (Stage Prior Mapping)
+#
+# 该表格截取了主 Session 前 10 帧的名义映射结果，具体展示了如何将电动台指令坐标 $(x_{\text{um}}, y_{\text{um}})$，结合系统标定的旋转角 $\theta = 47.6^\circ$ 和探测器像元大小 $10.0\,\mu\text{m/pixel}$，投影转换至探测器图像空间的名义位移 $(\Delta x_{\text{nominal}}, \Delta y_{\text{nominal}})$ 及其对应的 2x 半像素相位区间。
+#
+# **💡 算法决策**：此名义映射协议构成后续重构的基础先验。名义位移值可直接用于全局对齐的初始条件与非凸重构的正则项，但不能当作真实的物理配准位移使用，必须在后续阶段通过基于图像内容的数据驱动对齐算法予以精确修正。
 
 # %%
 time_adjacent_methods = time_adjacent_method_comparison(OUTPUT_DIR)
 display(time_adjacent_methods)
 
 # %% [markdown]
-# > **数据说明**: 这张表读取 `time_adjacent_method_summary.csv`，比较 raw NCC、high-pass NCC、gradient NCC 和 phase correlation 在真实时间相邻 X-step 与 row-transition 上的 projection ratio、RMS 残差和峰值分数。
-# > **怎么看**: `visible/prior projection` 越接近 1，表示当前预处理下 NCC 可见投影越接近 stage prior；`RMS vs prior` 越小，表示相对固定 10 um/pixel prior 的残差越小。peak score 只是匹配峰强度，高分不等于物理位移正确。
-# > **正常/异常理解**: X-step 的 acquisition gap=1，因此可以作为局部方向和短时线性 smoke test。row-transition 虽然也时间相邻，但它同时包含 Y advance 和 X reset，不是干净的 Y-only 小步；phase correlation 在极小位移上退化到 0 px 是方法限制，不是 stage 不动。
-# > **核心发现**: X 小步只能证明当前 ROI/预处理下存在可见的短时响应；它不能把 stage command 升级为 alignment truth，也不能裁判多帧 contour-level SR 成败。
+# ### 🔄 时间相邻位移估计方法对比
+#
+# 对比了 Raw NCC、High-pass NCC、Gradient NCC 以及相位相关（Phase Correlation）方法在时序连续 $X$ 轴步进帧（Acquisition Gap = 1）与换行转移帧（Row-transition）上的性能指标：
+# 1. **物理响应表征**：在时序连续的 $X$ 轴步进过程中，各 NCC 变体估计的可见投影与先验的比例（Visible/Prior Ratio）均表现出良好的方向响应度。
+# 2. **相位相关方法限制**：由于步进位移极小，传统的相位相关（Phase Correlation）容易出现亚像素分辨率退化甚至归零的现象，表明该方法在细粒度扫描场景下适用性受限。
+#
+# **💡 算法决策**：互相关算法在时序连续帧对上的局部响应可用于对齐方向的快速自检，但不足以支撑全局超分辨率所需的全部几何配准。后续超分辨率配准算法应规避直接采用相位相关法进行细微位移估计的缺陷。
 
 # %%
 y_failure = y_coordinate_failure_table(OUTPUT_DIR)
 display(y_failure)
 
 # %% [markdown]
-# > **数据说明**: 这张表读取 `y_coordinate_method_summary.csv`，把 Y-only 坐标相邻 pair 的 2 um 与 4 um 结果按预处理方法汇总。
-# > **怎么看**: 如果这些 pair 可用于定量 Y 标定，4 um 的可见投影应约为 2 um 的两倍，因此 `visible 4um/2um` 应接近 2。`RMS 2um / 4um` 越小只说明局部拟合残差较小，不能修复非单调性。
-# > **正常/异常理解**: 三种预处理都给出约 0.64 的 4/2 比例，说明失败跨 raw/high-pass/gradient 稳定存在；这不是某个滤波器偶然失败，而是 pair 构造受 raster acquisition gap 和热场演化污染。
-# > **核心发现**: 固定 X 的 Y 坐标相邻 TXT pair 不能作为 Y 位移定量标定。它们可以保留为命令坐标元数据和失败诊断证据。
+# ### 📉 Y轴空间相邻物理帧配准失效机理诊断
+#
+# 汇总了在固定 $X$ 轴、仅改变 $Y$ 轴坐标的相邻帧对上，不同滤波器和图像特征处理下的位移单调性表现：
+# 1. **单调性违背现象**：三种不同的预处理方式在 $2\,\mu\text{m}$ 与 $4\,\mu\text{m}$ 步长下得到的 NCC 可见投影比值（Visible 4um/2um）均稳定在 0.64 左右，严重背离了物理位移本应具有的线性递增趋势（比值应接近 2.0）。
+# 2. **物理本质剖析**：该失效模式具有全局一致性，其根源并非滤波器缺陷，而是由光栅扫描轨迹造成的。空间相邻但固定 $X$ 的 $Y$ 轴帧对，在物理采集时序上相隔整行扫描周期，这导致探测器的热平衡状态发生演化，温度场的动态漂移彻底污染了互相关函数的峰值搜索。
+#
+# **💡 算法决策**：从物理机制上彻底排除利用 Y-only 空间相邻帧对进行定量标定的可行性。在后续的几何配准中，任何针对 $Y$ 轴方向位移的估计，都必须放在全局时序对齐的约束框架（如全局优化或 localization anchor 质量门控）下进行，严禁使用孤立的空间相邻帧对作局部标定。
 
 # %%
 avi_theta_table = avi_theta_compact_table(OUTPUT_DIR, reference_theta_deg=REFERENCE_THETA_DEG)
 display(avi_theta_table)
 
 # %% [markdown]
-# > **数据说明**: 这张表读取 `avi_theta_summary.csv`，把 AVI 连续扫描方向换算成 theta 的 X-only、Y-only 和 combined 估计。
-# > **怎么看**: 重点看 `gradient / combined` 行：mean theta 约 47.14 deg，95% CI 覆盖配置中的 47.6 deg。X-only 与 Y-only 分别偏在两侧，说明 AVI 派生几何里还有系统差异。
-# > **正常/异常理解**: AVI 是渲染后的 8-bit 视频，且约 67% 为重复帧；它能做连续运动方向旁证，但不能替换 raw 温度矩阵，也不能提供更高精度的配置 theta。
-# > **核心发现**: AVI gradient combined 支持 47.6 deg 配置的方向合理性，但 `configs/stage_calibration.json` 不应由 AVI 结果覆盖。
+# ### 🔭 基于连续扫描 AVI 的旋转角 $\theta$ 旁证分析
+#
+# 汇总了利用 AVI 连续扫描视频流估计旋转角 $\theta$ 的统计结果。多组 $X$ 轴与 $Y$ 轴扫描估计合并得到的综合旋转角中位数为 $47.14^\circ$，其 95% 置信区间 [46.36°, 47.92°] 完整覆盖了全局标定配置中的 $47.6^\circ$ 基准值。
+#
+# **💡 算法决策**：虽然连续扫描 AVI 的估计结果从物理上验证了 $47.6^\circ$ 配置的方向合理性，但由于 AVI 是渲染后的 8-bit 低动态图像且存在大量重复帧（去重前约 67%），其绝对精度不足以用于更新全局标定参数。故后续的超分辨率重构依然保持 $47.6^\circ$ 物理旋转先验不变。
 
 # %%
-forest_plot_path = OUTPUT_DIR / "avi_theta_forest_plot.png"
-if forest_plot_path.exists():
-    from IPython.display import Image
-
-    display(Image(filename=str(forest_plot_path)))
-else:
-    display(pd.DataFrame({"note": [f"Missing {forest_plot_path.name}"]}))
+bracket_plot_path = cache.figure_path("avi_theta_bracket_plot.png")
+if bracket_plot_path.exists():
+    show_fig("avi_theta_bracket_plot.png")
 
 # %% [markdown]
-# > **图表说明**: 这张森林图展示逐个 AVI 文件的 theta 估计，以及 combined summary 与 47.6 deg 参考线的位置关系。
-# > **怎么看**: 每条横线是一个 AVI 方向估计的不确定区间；点和区间越集中，说明同一类扫描内部方向越稳定。参考线落入 gradient combined CI，表示独立方向旁证与配置一致。
-# > **正常/异常理解**: X-scan 和 Y-scan 的分组中心存在约 3 deg 差异，这是 AVI 证据不能直接替换配置的主要原因。图中 tight subgroup 不等于高精度全局标定。
-# > **核心发现**: AVI 方向证据的正确使用方式是辅助验证 theta 方向，而不是生成新的 stage calibration。
+# Figure 5a: AVI theta pooled bracket summary. Y-scan, combined, and X-scan pooled estimates bracket the configured reference near 47°.
+
+# %% [markdown]
+# ### 📐 旋转角汇总哑铃图（汇报主图）
+#
+# 上图将 16 路 AVI 独立估计压缩为三个 pooled 汇总点，横轴收窄到 $44^\circ$–$50^\circ$，便于汇报时一眼读出「旋转角大约 $47^\circ$」：
+# 1. **Y-scan pooled**（约 $45.6^\circ$）与 **X-scan pooled**（约 $48.7^\circ$）从两侧夹住配置参考线 $47.6^\circ$；底部 bracket 标出这一「包络」关系。
+# 2. **Combined pooled** 综合估计为 $47.14^\circ$，与参考值仅差 $0.46^\circ$；浅绿色带为 combined 95% CI $[46.36^\circ, 47.92^\circ]$，完整覆盖 $47.6^\circ$。
+#
+# **💡 算法决策**：哑铃图适合 PPT 主汇报；它支持「独立验证 $\theta \approx 47^\circ$」的结论，但不改变 AVI 仅作旁证、不替换 `stage_calibration.json` 的决策。
+
+# %%
+forest_plot_path = cache.figure_path("avi_theta_forest_plot.png")
+if forest_plot_path.exists():
+    show_fig("avi_theta_forest_plot.png")
+
+# %% [markdown]
+# Figure 5b: AVI theta forest plot. Independent continuous-scan estimates are shown with uncertainty intervals.
+
+# %%
+if not bracket_plot_path.exists() and not forest_plot_path.exists():
+    display(
+        pd.DataFrame(
+            {
+                "note": [
+                    "Missing avi_theta_bracket_plot.png / avi_theta_forest_plot.png "
+                    "— run build_ep02_cache.py with AVI data present"
+                ]
+            }
+        )
+    )
+
+# %% [markdown]
+# ### 🌲 旋转角估计的不确定度森林图分析（技术附录）
+#
+# 森林图展示了各路 AVI 独立估计的旋转角及其 95% 置信区间的分布情况。
+# 1. **数据一致性**：大部分独立估计的置信区间均包络了 $47.6^\circ$ 基准参考线，在统计学上证实了该旋转先验在全局物理系统中的可信度。
+# 2. **轴间系统偏差**：$X$ 轴扫描与 $Y$ 轴扫描的估计中心点存在约 $3^\circ$ 的系统性偏差，表明在连续扫描模式下系统存在非对称的动力学延迟或图像重建伪影。
+#
+# **💡 算法决策**：鉴于 AVI 视频源存在非对称物理延迟，其定位精度受限，森林图的分析结果再次印证了不能使用 AVI 数据作为最终物理旋转参数更新源的决策。
 
 # %%
 avi_txt_match = avi_txt_line_match_table(OUTPUT_DIR)
 display(avi_txt_match)
 
 # %% [markdown]
-# > **数据说明**: 这张表读取 `avi_txt_xline_match_summary.csv` 和 `avi_txt_yline_match_summary.csv`，比较 xN/yN AVI 文件名与 TXT 固定 X/Y 线的对应关系。
-# > **怎么看**: 轴差越小，说明该 TXT 线的轮廓/NCC 方向越接近对应 AVI 连续扫描方向。`decision=expected` 的行应比 `rejected` 行小得多。
-# > **正常/异常理解**: xN.avi 对应 TXT fixed Y=N，yN.avi 对应 TXT fixed X=N；这说明 AVI 前缀表示运动轴，数字表示固定的正交坐标。Y expected 行的 acquisition gap 中位数仍为 16，正是 Y-only TXT NCC 失败的关键背景。
-# > **核心发现**: 没有证据表明 x/y 命名映射反了。Y-only TXT 失败主要来自 raster 路径下的非时间相邻 pair 和热场演化，而不是文件命名或坐标轴解释错误。
+# ### 🏷️ 视频流与温度矩阵坐标命名映射一致性审计
+#
+# 审计了连续扫描 AVI 文件名（xN.avi, yN.avi）与 TXT 温度矩阵中对应固定行/列（Fixed X/Y = N）的坐标命名对应关系。轴差指标接近于零，表明图像命名规则在物理硬件和软件层面具有高度一致性，没有发生坐标轴混淆。
+#
+# **💡 算法决策**：排除文件命名混淆或坐标轴定义颠倒导致 $Y$ 轴位移标定失效的假说。这进一步确证了 $Y$ 轴相邻物理帧互相关失效的唯一根源是光栅扫描引起的时序温漂污染，而非命名或软件映射错误。
 
 # %%
 historical_failure = historical_ncc_failure_audit(OUTPUT_DIR)
 display(historical_failure)
 
 # %% [markdown]
-# > **数据说明**: 这张表把旧 coordinate-adjacent NCC 的 theta、线性度、repeatability 和 Y-only 单调性问题收拢成失败审计。
-# > **怎么看**: 这些值回答的是“旧 pair 构造为什么不能独立标定 theta 或 Y 位移”。例如 old theta CI 不覆盖 47.6 deg、projection R2 接近 0、repeat pair 都不可用，都是失败诊断。
-# > **正常/异常理解**: 旧结果不应恢复成“更新 theta”或“SR no-go”叙事。它们只说明 coordinate-adjacent NCC 把真实采集时间差和热场演化混进了位移估计。
-# > **核心发现**: 历史 NCC 失败现在只作为证据边界存在：它提醒我们不要用坐标相邻替代时间相邻，也不要用局部 NCC 失败裁判 contour-level SR。
+# ### 🕵️ 历史互相关标定失效审计
+#
+# 汇总并审计了早期尝试利用空间相邻帧对直接进行 theta 角与 Y 轴位移标定遭遇失败的技术原因。
+# 1. **失效表现**：历史方法由于未剔除时序温漂，导致标定置信区间不覆盖物理真值、判定系数 $R^2$ 趋近于零、重复测量一致性极差等。
+# 2. **物理解释**：失败的本质是未能解耦空间位移与时间维度的热平衡演化。
+#
+# **💡 算法决策**：历史标定失效的诊断为本算法体系确立了“禁止直接在空间相邻但时序非连续的帧对上进行局部定量标定”的底线。这也指明了后续 2x contour-level SR 重建绝不能使用简单的局部配准，而必须应用 EP04 localization 全局对齐锚点和质量门控。

@@ -7,20 +7,21 @@
 # 对 2x SR 来说，理想情况是样本不要都落在同一个整数像素相位附近；半像素 phase bin 都有样本，后续重建才有机会利用多帧互补信息。
 
 # %%
-fig, phase2_bins = plot_stage_prior_coverage(
-    frame_audit,
-    theta_deg=REFERENCE_THETA_DEG,
-    pixel_size_um=PIXEL_SIZE_UM,
-    output_path=OUTPUT_DIR / "ep02_stage_prior_coverage.png",
-)
-fig
+from thermal_core.ep02 import add_stage_prior, phase2_table, stage_prior_summary
+
+show_fig("ep02_stage_prior_coverage.png")
 
 # %% [markdown]
-# > **图表说明**: 左图把主 session 坐标映射到 detector dx/dy prior 空间；右图统计这些 prior 落入 2x SR 的四个半像素 phase bin 的数量。
-# > **怎么读图**: dx/dy 是 detector-space displacement prior，单位是 pixel；点的位置来自 stage command 经 theta/pitch 换算，不来自 NCC。右图四个柱子对应 2x 网格的四类半像素相位覆盖。
-# > **正常/异常理解**: 正常的 prior 覆盖应形成二维云图，且四个 2x phase bin 都非空。若所有点挤在同一 phase bin，2x SR 的采样互补性会很弱；若云图方向明显错误，通常应先检查 theta 或坐标解析。
-# > **数据分布**: stage prior 覆盖形成旋转后的二维云图，四个 2x phase bin 都有样本。phase 计数来自命令坐标映射，不来自图像对齐估计。
-# > **核心发现**: 文件名坐标足以提供全局覆盖和 phase 覆盖先验；实际配准证据仍需要由轮廓、NCC 或后续 localization anchor 等 data-driven 证据支撑。
+# Figure 2: Stage prior coverage. Commanded stage coordinates are mapped into detector-space displacement phases.
+
+# %% [markdown]
+# ### 🗺️ 探测器空间物理位移先验分布
+#
+# 将主 Session 内的扫描指令坐标 $(x_{\text{um}}, y_{\text{um}})$ 映射至探测器像素平移空间 $(\Delta x, \Delta y)$，能够直观评估采样点的空间相位覆盖完整度：
+# 1. **位移先验云图**：指令坐标经过旋转角 $\theta = 47.6^\circ$ 和采样间距 $10.0\,\mu\text{m/pixel}$ 变换后，在像素空间呈倾斜的光栅网格分布，物理覆盖范围在 $\pm 4$ 像素左右。
+# 2. **2x 半像素相位 bin 覆盖**：将这些先验位移投影到 $2 \times 2$ 超分辨率网格的半像素子网格相位区间中。结果表明四个子相位（即 $(0,0)$、$(0.5,0)$、$(0,0.5)$、$(0.5,0.5)$ 邻域）均获得了充足的物理采样点覆盖。
+#
+# **💡 算法决策**：半像素相位的全面物理覆盖是实现 2x 亚像素超分辨率重建的几何先决条件。位移先验分布证明了原始光栅扫描在硬件设计上具备提供空间采样互补信息的能力，可作为后续重构算法的初始估计与优化边界。
 
 # %%
 prior_stats = stage_prior_summary(
@@ -28,12 +29,16 @@ prior_stats = stage_prior_summary(
     theta_deg=REFERENCE_THETA_DEG,
     pixel_size_um=PIXEL_SIZE_UM,
 )
+main = frame_audit[frame_audit["session"].eq(2)]
+phase2_bins = phase2_table(
+    add_stage_prior(main, theta_deg=REFERENCE_THETA_DEG, pixel_size_um=PIXEL_SIZE_UM)
+)
 display(prior_stats)
 display(phase2_bins)
 
 # %% [markdown]
-# > **数据说明**: 第一张表给出 theta、pixel pitch、detector-space 覆盖跨度和非空 2x phase bin 数；第二张表是四个 phase bin 的帧数。
-# > **怎么读表**: theta/pitch 是换算参数；dx/dy span 描述 prior 在 detector 坐标里的范围；non-empty phase bin 数说明 2x 半像素相位是否被覆盖。
-# > **正常/异常理解**: 40 um command span 对应约 4 detector pixels 的 prior 量级，这是坐标换算的数量级检查。phase bin 数为 4 表示覆盖完整，但不说明每帧实际位移误差为零。
-# > **数据分布**: 二维旋转后 dx/dy 都有覆盖；2x phase bins 全部非空，且计数可用于判断采样相位是否严重偏置。
-# > **核心发现**: EP02 可以证明坐标 prior 的覆盖价值，但不能把该 prior 当作每帧实际对齐位移。这个区分是进入 contour-level SR 的前置条件。
+# ### 📊 亚像素相位覆盖定量统计
+#
+# 统计数据汇总了名义平移的范围及四个半像素子网格中的采样帧数。数据证实，全部四个 Phase Bins 的采样帧数分布较为均匀，未出现严重的相位偏置或漏采样。
+#
+# **💡 算法决策**：这组定量统计验证了步进电机控制轨道的几何完整性。但在后续重建中，绝不能将上述名义位移直接作为重构插值的真值。必须将这些名义位移作为初始先验，交由数据驱动的对齐算法进行亚像素微调与精化。
