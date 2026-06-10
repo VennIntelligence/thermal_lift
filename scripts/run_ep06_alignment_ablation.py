@@ -174,7 +174,7 @@ def phase_occupancy(shifts: np.ndarray, scale: int) -> tuple[dict[str, Any], np.
 
 
 def build_strategy_specs(args: argparse.Namespace) -> list[StrategySpec]:
-    return [
+    specs = [
         StrategySpec(
             "default_contour_refined",
             "Default contour refined",
@@ -192,14 +192,6 @@ def build_strategy_specs(args: argparse.Namespace) -> list[StrategySpec]:
             optional=False,
         ),
         StrategySpec(
-            "tuned_contour_refined",
-            "Tuned contour refined",
-            "contour_refined",
-            "alignment_csv",
-            args.tuned_alignment_csv,
-            optional=True,
-        ),
-        StrategySpec(
             "filename_affine_fit",
             "Filename affine fit",
             "filename_affine_fit",
@@ -208,6 +200,19 @@ def build_strategy_specs(args: argparse.Namespace) -> list[StrategySpec]:
             optional=False,
         ),
     ]
+    if args.tuned_alignment_csv is not None:
+        specs.insert(
+            2,
+            StrategySpec(
+                "tuned_contour_refined",
+                "Tuned contour refined",
+                "contour_refined",
+                "alignment_csv",
+                args.tuned_alignment_csv,
+                optional=True,
+            ),
+        )
+    return specs
 
 
 def load_strategy_inputs(
@@ -332,7 +337,6 @@ def plot_split_half(metrics: pd.DataFrame, output_path: Path) -> None:
     ax.errorbar(x, med, yerr=np.vstack([low, high]), fmt="none", ecolor="#333333", capsize=3, linewidth=0.9)
     ax.set_xticks(x, labels, rotation=25, ha="right")
     ax.set_ylabel("Split-half NRMSE")
-    ax.set_title("SAA Split-Half Stability")
     ax.grid(axis="y", alpha=0.25)
     savefig_academic(fig, output_path)
 
@@ -411,7 +415,6 @@ def plot_phase_coverage(phase_counts: pd.DataFrame, phase_summary: pd.DataFrame,
         )
     ax.set_xticks(x, labels, rotation=25, ha="right")
     ax.set_ylabel("Frame count")
-    ax.set_title("2x Phase-Bin Coverage")
     ax.set_ylim(0, max(float(plot_summary["n_frames"].max()) * 1.17, 1.0))
     ax.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=4)
     ax.grid(axis="y", alpha=0.2)
@@ -428,10 +431,22 @@ def plot_default_difference_panels(
     others = [s for s in metrics["strategy"] if s != "default_contour_refined"]
     if not others:
         return
+
+    # --- 3X center crop to reveal chip structure details, shifted slightly to the bottom-right ---
+    zoom_factor = 3
+    h, w = default.shape[:2]
+    crop_h, crop_w = h // zoom_factor, w // zoom_factor
+    shift_r = int(h * 0.06)  # Shift window down
+    shift_c = int(w * 0.06)  # Shift window right
+    r0 = (h - crop_h) // 2 + shift_r
+    c0 = (w - crop_w) // 2 + shift_c
+    r1 = r0 + crop_h
+    c1 = c0 + crop_w
+
     ncols = len(others)
-    fig, axes = plt.subplots(1, ncols, figsize=(2.5 * ncols, 2.6))
+    fig, axes = plt.subplots(1, ncols, figsize=(3.5 * ncols, 3.6))
     axes_arr = np.atleast_1d(axes)
-    diffs = [reconstructions[name] - default for name in others]
+    diffs = [reconstructions[name][r0:r1, c0:c1] - default[r0:r1, c0:c1] for name in others]
     limit = float(np.nanpercentile(np.abs(np.concatenate([d.ravel() for d in diffs])), 99.0))
     limit = max(limit, 1e-6)
     for ax, strategy, diff in zip(axes_arr, others, diffs, strict=True):
@@ -440,8 +455,8 @@ def plot_default_difference_panels(
         ax.set_title(label)
         ax.set_xticks([])
         ax.set_yticks([])
-        fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
-    fig.suptitle("SAA highpass difference to default contour refined")
+        cbar = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.02)
+        cbar.set_label("Highpass Δ (°C)")
     savefig_academic(fig, output_path)
 
 
@@ -453,11 +468,11 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--tuned-alignment-csv",
         type=Path,
-        default=PROJECT_ROOT
-        / "output"
-        / "ep05_alignment_tuning"
-        / "full_r360_e93_rad100_s0125"
-        / "contour_alignment_results.csv",
+        default=None,
+        help=(
+            "Optional tuned contour alignment CSV. Must be an explicitly provided, validated 248-frame "
+            "candidate, for example under output/ep05_alignment_tuning_study/ after a full-frame run."
+        ),
     )
     parser.add_argument("--affine-scores-csv", type=Path, default=PROJECT_ROOT / "output" / "ep05_alignment_sr_capacity" / "alignment_method_holdout_scores.csv")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "output" / "ep06_alignment_ablation")

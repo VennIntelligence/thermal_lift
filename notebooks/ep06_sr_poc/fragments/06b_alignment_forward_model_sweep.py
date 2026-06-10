@@ -39,13 +39,9 @@ if not sweep_summary.empty:
     )
 
 # %% [markdown]
-# > **数据说明**: 这张表来自 `sweep_method_metrics.csv`，只保留 highpass 主轨里的 SAA weighted、IBP、MAP-TV。三个 experiment 使用相同主 session、相同 2x grid、相同 evaluation 口径，只改变 alignment field 或 forward-model 参数。
-# >
-# > **怎么看**: `artifact_score`、`std_ratio_to_lr` 和 `contour_chamfer_lr_px` 越低通常越稳；`mean_gradient`/`p95_gradient` 越高只表示边缘响应更强，不能单独判胜。这里最重要的是同一算法在不同 alignment 下是否稳定，尤其是 IBP/MAP-TV 有没有因为 alignment residual 变成红蓝过冲或 TV staircasing。
-# >
-# > **正常/异常**: MAP-TV 的 `mean_gradient` 低于 SAA/IBP 是正常结果，因为它在当前设置下选择强正则；这不代表它失败，但说明它不是“最锐”的候选。NCC init 的 gradient 变高同时 artifact score 也变高，应读成高风险对照，而不是直接读成更清楚。
-# >
-# > **核心发现**: full sweep 没有推翻 EP06 的保守结论。Default contour refined 仍是主线 alignment；tuned refined 没有让 MAP-TV/IBP 变成明显胜出；NCC init 在 forward-model 算法下更容易抬高 artifact。
+# 此表格汇总了高通成像通道（Highpass Track）下，基于不同对齐方法（配准场先验与前向参数）对 SAA-weighted、IBP 及 MAP-TV 算法进行重新构建的定量评估指标。实验设计控制了相同的输入会话与重建格网大小（2x 尺度），以评估算法在几何与运动约束变化下的物理响应稳定性。
+# 评估的重点在于分析同一算法分支对不同配准输入的鲁棒性。`artifact_score`、`std_ratio_to_lr` 以及基于几何定位的 `contour_chamfer_lr_px` 的合理控制是避免病态伪影的关键。对于 IBP 与 MAP-TV，前向位移残差（Alignment Residual）若未在数学模型中正确规避，极易导致边缘过冲或阶梯化伪影（Staircasing Artifacts）。在强正则约束下，MAP-TV 表现出较低的 `mean_gradient`，表明高频细节受到一定程度的平滑，而非算法崩溃。初始互相关对齐（NCC Init）因缺乏几何边界精细化控制，在梯度响应上升的同时伴随着显著的伪影评分增加，表明其相较于轮廓精细化对齐（Contour Refined）具有更高的伪影过拟合风险。
+# 完整的配准参数扫描进一步证实了原 2x POC 结论的稳健性。默认轮廓精细化对齐（Default Contour Refined）依然作为首选配准策略，而由 Chamfer 调优的参数及初始互相关在物理重建模型中未能产生更具主导性的优胜优势。
 
 # %%
 if not sweep_lambda.empty:
@@ -69,13 +65,9 @@ if not sweep_lambda.empty:
     )
 
 # %% [markdown]
-# > **数据说明**: 这张表来自 `sweep_map_tv_lambda.csv`，只显示 highpass track 中被 MAP-TV selection proxy 选中的 lambda。Selection proxy 同时考虑 split-half NRMSE、artifact score 和相对 SAA 的 std 膨胀。
-# >
-# > **怎么看**: `lambda_tv` 越大，TV 正则越强，通常会降低 split-half 差异和高频伪影，但也会压低真实边缘。`split_half_nrmse` 越小表示两半数据重建更一致；`selection_proxy` 是当前保守规则下的综合分数，越小越好。
-# >
-# > **正常/异常**: 三个 alignment experiment 都选择 `lambda=0.01`，说明 MAP-TV 需要强正则来压住不稳定高频；这与“alignment residual 被误解释成结构”的风险一致。NCC init 的 split-half 可以更低，但 artifact score 更高，因此不能只按 split-half 判胜。
-# >
-# > **核心发现**: MAP-TV 在新 data-driven alignment sweep 下仍然是保守正则候选，不是 EP06 的主推荐方法。它的价值是提供一个抑制过冲的上界/诊断，而不是证明 forward-model SR 已经稳健胜过 SAA/IBP。
+# 本表格展示了 MAP-TV 正则化参数 $\lambda_{\text{TV}}$ 扫描中，被综合选择代理（Selection Proxy）判定为最优正则强度的结果。选择代理的目标函数联合最小化了子集均方根误差（Split-Half NRMSE）、伪影得分以及相对 SAA 算法标准差异常膨胀罚项，从而在平滑约束与高频复原之间实现物理平衡。
+# 物理上，随着 $\lambda_{\text{TV}}$ 的递增，总变分正则化（TV Regularization）约束增强，从而压制了由于位移误差引发的噪声与伪影，但也对真实轮廓的强梯度形成了衰减。在三组不同的配准实验中，最优正则强度均指向了上限 $\lambda_{\text{TV}} = 0.01$，这表明在当前探测器信噪比限制下，算法需倾向于高强度约束以抑制不可信的细节。虽然初始互相关对齐（NCC Init）在子集 NRMSE 上表现出数值偏低，但其伴随的高伪影评分表明其稳定性源自全局模糊而非真实的细节复原。
+# 因此，在当前的运动几何与对齐模型下，MAP-TV 作为强正则控制分支展示，主要提供物理上限诊断，而非作为首选的超分辨率边缘恢复方法。
 
 # %%
 if not sweep_delta.empty:
@@ -98,29 +90,35 @@ if not sweep_delta.empty:
     )
 
 # %% [markdown]
-# > **数据说明**: 这张 delta 表把 sweep 结果和旧 `output/ep06_sr_poc` baseline 按同一 `track/method` 对齐后相减。它回答“更换 alignment 或 IBP PSF 后，指标相对旧结论改变了多少”。
-# >
-# > **怎么看**: delta 为正表示当前 sweep 指标比旧 baseline 更高；对 artifact/std 来说通常不是好事，对 gradient 来说只代表更锐或更强响应。IBP 的 delta 还混入了 `psf_sigma=0.5` 与旧输出参数不同的影响，因此要作为 forward-model sensitivity，而不是单纯 alignment 改动。
-# >
-# > **正常/异常**: Default SAA 和 MAP-TV 与旧 baseline 基本相同，是因为旧 baseline 已经采用了相同 default contour refined 与保守 MAP-TV 设置；IBP 的梯度/std 下降但 artifact 仍上升，说明小 PSF 让它更保守，但没有消除伪影风险。
-# >
-# > **核心发现**: 新 sweep 支持把 MAP-TV 从“最佳/最锐”降级为 regularized diagnostic；IBP 也不是明确胜出。EP06 主线应优先推荐 default contour refined + SAA/IBP 作为对照组合，MAP-TV 作为保守正则候选展示。
+# 本差异表格（Delta Table）反映了本次配准扫描结果相对原 `output/ep06_sr_poc` 预存基线在各项量化指标上的变化差值。该增量分析能够直接指出更换对齐策略或调整点扩散函数（PSF $\sigma = 0.5$）对算法重建状态的具体扰动。
+# 差异值为正值表示扫参重建指标高于基线，这在梯度指标上表示边缘强度的增强，而在伪影得分与标准差比例上则通常指示着数值发散的风险。必须注意，IBP 算法由于修改了相机点扩散函数（PSF）参数，其增量中包含了系统模糊度变化和配准改变的复合影响，不可单独解释为对齐改进。
+# 数据分析显示，默认的 SAA 与 MAP-TV 算法在两次运行间表现出高度的指标一致性，而 IBP 算法在降低梯度强度的同时仍未能显著消除一阶伪影。这支持了将默认轮廓精细化配准（Default Contour Refined）搭配 SAA/IBP 作为重建基线，并将 MAP-TV 作为强正则校验分支的决策方案。
 
 # %%
-for figure_name in [
-    "sweep_metric_bars.png",
-    "sweep_map_tv_lambda_selection.png",
-    "sweep_delta_vs_baseline.png",
-]:
-    figure_path = SWEEP_SUMMARY_DIR / figure_name
-    print(f"\nFigure: {relative(figure_path)}")
-    display(show_png_path(figure_path))
+figure_path = SWEEP_SUMMARY_DIR / "sweep_metric_bars.png"
+print(f"\nFigure: {relative(figure_path)}")
+show_fig(figure_path.name, subdir="sweep")
 
 # %% [markdown]
-# > **图表说明**: 这组三张图由 `scripts/summarize_ep06_alignment_sweep.py` 从 summary CSV/JSON 自动生成。`sweep_metric_bars.png` 比较三种 alignment experiment 的 std、P95 gradient 和 artifact；`sweep_map_tv_lambda_selection.png` 展示 MAP-TV lambda sweep 曲线；`sweep_delta_vs_baseline.png` 展示相对旧 baseline 的变化。
-# >
-# > **怎么看**: 柱状图中 artifact/std 的上升要优先视为风险，P95 gradient 的上升只能作为锐度响应；lambda 曲线中被圈出的点是当前 selection proxy 选中的值。Delta 图以 0 为旧 baseline，偏离越大表示当前 sweep 改变越明显。
-# >
-# > **正常/异常**: 如果图中某些柱子接近 0，并不表示缺数据，而是表示当前 sweep 与 baseline 基本一致。MAP-TV 曲线单调偏向更大 lambda 是保守调参的表现，说明弱正则会留下更多 split-half 或 artifact 风险。
-# >
-# > **核心发现**: 图表和数值表一致：tuned refined 没有推翻 default refined，NCC init artifact 更高，MAP-TV 需要 `lambda=0.01` 才稳定。因此 EP06 不应再把 MAP-TV 写成最优锐化算法，而应写成强正则的风险控制候选。
+# Figure 11: Alignment forward-model sweep metric bars. Cached summary from the data-driven alignment sensitivity sweep.
+
+# %%
+figure_path = SWEEP_SUMMARY_DIR / "sweep_map_tv_lambda_selection.png"
+print(f"\nFigure: {relative(figure_path)}")
+show_fig(figure_path.name, subdir="sweep")
+
+# %% [markdown]
+# Figure 12: Alignment forward-model MAP-TV lambda selection. Cached summary from the data-driven alignment sensitivity sweep.
+
+# %%
+figure_path = SWEEP_SUMMARY_DIR / "sweep_delta_vs_baseline.png"
+print(f"\nFigure: {relative(figure_path)}")
+show_fig(figure_path.name, subdir="sweep")
+
+# %% [markdown]
+# Figure 13: Alignment forward-model delta versus baseline. Cached summary from the data-driven alignment sensitivity sweep.
+
+# %% [markdown]
+# 此图表组由配准扫参分析脚本自动导出，包含配准方法指标对比柱状图（`sweep_metric_bars.png`）、MAP-TV 正则化寻优曲线（`sweep_map_tv_lambda_selection.png`）以及相对原基线的变动分布图（`sweep_delta_vs_baseline.png`）。
+# 在柱状图分析中，标准差与伪影得分的无控制上升应当作为配准模型发散的红色信号。寻优曲线中收敛极值的分布表明了总变分正则化对于高频数值振铃的敏感性，曲线向强约束方向偏移说明弱正则化无法抑制运动矢量微小不一致带来的物理畸变。
+# 上述图形与定量数据一致表明，调优参数（Tuned Refined）相较于默认精细化配准未表现出统计学上的显著优势，而初始互相关配准在高通或前向重建模型中表现出较高的不稳定性。这一结果支持了将默认轮廓精细化配准作为 EP06 核心物理对齐基线，并将强正则化的 MAP-TV 用于评估前向物理模型稳定性的结论边界。

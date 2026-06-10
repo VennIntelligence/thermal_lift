@@ -13,7 +13,7 @@ if str(SRC) not in sys.path:
 
 from ibp import forward
 from map_tv import reconstruct_map_tv, tv_denoise_chambolle
-from map_tv.map_tv import tv_norm
+from map_tv.map_tv import _data_gradient_and_loss, _data_gradient_and_loss_cached, tv_norm
 from saa import reconstruct_saa
 
 
@@ -95,3 +95,30 @@ def test_map_tv_can_return_dataframe() -> None:
 
     assert isinstance(convergence, pd.DataFrame)
     assert len(convergence) == 2
+
+
+def test_cached_gradient_matches_uncached_gradient() -> None:
+    hr = _scene((24, 28))
+    shifts = _shifts(6)
+    frames = np.stack([forward(hr, shift, psf_sigma=0.18) for shift in shifts])
+    x0 = hr + np.random.default_rng(10).normal(scale=0.01, size=hr.shape)
+
+    grad_ref, loss_ref = _data_gradient_and_loss(
+        x0,
+        frames,
+        shifts,
+        psf_sigma=0.18,
+        scale=2,
+        workers=1,
+    )
+    grad_cached, loss_cached = _data_gradient_and_loss_cached(
+        x0,
+        frames,
+        shifts,
+        psf_sigma=0.18,
+        scale=2,
+        workers=1,
+    )
+
+    assert np.allclose(loss_cached, loss_ref, rtol=1e-12, atol=1e-12)
+    assert np.allclose(grad_cached, grad_ref, rtol=1e-10, atol=1e-10)

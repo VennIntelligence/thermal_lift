@@ -4,7 +4,10 @@
 # Raw track 对原始温度帧只做 per-frame offset correction，再重建；可视化时对输出做 highpass 以便和主轨对照。这里同样使用芯片中心约 6x 放大，检查中心结构是否不是 highpass 输入人为制造出来的。
 
 # %%
-display(show_png("comparison_control_track.png"))
+show_fig("comparison_control_track.png")
+
+# %% [markdown]
+# Figure 7: Raw-temperature control track comparison. Highpass-input and raw-control reconstructions are compared on the same center crop.
 
 # %% [markdown]
 # > **图表说明**: `comparison_control_track.png` 把 highpass-input 主轨和 raw-temperature 控制轨放在一起，并且同样裁到芯片中心约 6x 放大。上排来自先 highpass 再重建的主流程；下排先在原始温度帧上做 offset correction 和重建，再在输出端 highpass，目的是检查中心结构是否依赖某个预处理步骤。

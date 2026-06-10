@@ -23,10 +23,5 @@ synthetic_table = pd.DataFrame(synthetic_rows)
 display(synthetic_table)
 
 # %% [markdown]
-# > **数据说明**: 这张 synthetic table 汇总 SAA、IBP、MAP-TV 三条算法脚本在合成小图上的 smoke test 结果。合成图有已知的生成过程，所以它主要用来检查代码链路、forward/backward shift 约定、迭代是否稳定，而不是用来替代真实红外数据结论。
-# >
-# > **怎么看**: `psnr` 或类似误差指标越好，通常说明算法能在这个简化场景里把合成观测还原得更接近已知答案；`selected_lambda`、`iterations`、`finite` 等字段用于确认脚本有没有正常跑完，以及 MAP-TV 的正则强度选择是否有记录。
-# >
-# > **正常/异常**: 第一张表里如果看到某些单元格是 `NaN`，优先理解为不同 JSON 文件的字段名不完全一致：例如某个算法没有 `selected_lambda`，pandas 合并成表时就会把该列填成 `NaN`。这不等于真实重建图里有 NaN，也不等于算法输出坏掉；真正的数值有效性要看 `finite` 字段和后续真实数据评估。
-# >
-# > **核心发现**: 合成验证只能说明 EP06 脚本没有明显的方向约定错误或数值爆炸。真实 POC 是否成立，仍以后面的主 session highpass 图、raw-temperature 中心检查、split-half 和伪影审计为准。
+# 此合成验证表（Synthetic Table）汇总了 Shift-and-Add（SAA）、Iterative Back-Projection（IBP）以及 Maximum A Posteriori with Total Variation（MAP-TV）三种重建算法在合成图像序列上的冒烟测试（Smoke Test）指标。合成场景包含已知的退化过程（前向成像模型 $y_k = D H W_k x + n_k$），主要用于验证代码逻辑链路、前向与逆向位移约定的自洽性以及迭代优化过程的数值稳定性，并非用来替代真实热像数据的重建结论。
+# 表中如峰值信噪比（PSNR）等图像保真度指标的提升，用以衡量算法在理想退化条件下的数学收敛性。`selected_lambda`、`iterations` 及 `finite` 等字段记录了算法的运行参数和数值完整性。由于不同算法的前向模型和正则化机制有所差异，部分特有字段合并后在 pandas DataFrame 中显示为 `NaN` 属于正常现象，并不代表重建图发生数值异常。合成验证的通过，确立了 EP06 核心算法管道无方向性偏差或数值爆炸的底线；算法在真实物理场景下的超分辨率有效性，仍需在后续章节中通过主扫描会话的高通滤波图像、原始温度图像、split-half 交叉验证以及伪影程度进行严谨判定。

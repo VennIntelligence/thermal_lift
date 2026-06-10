@@ -1,6 +1,6 @@
 """Shared infrastructure for EP06 2x contour-level SR POC."""
 
-from .alignment import load_alignment_shifts, load_alignment_table, load_quality_weights
+from .alignment import load_alignment_shifts, load_alignment_table, load_quality_weights, validate_alignment_frame_count
 from .data_loader import (
     bicubic_upsample,
     highpass_preprocess,
@@ -46,4 +46,5 @@ __all__ = [
     "psnr",
     "split_half_consistency",
     "upsample_block_adjoint",
+    "validate_alignment_frame_count",
 ]

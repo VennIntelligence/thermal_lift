@@ -4,7 +4,10 @@
 # ROI 图用于检查中心针脚/内部折线区域的局部轮廓、结构分离和算法伪影。三个 ROI 现在都固定在芯片中心，只改变 crop 尺寸，形成“中心全貌 -> 中等放大 -> 更强放大”的读图顺序。
 
 # %%
-display(show_png("comparison_roi_1.png"))
+show_fig("comparison_roi_1.png")
+
+# %% [markdown]
+# Figure 14: Center ROI comparison at the widest crop. Highpass structure responses are compared across LR, bicubic, and SR methods.
 
 # %% [markdown]
 # > **图表说明**: `comparison_roi_1.png` 是中心区域的较大 crop，对同一中心位置横向展示 LR、bicubic 和多种 SR 输出。ROI 图放大的是 highpass 结构响应，因此主要看中心边缘和局部轮廓。
@@ -16,7 +19,10 @@ display(show_png("comparison_roi_1.png"))
 # > **核心发现**: ROI 1 用来建立中心区域的上下文，确认主图里看到的 contour 增益是否在芯片中心仍然成立；单个 ROI 不能独立证明 SR 成功，但可以暴露缩略图看不出的伪影。
 
 # %%
-display(show_png("comparison_roi_2.png"))
+show_fig("comparison_roi_2.png")
+
+# %% [markdown]
+# Figure 15: Center ROI comparison at medium magnification. The same chip-center region is inspected with a tighter highpass crop.
 
 # %% [markdown]
 # > **图表说明**: `comparison_roi_2.png` 是同一芯片中心的中等放大窗口，保持与 ROI 1 相同的列顺序和 highpass 解释方式。这里不是换到别的边角，而是在中心继续放大。
@@ -28,7 +34,10 @@ display(show_png("comparison_roi_2.png"))
 # > **核心发现**: ROI 2 用于检查中心结构在更高放大下是否仍然可信。它帮助区分“中心内部结构更容易看”与“某些边被锐化得更显眼”。
 
 # %%
-display(show_png("comparison_roi_3.png"))
+show_fig("comparison_roi_3.png")
+
+# %% [markdown]
+# Figure 16: Center ROI comparison at the tightest crop. The most magnified highpass view checks fine contour continuity and artifacts.
 
 # %% [markdown]
 # > **图表说明**: `comparison_roi_3.png` 是同一芯片中心的最强放大 crop，继续用同一 highpass 色标比较多个方法。它专门服务于“中心针脚/内部细分隔能不能分开”的问题。
@@ -45,13 +54,32 @@ display(show_png("comparison_roi_3.png"))
 # 前面的 ROI 是 highpass 结构图，适合看边缘是否变锐，但不适合直接判断中心针脚/内部块状区域是不是在普通温度图里真的分开。这里改用 raw-temperature 控制轨的中心 crop，使用普通温度色标检查中心结构。
 
 # %%
-display(show_png("comparison_center_raw_temperature.png"))
+show_fig("comparison_center_raw_temperature.png")
+
+# %% [markdown]
+# Figure 17: Center raw-temperature comparison at 2x. Offset-corrected temperature reconstructions are shown without highpass coloring.
 
 # %% [markdown]
 # > **图表说明**: `comparison_center_raw_temperature.png` 显示中心区域的 offset-corrected raw-temperature 重建，不做 highpass，也不使用红蓝差分色标。左侧加入 `LR raw reference` 和 `Bicubic raw reference`，后面才是多帧 SR 方法，因此可以直接比较原始 raw、普通插值和 SR 输出在中心针脚区域的差别。
 # >
 # > **怎么看**: 重点看中心针脚/内部轮廓之间的分隔是否变清楚：暗缝是否更连续，亮块边界是否更稳定，相邻结构是否更容易分开。这里不是看颜色谁更鲜艳，而是看同一物理结构的边界是否在不同方法中更明确、更一致。
 # >
-# > **正常/异常**: 普通温度图保留慢变热背景，所以不会像 highpass 图那样大面积发白，边缘也不会天然出现红蓝成对响应。若中心区域在 highpass 图里边缘很强，但在 raw-temperature 中仍然糊成一片，说明当前方法可能主要增强了外轮廓或强边缘，内部细分隔还没有被可靠恢复。
+# > **正常/异常**: 普通温度图保留慢变热背景，所以不会像 highpass 图那样大面积发白，边缘也不会天然出现红蓝对响应。若中心区域在 highpass 图里边缘很强，但在 raw-temperature 中仍然糊成一片，说明当前方法可能主要增强了外轮廓或强边缘，内部细分隔还没有被可靠恢复。
 # >
 # > **核心发现**: 这张新图是 EP06 判断中心结构的关键补充：它把“边缘响应更强”转化为更贴近使用场景的问题，即中心针脚和内部轮廓在普通视觉上是否更可分。最终结论应同时引用 highpass ROI 和这张 raw-temperature 中心检查。
+
+# %% [markdown]
+# ## 6.2 Center Raw-Temperature 4X SR Reconstruct & Contrast
+#
+# 4X 尺度下的普通温度图中心裁剪对比由 `scripts/build_ep06_cache.py` 预生成（SAA/IBP/MAP-TV 快速 4x 迭代）。Notebook 只展示缓存 PNG，不在 cell 内 subprocess 重建。
+
+# %%
+show_fig("comparison_center_raw_temperature.png", subdir="4x")
+
+# %% [markdown]
+# Figure 18: Center raw-temperature comparison at 4x. The same physical center crop is displayed on a denser output grid for visualization only.
+
+# %% [markdown]
+# > **图表说明**: 4X 版本的 `comparison_center_raw_temperature.png` 展示了上采样网格扩大为 4 倍（HR 尺寸 1920x2560）时的芯片中心局部区域。
+# >
+# > **对比分析**: 可以与上方的 2X 版本进行直观对比。4X 的重构在像素颗粒感上比 2X 更加细腻，但因为 4X 下亚像素对齐的病态程度剧增，使得它在插值和去卷积过程中对位移先验偏差和噪声的敏感度更高，部分物理结构的边缘容易产生振铃或柔和的模糊。

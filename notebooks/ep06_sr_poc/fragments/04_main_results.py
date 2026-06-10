@@ -4,7 +4,10 @@
 # 主轨使用 per-frame highpass 后的结构图作为输入，输出仍是结构图。这里不再展示整幅缩略图，而是固定芯片中心做约 6x 视觉放大，对比 LR、bicubic、SAA、IBP 和 MAP-TV。
 
 # %%
-display(show_png("comparison_fullview.png"))
+show_fig("comparison_fullview.png")
+
+# %% [markdown]
+# Figure 6: Main highpass result comparison. Center-crop comparison of LR, bicubic, SAA, IBP, and MAP-TV outputs.
 
 # %% [markdown]
 # > **图表说明**: `comparison_fullview.png` 是 EP06 的主视觉证据，横向比较 LR reference、bicubic、SAA、IBP、MAP-TV 等 2x 输出。图像已经裁到芯片中心并做约 6x 视觉放大，便于直接检查中心针脚/折线区域；这里显示的是 per-frame highpass 后的结构图，不是普通温度图。

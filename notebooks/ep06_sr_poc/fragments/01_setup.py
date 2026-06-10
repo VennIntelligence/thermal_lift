@@ -5,12 +5,18 @@
 #
 # ```bash
 # cd /path/to/thermal_lift
+# uv sync
+#
+# # 1. 运行 EP06 算法脚本（2x SR 产物）
 # uv run python algos/ep06_sr_poc/scripts/run_saa.py --psf-sigma 0.5
 # uv run python algos/ep06_sr_poc/scripts/run_ibp.py --max-iter 8 --psf-sigma 0.5
 # uv run python algos/ep06_sr_poc/scripts/run_map_tv.py --max-iter 8 --step-size 0.25 --psf-sigma 0.5 --lambda-grid 0.0003,0.001,0.003,0.01 --no-fista
 # uv run python algos/ep06_sr_poc/scripts/run_evaluation.py --center-roi-sizes 160,112,80
-# uv run python scripts/run_ep06_alignment_ablation.py
-# uv run python scripts/summarize_ep06_alignment_sweep.py
+#
+# # 2. 验证产物并构建 4x ROI 缓存
+# uv run python scripts/build_ep06_cache.py
+#
+# # 3. 构建/执行 notebook
 # uv run python scripts/build_notebook.py notebooks/ep06_sr_poc --execute
 # ```
 #
@@ -19,15 +25,16 @@
 # **边界**: 本 EP 只验证 2x contour-level 结构可见性。Highpass 输出是结构图，不是绝对温度 SR；raw track 是控制轨。2x 输出网格不等价于声明 5 um 实际空间分辨率。
 
 # %%
-%matplotlib inline
-
 from pathlib import Path
 
-import numpy as np
 import pandas as pd
-from IPython.display import Image as NotebookImage
 from IPython.display import display
 
+from thermal_core.ep06_cache import (
+    EP06_REQUIRED_OUTPUTS,
+    load_ep06_cache,
+)
+from thermal_core.notebook_cache import show_fig as _show_cached_fig
 from thermal_core.plotting import setup_academic_style
 
 PROJECT_ROOT = Path.cwd()
@@ -41,37 +48,6 @@ SWEEP_SUMMARY_DIR = SWEEP_ROOT / "summary"
 REPORT_DIR = PROJECT_ROOT / "reports" / "ep06_sr_poc"
 OUTPUT_DIR.mkdir(parents=True, exist_ok=True)
 REPORT_DIR.mkdir(parents=True, exist_ok=True)
-
-REQUIRED_OUTPUTS = [
-    "saa_uniform_highpass.npy",
-    "saa_weighted_highpass.npy",
-    "saa_uniform_raw.npy",
-    "saa_weighted_raw.npy",
-    "bicubic_reference.npy",
-    "lr_reference.npy",
-    "lr_raw_reference.npy",
-    "bicubic_raw_reference.npy",
-    "saa_synthetic_validation.json",
-    "ibp_highpass.npy",
-    "ibp_raw.npy",
-    "ibp_convergence.csv",
-    "ibp_synthetic_validation.json",
-    "map_tv_highpass.npy",
-    "map_tv_raw.npy",
-    "map_tv_lambda_selection.csv",
-    "map_tv_convergence.csv",
-    "map_tv_synthetic_validation.json",
-    "evaluation_summary.csv",
-    "comparison_fullview.png",
-    "comparison_roi_1.png",
-    "comparison_roi_2.png",
-    "comparison_roi_3.png",
-    "comparison_control_track.png",
-    "comparison_center_raw_temperature.png",
-    "gradient_magnitude_comparison.png",
-    "split_half_consistency.png",
-    "artifact_audit.png",
-]
 
 ABLATION_OUTPUT_PATTERNS = {
     "figures": [
@@ -90,18 +66,23 @@ ABLATION_OUTPUT_PATTERNS = {
     ],
 }
 
-missing = [name for name in REQUIRED_OUTPUTS if not (OUTPUT_DIR / name).exists()]
 setup_academic_style()
+cache = load_ep06_cache(project_root_path=PROJECT_ROOT, output_dir=OUTPUT_DIR, require_complete=False)
+OUTPUT_DIR_4X = cache.output_dir_4x
 
-print(f"Project root: {PROJECT_ROOT}")
-print(f"EP06 output: {OUTPUT_DIR.relative_to(PROJECT_ROOT)}")
-print(f"EP06 alignment ablation output: {ABLATION_OUTPUT_DIR.relative_to(PROJECT_ROOT)}")
-print(f"EP06 alignment sweep summary: {SWEEP_SUMMARY_DIR.relative_to(PROJECT_ROOT)}")
-print(f"Missing outputs: {len(missing)}")
-if missing:
-    print("Run the EP06 scripts before executing the result cells. First missing files:")
-    for name in missing[:8]:
-        print(f"  - {name}")
+
+def show_fig(name: str, *, subdir: str = "main"):
+    """Display a cached EP06 figure (300 dpi PNG from build_ep06_cache.py)."""
+    output_dir = {
+        "main": cache.output_dir,
+        "4x": cache.output_dir_4x,
+        "sweep": cache.sweep_summary_dir,
+        "ablation": cache.ablation_output_dir,
+    }.get(subdir, cache.output_dir)
+    hint = cache.manifest.get("rebuild_command", "uv run python scripts/build_ep06_cache.py")
+    if subdir == "main" and name in EP06_REQUIRED_OUTPUTS:
+        hint = cache.manifest.get("algo_build_hint", hint)
+    _show_cached_fig(output_dir, name, rebuild_command=hint)
 
 
 def relative(path: Path) -> str:
@@ -120,27 +101,12 @@ def discover_outputs(patterns: list[str], base_dir: Path = OUTPUT_DIR) -> list[P
     return [found[name] for name in sorted(found)]
 
 
-def show_png(name: str):
-    path = OUTPUT_DIR / name
-    if not path.exists():
-        print(f"Missing figure: {relative(path)}")
-        return None
-    return NotebookImage(filename=str(path))
-
-
 def read_csv_if_exists(name: str) -> pd.DataFrame:
     path = OUTPUT_DIR / name
     if not path.exists():
         print(f"Missing table: {relative(path)}")
         return pd.DataFrame()
     return pd.read_csv(path)
-
-
-def show_png_path(path: Path):
-    if not path.exists():
-        print(f"Missing figure: {relative(path)}")
-        return None
-    return NotebookImage(filename=str(path))
 
 
 def read_csv_path(path: Path) -> pd.DataFrame:
@@ -150,7 +116,20 @@ def read_csv_path(path: Path) -> pd.DataFrame:
     return pd.read_csv(path)
 
 
+print(f"Project root: {PROJECT_ROOT}")
+print(f"EP06 output: {OUTPUT_DIR.relative_to(PROJECT_ROOT)}")
+print(f"EP06 4x output: {OUTPUT_DIR_4X.relative_to(PROJECT_ROOT)}")
+print(f"EP06 alignment ablation output: {ABLATION_OUTPUT_DIR.relative_to(PROJECT_ROOT)}")
+print(f"EP06 alignment sweep summary: {SWEEP_SUMMARY_DIR.relative_to(PROJECT_ROOT)}")
+print(f"Missing required outputs: {len(cache.missing_required)}")
+if cache.missing_required:
+    print("Run EP06 algo scripts before executing result cells. First missing files:")
+    for name in cache.missing_required[:8]:
+        print(f"  - {name}")
+if cache.manifest:
+    print(f"Cache built (UTC): {cache.manifest.get('built_at_utc', 'unknown')}")
+    print(f"4x figure built: {cache.manifest.get('four_x_built', False)}")
+
 # %% [markdown]
-# > **数据说明**: 输入帧限定为 EP01 主 session，位移使用 EP05 的 LR-frame-to-reference 对齐约定。脚本把 `algos/ep06_sr_poc/src` 加入 `sys.path`，优先调用算法模块；模块缺失时使用脚本内 fallback。
-# > **数据分布/模式**: 评估结果保存在 `output/ep06_sr_poc/`，Notebook 只读取产物，不在 fragments 中重新跑重建。
-# > **核心发现**: 本 Notebook 的主证据是直接视觉对比图，全图、ROI 和 highpass/raw 控制轨优先于单独指标表。
+# 本实验的输入帧序列限定为主扫描会话（session=2），配准参数遵循低分辨率帧至参考帧的对齐约定。为确保算法实现的可维护性与重用性，系统路径中优先载入了算法模块（`algos/ep06_sr_poc/src`），并在模块不可用时自动启用本地后备实现。
+# 重建与分析产物均固化于输出目录（`output/ep06_sr_poc/`）中，其中高倍率局部图像由缓存生成脚本预先处理。本分析报告的核心证据链建立在多算法全图对比、局部特征区域（ROI）放大以及高通滤波/原始控制轨的直接目视对比基础之上，定量评估指标表作为辅助支撑工具共同参与论证。

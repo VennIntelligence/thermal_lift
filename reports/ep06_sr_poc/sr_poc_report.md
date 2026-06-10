@@ -2,15 +2,15 @@
 
 ## Scope
 
-EP06 evaluates a 2x contour-level super-resolution POC on the 255-frame main TXT session. The goal is to test whether multi-frame micro-scanning improves visible chip/internal contours relative to LR and bicubic references.
+EP06 evaluates a 2x contour-level super-resolution POC on 248 clean SR-usable frames selected from the historical 255-frame main TXT acquisition segment. The goal is to test whether multi-frame micro-scanning improves visible chip/internal contours relative to LR and bicubic references.
 
 This report does **not** claim 4x SR, 5 um actual spatial resolution, or absolute-temperature SR. The highpass track is a structure-map reconstruction. The raw-temperature track is a control track used to test whether the highpass preprocessing creates unsupported structure.
 
 ## Inputs
 
-- Frames: `output/ep01_data_processing/frame_audit.csv`, main session only.
+- Frames: 248 clean SR-usable rows from `output/ep01_data_processing/frame_audit.csv`, selected with `is_sr_usable` when available and aligned one-to-one with EP05 contour results. The raw 255-frame main segment is historical acquisition context only.
 - Data: `data/data_raw/infrared_avi/*.txt`.
-- Alignment: default `output/ep05_contour_alignment/contour_alignment_results.csv`; ablation and sweep also use `data_driven_ncc_init`, tuned refined alignment from `output/ep05_alignment_tuning/full_r360_e93_rad100_s0125/`, and filename/stage controls from EP05 capacity outputs.
+- Alignment: default `output/ep05_contour_alignment/contour_alignment_results.csv` (248 rows). Ablation also uses `data_driven_ncc_init` from the same CSV and filename/stage controls from EP05 capacity outputs. Tuned refined alignment is optional/pending unless a 248-frame candidate under `output/ep05_alignment_tuning_study/` is explicitly supplied.
 - Shift convention: `align_dx_px/align_dy_px` and `refined_align_dx_px/refined_align_dy_px` move each LR frame into the reference coordinate system, in LR pixels.
 - Evaluation anchors: `output/ep04_global_validation/segment_summary.csv` as a contour proxy, not optical ground truth.
 
@@ -28,7 +28,7 @@ uv run python scripts/build_notebook.py notebooks/ep06_sr_poc --execute
 
 For the full alignment sweep, repeat the first four commands with these changes:
 
-- `tuned_contour_refined_psf05`: add `--alignment-csv output/ep05_alignment_tuning/full_r360_e93_rad100_s0125/contour_alignment_results.csv --alignment-method data_driven_contour_refined` and write to `output/ep06_sr_poc_data_driven_align_sweep/tuned_contour_refined_psf05`.
+- `tuned_contour_refined_psf05`: optional/pending. Only add `--alignment-csv <validated 248-frame CSV under output/ep05_alignment_tuning_study/> --alignment-method data_driven_contour_refined` after EP05 tuning has produced a full 248-frame candidate.
 - `ncc_init_psf05`: add `--alignment-method data_driven_ncc_init` and write to `output/ep06_sr_poc_data_driven_align_sweep/ncc_init_psf05`.
 
 ## Methods
@@ -49,7 +49,7 @@ For the full alignment sweep, repeat the first four commands with these changes:
 - Validation and convergence: `saa_synthetic_validation.json`, `ibp_synthetic_validation.json`, `ibp_convergence.csv`, `map_tv_synthetic_validation.json`, `map_tv_lambda_selection.csv`, `map_tv_convergence.csv`.
 - Evaluation: `evaluation_summary.csv`.
 - Direct visual comparisons: `comparison_fullview.png`, `comparison_roi_1.png`, `comparison_roi_2.png`, `comparison_roi_3.png`, `comparison_control_track.png`, `comparison_center_raw_temperature.png`, `gradient_magnitude_comparison.png`, `split_half_consistency.png`, `artifact_audit.png`.
-- Alignment sweep: `output/ep06_sr_poc_data_driven_align_sweep/{default_contour_refined_psf05,tuned_contour_refined_psf05,ncc_init_psf05}/`.
+- Alignment sweep: current baseline directories are `output/ep06_sr_poc_data_driven_align_sweep/{default_contour_refined_psf05,ncc_init_psf05}/`; tuned refined remains optional/pending until backed by a validated 248-frame CSV.
 - Sweep summary: `output/ep06_sr_poc_data_driven_align_sweep/summary/sweep_method_metrics.csv`, `sweep_map_tv_lambda.csv`, `sweep_validation_summary.csv`, `sweep_delta_vs_baseline.csv`, `sweep_summary.json`, `sweep_metric_bars.png`, `sweep_map_tv_lambda_selection.png`, `sweep_delta_vs_baseline.png`.
 
 ## Evaluation Criteria
@@ -115,6 +115,8 @@ Current ablation outputs:
 
 SAA alignment comparison:
 
+The tuned refined row below is a historical deprecated-path sensitivity result and is excluded from the current EP06 baseline until rerun from a validated 248-frame tuning-study CSV.
+
 | Alignment | Mean gradient | P95 gradient | Artifact score | Split-half NRMSE | NRMSE to default | 2x phase |
 |---|---:|---:|---:|---:|---:|---:|
 | default contour refined | `0.0373` | `0.2008` | `1.5094` | `0.0217` | `0.0000` | `4/4` |
@@ -125,7 +127,7 @@ SAA alignment comparison:
 Interpretation:
 
 - Default contour refined is the most stable SAA alignment in this center-ROI ablation by split-half NRMSE.
-- Tuned refined improves EP05 held-out Chamfer and has the lowest artifact proxy here, but its split-half NRMSE is worse than default refined. It should be treated as a candidate/gate, not automatically promoted as the final SR shift.
+- The historical tuned refined row improves EP05 held-out Chamfer and has the lowest artifact proxy here, but it came through a deprecated path and its split-half NRMSE is worse than default refined. It remains excluded/pending for the current baseline.
 - NCC init preserves continuous phase coverage and the strongest EP05 gradient correlation, but its artifact proxy is higher in this SAA ablation. It remains an important phase-prior control.
 - Filename affine remains a strong prior/control, but it is not the best SAA ablation strategy and should not be promoted to alignment truth.
 
@@ -133,12 +135,12 @@ MAP-TV split-half selection chose `lambda=0.01` for both the highpass and raw tr
 
 ## Data-Driven Alignment Sweep
 
-The full sweep re-ran SAA-weighted, IBP, and MAP-TV under three data-driven alignment variants, all with `psf_sigma=0.5` for the forward-model methods. The summary script found no missing files: `sweep_method_metrics.csv` has 27 rows, `sweep_map_tv_lambda.csv` has 24 rows, `sweep_validation_summary.csv` has 9 rows, and `sweep_delta_vs_baseline.csv` has 27 rows.
+The historical full sweep re-ran SAA-weighted, IBP, and MAP-TV under three data-driven alignment variants, all with `psf_sigma=0.5` for the forward-model methods. Results that use `tuned_contour_refined_psf05` are deprecated-path sensitivity records, not current EP06 baseline evidence. The current baseline should be rerun with 248-frame default contour refined and NCC-init variants; tuned refined can be added only after EP05 produces a validated 248-frame tuning-study CSV.
 
 Sweep outputs:
 
 - `output/ep06_sr_poc_data_driven_align_sweep/default_contour_refined_psf05/`
-- `output/ep06_sr_poc_data_driven_align_sweep/tuned_contour_refined_psf05/`
+- `output/ep06_sr_poc_data_driven_align_sweep/tuned_contour_refined_psf05/` (historical deprecated-path output; excluded/pending)
 - `output/ep06_sr_poc_data_driven_align_sweep/ncc_init_psf05/`
 - `output/ep06_sr_poc_data_driven_align_sweep/summary/sweep_metric_bars.png`
 - `output/ep06_sr_poc_data_driven_align_sweep/summary/sweep_map_tv_lambda_selection.png`
@@ -169,7 +171,7 @@ MAP-TV highpass lambda selection:
 Delta versus the old baseline:
 
 - Default SAA and MAP-TV are unchanged by the sweep. Default IBP with `psf_sigma=0.5` lowers std by `-0.006953` and P95 gradient by `-0.050307` versus the old IBP, but artifact rises by `+0.007619`.
-- Tuned refined stays close to default. Relative to the old baseline, artifact changes are SAA `+0.000696`, IBP `+0.007534`, and MAP-TV `+0.000139`.
+- Historical tuned refined stays close to default in the deprecated-path sweep. Relative to the old baseline, artifact changes are SAA `+0.000696`, IBP `+0.007534`, and MAP-TV `+0.000139`; these numbers should not be used as current baseline evidence until rerun with a validated 248-frame input.
 - NCC init preserves the phase-prior control, but raises artifact across all full-SR methods: SAA `+0.015149`, IBP `+0.023794`, and MAP-TV `+0.013468`.
 
 Decision from the sweep:
@@ -200,7 +202,7 @@ Direct visual comparison:
 
 - The fallback implementations in the run scripts are intentionally conservative orchestration fallbacks. The current run used the algorithm modules under `algos/ep06_sr_poc/src`.
 - MAP-TV is no longer described as the sharpest candidate in the current run; it is a regularized candidate selected by split-half stability and must still be shown with ROI and raw-control panels.
-- The full data-driven sweep does not promote tuned refined, NCC init, IBP, or MAP-TV over default contour refined as the EP06 recommendation.
+- The full data-driven sweep does not promote NCC init, IBP, or MAP-TV over default contour refined as the EP06 recommendation. Tuned refined remains excluded/pending until rerun from a validated 248-frame tuning-study CSV.
 - EP04 segment anchors are useful for contour proxy scoring but are not independent optical ground truth.
 
 ## EP07 Handoff

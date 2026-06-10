@@ -32,6 +32,7 @@
 ## 产物索引
 
 - `algos/ep06_sr_poc/` — 算法实现（独立 UV 环境）
+- `scripts/build_ep06_cache.py` — 验证 SR 产物、构建 4x ROI 图、写入 `cache_manifest.json`
 - `scripts/summarize_ep06_alignment_sweep.py` — 汇总 EP06 data-driven alignment sweep 的 CSV/JSON/图表
 - `output/ep06_sr_poc/` — 数据产物
 - `output/ep06_sr_poc_data_driven_align_sweep/` — default/tuned/NCC-init 三组 full SR sweep 产物
@@ -60,6 +61,7 @@ uv run python algos/ep06_sr_poc/scripts/run_map_tv.py --workers 4 --alignment-me
 uv run python algos/ep06_sr_poc/scripts/run_evaluation.py --output-dir output/ep06_sr_poc_data_driven_align_sweep/default_contour_refined_psf05 --center-roi-sizes 160,112,80
 uv run python scripts/run_ep06_alignment_ablation.py
 uv run python scripts/summarize_ep06_alignment_sweep.py --sweep-root output/ep06_sr_poc_data_driven_align_sweep --baseline-dir output/ep06_sr_poc
+uv run python scripts/build_ep06_cache.py
 uv run python scripts/build_notebook.py notebooks/ep06_sr_poc --execute
 ```
 

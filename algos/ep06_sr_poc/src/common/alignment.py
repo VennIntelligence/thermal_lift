@@ -7,7 +7,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from .data_loader import DEFAULT_FRAME_AUDIT_PATH, load_main_session_metadata
+from .data_loader import DEFAULT_CLEAN_SR_FRAME_COUNT, DEFAULT_FRAME_AUDIT_PATH, load_main_session_metadata
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
@@ -61,6 +61,42 @@ def _scores_rows(path: Path, method: str) -> pd.DataFrame:
     return rows[keep]
 
 
+def validate_alignment_frame_count(
+    metadata: pd.DataFrame,
+    alignment_csv: str | Path,
+    *,
+    expected_count: int | None = DEFAULT_CLEAN_SR_FRAME_COUNT,
+) -> pd.DataFrame:
+    """Require one alignment-result row for each clean SR input frame."""
+
+    path = Path(alignment_csv)
+    alignment = pd.read_csv(path)
+    metadata_count = int(len(metadata))
+    alignment_count = int(len(alignment))
+    if expected_count is not None and metadata_count != int(expected_count):
+        raise ValueError(
+            f"EP06 clean SR metadata has {metadata_count} frames; expected {int(expected_count)}. "
+            "Check frame_audit.csv filtering: prefer is_sr_usable, fallback to is_main_session only for legacy audits."
+        )
+    if alignment_count != metadata_count:
+        raise ValueError(
+            f"EP06 frame-count contract failed for {path}: metadata has {metadata_count} clean SR frames, "
+            f"alignment CSV has {alignment_count} result rows. Current EP06 baseline expects "
+            f"{metadata_count} one-to-one rows."
+        )
+    if "file" in metadata.columns and "file" in alignment.columns:
+        metadata_files = set(metadata["file"].astype(str))
+        alignment_files = set(alignment["file"].astype(str))
+        missing = sorted(metadata_files - alignment_files)
+        extra = sorted(alignment_files - metadata_files)
+        if missing or extra:
+            raise ValueError(
+                f"EP06 alignment file contract failed for {path}: "
+                f"missing={missing[:5]} extra={extra[:5]}"
+            )
+    return alignment
+
+
 def _contour_rows(path: Path, method: str) -> pd.DataFrame | None:
     if _METHOD_ALIASES.get(method, method) == "filename_affine_fit":
         return None
@@ -111,6 +147,9 @@ def load_alignment_table(
 
     contour_path = Path(contour_alignment_path or alignment_csv or DEFAULT_CONTOUR_ALIGNMENT_PATH)
     scores_path = Path(alignment_scores_path or DEFAULT_ALIGNMENT_SCORES_PATH)
+
+    if contour_path.exists() and _METHOD_ALIASES.get(method, method) != "filename_affine_fit":
+        validate_alignment_frame_count(meta, contour_path)
 
     contour = _contour_rows(contour_path, method) if contour_path.exists() else None
     primary = contour if contour is not None else _scores_rows(scores_path, method)

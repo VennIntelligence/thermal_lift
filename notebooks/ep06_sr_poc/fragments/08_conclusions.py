@@ -3,7 +3,7 @@
 #
 # EP06 的结论必须按证据强度书写：
 #
-# 1. **可以声明**: 在 255 帧主 session 上完成了 2x contour-level POC 的 classic SR 对比，包含 highpass 结构主轨和 raw-temperature 控制轨。
+# 1. **可以声明**: 在 248 clean SR-usable frames 上完成了 2x contour-level POC 的 classic SR 对比，包含 highpass 结构主轨和 raw-temperature 控制轨；原始 255 帧只作为历史主采集段说明。
 # 2. **可以讨论**: SAA-weighted 是否优于 SAA-uniform，IBP/MAP-TV 是否在直接视觉、split-half、artifact audit、alignment ablation 和 data-driven alignment sweep 上带来稳健增益。
 # 3. **必须保守**: alignment ablation/sweep 若缺失或显示策略敏感，只能写成“当前对齐策略下的候选结果”，不能写成对齐无关的稳健 SR 结论。
 # 4. **不能声明**: 4x SR、5 um 实际空间分辨率、绝对温度计量 SR，或仅凭 sharper gradient 判定 SR 成功。
@@ -28,10 +28,6 @@ else:
     print("Use the ablation section command before making alignment-stability claims.")
 
 # %% [markdown]
-# > **数据说明**: 这张结论表只保留 highpass 主轨的核心辅助指标，方便在 EP06 结尾快速比较候选方法。它不是新的实验输出，而是从 `evaluation_summary.csv` 中抽取与方法选择最相关的列。
-# >
-# > **怎么看**: `mean_gradient` 较高说明整体边缘响应更强，但仍要防止噪声和振铃；`artifact_score` 越低通常越稳；`contour_chamfer_lr_px` 越低通常表示与 EP04 segment proxy 更接近；`corr_to_bicubic` 用来判断结果是否过于接近插值 baseline 或偏离过大。
-# >
-# > **正常/异常**: 最终排序不能只按一个数值决定。若某方法梯度最高但 artifact score、split-half 或 alignment ablation 明显更差，应降级为“锐但风险高”；若某方法指标温和但 fullview、ROI 和 center raw-temperature 都更可读，则可以作为更保守的候选。
-# >
-# > **核心发现**: 最终报告应以 `comparison_fullview.png`、三个 ROI、`comparison_center_raw_temperature.png`、`comparison_control_track.png`、split-half、artifact audit、alignment ablation 和 data-driven alignment sweep 为主证据；如果指标与视觉证据冲突，优先保守解释并写明风险。2x grid 是重建采样网格，不能被写成 5 um 计量级空间分辨率证明。
+# 此处的最终结论表提取自高通成像通道（Highpass Track）的量化评估结果，汇总了平均梯度、伪影得分、Chamfer 距离以及相对插值的相关性系数。该表用于协助在 EP06 实验结尾快速总结不同超分辨率算法分支的优缺点。
+# 在参数判定中，各项指标应进行交叉验证：高梯度响应（平均梯度）必须与低伪影得分（`artifact_score`）及低 Chamfer 距离（`contour_chamfer_lr_px`）相匹配，以排除由高频噪声或数值振铃带来的假阳性锐化增益。若算法分支在某项锐度指标上突出，但在子集一致性或配准烧蚀敏感性（Alignment Ablation Sensitivity）测试中表现较差，则在物理结论中应界定为高伪影过拟合风险分支。
+# 综上所述，超分辨率 POC 的论证需以全景与局部多算法对比图、中心区域温度分布图以及高通滤波/原始控制轨的多维视觉证据为主，定量物理指标作为辅助诊断。本阶段所确立的 2x 采样网格旨在改善工业检测下的芯片内部轮廓清晰度与结构边界稳定性，不能被直接等同于 5 µm 的光学计量级空间分辨率声明。后续的 EP07 仿真实验将在此 2x 基准上引入更严格的前向退化退卷积及局部边缘过渡函数（ESF）分析以进一步厘清分辨率增益的物理边界。

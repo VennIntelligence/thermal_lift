@@ -7,7 +7,7 @@
 
 ## 🎯 总体目标
 
-在 thermal_lift 项目的 255 帧主 session LWIR 温度矩阵上，实现 **2x contour-level 超分辨率重建 POC**。使用 5 种经典物理算法（含 baseline），通过双轨输出（highpass 结构图 + raw 温度控制轨）证明多帧微扫描对芯片内部结构/轮廓的增益。
+在 thermal_lift 项目的 248 个 clean SR-usable LWIR 温度矩阵上，实现 **2x contour-level 超分辨率重建 POC**。这些帧来自历史 255 帧主采集段；使用 5 种经典物理算法（含 baseline），通过双轨输出（highpass 结构图 + raw 温度控制轨）证明多帧微扫描对芯片内部结构/轮廓的增益。
 
 **不是**温度计量 SR，**是**轮廓/结构可见性增强。
 
@@ -17,7 +17,7 @@
 
 | 产物 | 路径 | 用途 |
 |------|------|------|
-| 帧审计表 | `output/ep01_data_processing/frame_audit.csv` | 主 session 255 帧筛选 |
+| 帧审计表 | `output/ep01_data_processing/frame_audit.csv` | 248 clean SR-usable frame 筛选 |
 | 对齐位移表 | `output/ep05_sr_reassessment/displacement_measurements.csv` | NCC init 位移 |
 | 对齐方法对比 | `output/ep05_alignment_sr_capacity/alignment_method_holdout_scores.csv` | 方法选择依据 |
 | Contour alignment | `output/ep05_contour_alignment/contour_alignment_results.csv` | 每帧 refined shift |
@@ -31,7 +31,7 @@
 - 目标: 2x → 10 µm 等效分辨率（5 µm/pixel 输出网格）
 - PSF: Gaussian σ ≈ 1.0 px（实测 ESF 等效宽度，含热边缘过渡）
 - Noise floor: 0.0724°C
-- 主 session: 255 帧
+- SR 输入: 248 clean SR-usable frames（历史主采集段为 255 帧）
 - 旋转角 θ: 47.6°
 
 ---
@@ -45,7 +45,7 @@ algos/ep06_sr_poc/
 ├── src/
 │   ├── common/                 ← 共享基础设施
 │   │   ├── __init__.py
-│   │   ├── data_loader.py     ← 加载 255 帧 + highpass 预处理
+│   │   ├── data_loader.py     ← 加载 clean SR frames + highpass 预处理
 │   │   ├── alignment.py       ← 从 EP05 产物加载对齐位移
 │   │   ├── forward_model.py   ← H 矩阵（shift + PSF + downsample）
 │   │   ├── metrics.py         ← 评价指标
@@ -89,10 +89,10 @@ algos/ep06_sr_poc/
 **data_loader.py**:
 ```python
 def load_main_session_frames(data_dir, frame_audit_path):
-    """加载 255 帧主 session TXT 温度矩阵，返回 (N, H, W) ndarray。"""
-    # 从 frame_audit.csv 筛选 is_main_session == True
+    """加载 clean main SR TXT 温度矩阵，返回 (N, H, W) ndarray。"""
+    # 从 frame_audit.csv 优先筛选 is_sr_usable == True；legacy metadata 才 fallback 到 is_main_session
     # 按 acquisition_order 排序
-    # 返回 frames: (255, 480, 640), metadata: DataFrame
+    # 返回 frames: (248, 480, 640), metadata: DataFrame
 
 def highpass_preprocess(frames, sigma_bg=5.0):
     """对每帧减去 Gaussian 平滑背景，返回 highpass 结构图。
@@ -101,7 +101,7 @@ def highpass_preprocess(frames, sigma_bg=5.0):
     选择依据：远大于 PSF σ≈1 px，保留边缘；远小于芯片尺度，去除漂移。
     """
     # frames_hp[i] = frames[i] - gaussian_filter(frames[i], sigma=sigma_bg)
-    # 返回 (255, 480, 640) highpass 图
+    # 返回 (248, 480, 640) highpass 图
 
 def offset_correction(frames):
     """Per-frame offset correction for raw-temperature track.
@@ -116,7 +116,7 @@ def load_alignment_shifts(method='ncc_init'):
     """从 EP05 产物加载每帧的 (dx, dy) 亚像素位移。
 
     method: 'ncc_init' | 'filename_affine' | 'contour_refined'
-    返回 shifts: (255, 2) ndarray，单位 pixel。
+    返回 shifts: (248, 2) ndarray，单位 pixel。
     """
 
 def load_quality_weights():
@@ -204,7 +204,7 @@ w_i 来自 load_quality_weights()。
 - 合成数据测试：已知 HR 图 → 生成 LR 帧 → SAA 重建 → 与真值 PSNR > 25 dB
 - 真实数据：输出 (960, 1280) 的 2x HR 图
 - 两个变体的结果都要输出
-- 运行时间 < 30 秒（255 帧）
+- 运行时间 < 30 秒（248 clean frames）
 
 **输出文件**:
 - `output/ep06_sr_poc/saa_uniform_highpass.npy`
@@ -245,7 +245,7 @@ w_i 来自 load_quality_weights()。
 - 合成数据测试：已知 HR + PSF → LR 帧 → IBP 重建 → PSNR 比 SAA 高
 - 真实数据：输出 (960, 1280) 的 2x HR 图
 - 迭代收敛曲线要输出
-- 运行时间 < 5 分钟（255 帧，50 iter）
+- 运行时间 < 5 分钟（248 clean frames，50 iter）
 - 不能出现明显振铃（用 artifact_score 检查）
 
 **输出文件**:
@@ -306,7 +306,7 @@ J(x) = (1/2N) * Σ_i ||y_i - H_i(x)||² + λ * TV(x)
 - 合成数据测试：已知 HR + PSF → LR 帧 → MAP-TV 重建 → PSNR 比 IBP 高
 - 真实数据：输出 (960, 1280) 的 2x HR 图
 - λ 选择曲线（split-half vs λ）要输出
-- 运行时间 < 30 分钟（255 帧，200 iter）
+- 运行时间 < 30 分钟（248 clean frames，200 iter）
 - 不能出现明显块状伪影
 
 **输出文件**:
@@ -430,9 +430,9 @@ def compute_quality_weights(chamfer_scores, ncc_peaks):
 def generate_synthetic_test():
     """
     1. 创建已知 HR 图 (960, 1280)：含清晰边缘、内部结构
-    2. 生成 255 个随机亚像素位移（模拟真实分布）
+    2. 生成 248 个随机亚像素位移（模拟真实分布）
     3. 对每个位移：shift → PSF blur → downsample → add noise
-    4. 得到 255 帧 LR (480, 640)
+    4. 得到 248 帧 LR (480, 640)
     5. 用各算法重建，与真值比较
 
     这是端到端验证，确保代码链路正确。

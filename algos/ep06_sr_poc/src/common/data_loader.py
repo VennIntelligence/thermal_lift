@@ -14,6 +14,7 @@ from scipy.ndimage import gaussian_filter, zoom
 PROJECT_ROOT = Path(__file__).resolve().parents[4]
 DEFAULT_DATA_DIR = PROJECT_ROOT / "data" / "data_raw" / "infrared_avi"
 DEFAULT_FRAME_AUDIT_PATH = PROJECT_ROOT / "output" / "ep01_data_processing" / "frame_audit.csv"
+DEFAULT_CLEAN_SR_FRAME_COUNT = 248
 
 
 def _boolish(series: pd.Series) -> pd.Series:
@@ -50,13 +51,15 @@ def load_main_session_metadata(
     if missing:
         raise ValueError(f"Frame audit CSV is missing required columns: {sorted(missing)}")
 
-    if "is_main_session" in audit.columns:
+    if "is_sr_usable" in audit.columns:
+        metadata = audit[_boolish(audit["is_sr_usable"])].copy()
+    elif "is_main_session" in audit.columns:
         metadata = audit[_boolish(audit["is_main_session"])].copy()
     elif "session" in audit.columns:
         main_session = 2 if audit["session"].eq(2).any() else audit.groupby("session")["file"].count().idxmax()
         metadata = audit[audit["session"].eq(main_session)].copy()
     else:
-        raise ValueError("Frame audit must contain is_main_session or session")
+        raise ValueError("Frame audit must contain is_sr_usable, is_main_session, or session")
 
     metadata["acquisition_order"] = pd.to_numeric(metadata["acquisition_order"], errors="coerce")
     metadata = metadata.sort_values(["acquisition_order", "file"]).reset_index(drop=True)
@@ -87,7 +90,7 @@ def load_main_session_frames(
     dtype: np.dtype | str | None = np.float32,
     limit: int | None = None,
 ) -> tuple[np.ndarray, pd.DataFrame]:
-    """Load the 255-frame main TXT session as ``(N, H, W)`` plus metadata."""
+    """Load the clean main SR TXT input as ``(N, H, W)`` plus metadata."""
 
     audit_path = frame_audit_path if frame_audit_path is not None else frame_audit_csv
     metadata = load_main_session_metadata(audit_path, limit=limit)

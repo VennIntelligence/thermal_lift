@@ -181,11 +181,22 @@ def upscale_lr_for_display(lr: np.ndarray, target_shape: tuple[int, int]) -> np.
     return zoom(lr, (target_shape[0] / lr.shape[0], target_shape[1] / lr.shape[1]), order=0).astype(np.float32)
 
 
+def get_structure_center(shape: tuple[int, int]) -> tuple[int, int]:
+    scale = shape[0] // 480
+    # The gradient centroid center at 2X scale was calculated at (455.08, 614.88)
+    # relative to the math center (480, 640), representing a Y/X offset of -25 pixels.
+    # We project this offset according to the current scale factor.
+    offset = int(-25.0 * scale / 2.0)
+    cy = shape[0] // 2 + offset
+    cx = shape[1] // 2 + offset
+    return cy, cx
+
+
 def center_zoom_roi(shape: tuple[int, int], *, zoom_factor: float) -> tuple[slice, slice]:
     if zoom_factor <= 1.0:
         return slice(0, shape[0]), slice(0, shape[1])
     size = int(round(min(shape) / zoom_factor))
-    return roi_slices((shape[0] // 2, shape[1] // 2), shape, max(32, size))
+    return roi_slices(get_structure_center(shape), shape, max(32, size))
 
 
 def save_fullview(output_dir: Path, high: dict[str, np.ndarray], *, zoom_factor: float) -> None:
@@ -227,7 +238,7 @@ def save_roi_figures(output_dir: Path, high: dict[str, np.ndarray], *, roi_sizes
         for key, image in high.items()
     }
     vmin, vmax = robust_limits(list(display_images.values()), symmetric=True)
-    center = (target_shape[0] // 2, target_shape[1] // 2)
+    center = get_structure_center(target_shape)
     for idx, size in enumerate(roi_sizes, start=1):
         if idx > 3:
             break
@@ -306,7 +317,7 @@ def save_center_raw_temperature(
         "ibp": raw["ibp"],
         "map_tv": raw["map_tv"],
     }
-    roi = roi_slices((reference.shape[0] // 2, reference.shape[1] // 2), reference.shape, center_size)
+    roi = roi_slices(get_structure_center(reference.shape), reference.shape, center_size)
     crops = [display_images[key][roi] for key, _ in columns]
     vmin, vmax = robust_limits(crops, symmetric=False)
     fig, axes = plt.subplots(2, 3, figsize=(7.1, 4.35), constrained_layout=False)
@@ -408,8 +419,8 @@ def parse_args() -> argparse.Namespace:
 def main() -> None:
     args = parse_args()
     args.output_dir = args.output_dir.resolve()
-    if args.scale != 2:
-        raise ValueError("EP06 is a 2x contour-level POC; keep --scale 2.")
+    if args.scale not in (2, 4):
+        raise ValueError("EP06 is a 2x/4x contour-level POC; keep --scale 2 or 4.")
     setup_academic_style()
 
     high = {key: load_array(args.output_dir / filename) for key, _, filename in HIGH_METHODS}

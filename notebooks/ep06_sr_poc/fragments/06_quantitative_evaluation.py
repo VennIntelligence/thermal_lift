@@ -69,46 +69,40 @@ if not lambda_selection.empty:
     )
 
 # %% [markdown]
-# > **数据说明**: 这张表把每个 track 和方法的辅助指标汇总在一起。`std`/`std_ratio_to_lr` 描述输出动态范围是否膨胀，`mean_gradient` 和 `p95_gradient` 描述边缘/纹理响应强度，`artifact_score` 描述一阶伪影风险，`nrmse_to_bicubic` 和 `corr_to_bicubic` 描述相对 bicubic baseline 的接近程度，`contour_chamfer_lr_px` 是基于 EP04 segment points 的轮廓距离 proxy。
-# >
-# > **怎么看**: `p95_gradient` 越大通常表示较强边缘更多，但它不是“越大就绝对越好”；噪声、振铃和假边缘也会推高梯度。`artifact_score` 通常越小越好，因为它希望惩罚不自然的一阶结构；`contour_chamfer_lr_px` 通常越小越好，但它只是相对于 EP04 点集的 proxy，不是独立光学 ground truth。
-# >
-# > **正常/异常**: `finite=True` 是最基本的数值健康检查；如果某个方法梯度很高但 artifact score 或 std ratio 同时变高，或 Chamfer 没有改善，就要把“更锐”解释为可疑而不是自动解释为更清楚。`nrmse_to_bicubic` 和 `corr_to_bicubic` 也不能单独排名，因为太接近 bicubic 可能意味着保守，太远又可能意味着引入了伪影。第二张方法摘要中 raw-control 没有 `SAA uniform raw` 行时是脚本产物设计差异，不是缺数据错误；MAP-TV lambda 表中 `selected=True` 表示 split-half + artifact/std proxy 当前选中的正则强度。
-# >
-# > **核心发现**: 当前评估应读成方法画像，而不是单项排名：SAA 是多帧相位覆盖 baseline，IBP 检查 forward model 迭代是否带来额外结构，MAP-TV 用 split-half proxy 选择正则强度。EP06 需要同时满足轮廓更清楚、split-half 稳定、artifact 不恶化、Chamfer proxy 不矛盾，才适合把某个方法作为 EP07 候选。
+# 定量评估表汇总了不同成像通道及重建方法的辅助物理指标。指标体系的设计旨在从多个维度对超分辨率重建质量进行综合画像，其包含：
+# 1. **动态范围表征**：标准差（`std`）及相对低分辨率输入标准差的比例（`std_ratio_to_lr`），用以监测动态范围是否发生病态膨胀。
+# 2. **边缘与梯度强度**：平均梯度（`mean_gradient`）与梯度第 95 百分位数（`p95_gradient`），用于量化高频边缘及纹理的响应强度。
+# 3. **结构伪影评估**：伪影评分（`artifact_score`），用以评估局部高频结构中引入不自然的条纹、振铃或尖峰伪影的物理风险。
+# 4. **与插值基线相似度**：相对 Bicubic 插值的归一化均方根误差（`nrmse_to_bicubic`）与相关系数（`corr_to_bicubic`），作为算法物理约束强弱的诊断工具。
+# 5. **几何轮廓贴合度**：基于 EP04 定位分割点计算的 Chamfer 距离（`contour_chamfer_lr_px`），提供了几何域内的对齐精细度参考。
+# 梯度指标的单调上升并不直接代表分辨率的物理提升，因为高频噪声及插值振铃效应亦会推高梯度均值。伪影评分与 Chamfer 距离则为评价提供稳定性门控。对于 MAP-TV 算法，`selected` 标记所指代的正则化参数 $\lambda_{\text{TV}}$ 选择，需在子集一致性与伪影控制之间取得物理平衡。实验评估需以合取逻辑（Conjunction Logic）进行多指标约束，从而避免仅依赖锐度指标而忽视系统性伪影的盲目判断。
 
 # %%
-display(show_png("gradient_magnitude_comparison.png"))
+show_fig("gradient_magnitude_comparison.png")
 
 # %% [markdown]
-# > **图表说明**: `gradient_magnitude_comparison.png` 把不同方法的梯度幅值可视化出来，显示哪里出现了强边缘或强局部变化。它回答的是“哪里更锐、边缘响应更强”，不是“真实分辨率提高了多少”。
-# >
-# > **怎么看**: 亮的区域代表梯度大，通常对应芯片边界、针脚边、内部结构边缘，也可能对应噪声和振铃。可以把它和 fullview/ROI highpass 图对照：如果亮边沿着稳定结构分布，可信度更高；如果亮点散乱或呈规则纹理，可信度更低。
-# >
-# > **正常/异常**: P95 gradient 这类高分位梯度指标容易被少量强边缘或伪影影响，因此不能简单认为数值越大越好。异常表现包括整幅图普遍变亮、细碎噪点增多、边缘两侧出现过宽的亮带。
-# >
-# > **核心发现**: 梯度图只能作为 contour sharpness 的辅助证据。它支持“哪里看起来更锐”的描述，但必须和 raw-temperature 中心图、split-half、artifact audit 一起使用。
+# Figure 8: Gradient magnitude comparison. Spatial edge-response maps for the main reconstruction methods.
+
+# %% [markdown]
+# 梯度幅值对比图表将不同重建方法的高频边缘响应进行了空间二维可视化。这主要用于诊断算法在芯片边界、针脚边沿及内部结构等梯度集中区域的边缘增益空间分布。
+# 在图像分析中，亮区指示着局部高梯度。由于梯度对噪声和高频振铃高度敏感，必须将梯度图与原始高通滤波图像进行空间位置对照。若高梯度特征集中于稳定的物理结构边缘，则说明高频复原具备物理合理性；反之，若高梯度呈零散分布或表现为有规律的格栅伪影，则指示着噪声的异常放大或算法数值不稳定性。因此，梯度幅值图仅能作为边缘清晰度的定性物理参考，不可单独作为超分辨率重建成功的计量依据。
 
 # %%
-display(show_png("split_half_consistency.png"))
+show_fig("split_half_consistency.png")
 
 # %% [markdown]
-# > **图表说明**: `split_half_consistency.png` 把同一主 session 拆成两个子集后分别重建，再比较两半结果的一致性。它检查的是方法是否依赖偶然帧或噪声，而不是检查最终图是否最锐。
-# >
-# > **怎么看**: Split-half NRMSE 通常越小越好，表示两半数据得到的结构更一致；如果图中按 lambda 或方法展示曲线，最低点附近通常是稳定性较好的候选。MAP-TV 用这个 proxy 选择 lambda，是为了避免正则过弱导致噪声/伪影，也避免正则过强把结构抹平。
-# >
-# > **正常/异常**: NRMSE 很低不自动代表结构最真实，因为过度平滑也可能让两半看起来一致；NRMSE 很高则提示方法对帧选择敏感，可能在追逐噪声、热漂移或对齐误差。这个指标没有外部显微配准真值，因此只能当稳定性约束。
-# >
-# > **核心发现**: Split-half 的价值是给视觉结论加一个复现性门槛。一个方法即使 highpass 看起来更锐，只要 split-half 明显变差，就不应被直接升级为可靠 SR 增益。
+# Figure 9: Split-half consistency diagnostics. Independent subset reconstructions quantify repeatability and overfitting risk.
+
+# %% [markdown]
+# 子集交叉一致性（Split-Half Consistency）分析通过将主扫描序列等分为两个独立的子集分别进行重建，进而计算两者之间的归一化均方根误差（NRMSE）。该方法旨在检验超分辨率重建是否依赖于特定帧的偶然性或局部噪声起伏，从而评估重建结果的可重复性。
+# 在稳定性曲线中，较低的子集 NRMSE 意味着算法对于数据噪声与热漂移具有较强的鲁棒性。MAP-TV 等正则化方法在此基础上进行正则强度参数 $\lambda$ 的优选，以规避因正则化不足导致对噪声的过拟合，以及因正则化过度导致的结构平滑。子集 NRMSE 作为稳定性约束门限，有效避免了超分辨率重建对输入样本集的过拟合风险。
 
 # %%
-display(show_png("artifact_audit.png"))
+show_fig("artifact_audit.png")
 
 # %% [markdown]
-# > **图表说明**: `artifact_audit.png` 用一阶统计或局部差分类指标检查重建图是否引入不自然的条纹、振铃、棋盘纹或局部尖峰。它关注的是“看起来变清楚”背后的代价。
-# >
-# > **怎么看**: Artifact score 通常越小越好；如果某个算法在视觉图中更锐，但 artifact audit 也显著升高，说明锐化可能夹带了伪影。要特别留意算法之间是否只是把边缘加强，还是同时把背景噪声也结构化了。
-# >
-# > **正常/异常**: 轻微升高不一定致命，因为真实边缘增强也会改变一阶统计；但大幅升高、局部异常集中或与 highpass 图中的条纹相互对应时，应把该方法标为高风险。Artifact audit 同样不是光学真值，它只是伪影 proxy。
-# >
-# > **核心发现**: EP06 的定量结论应采用保守合取逻辑：P95 gradient 可以高一些，但 split-half 不能明显变差，artifact score 不能明显恶化，Chamfer proxy 也不能和视觉证据强烈冲突。
+# Figure 10: Artifact audit summary. Local first-difference statistics highlight ringing, checkerboard, and oversharpening risks.
+
+# %% [markdown]
+# 伪影审计（Artifact Audit）通过量化重建图像在局部区域的一阶差分统计特征，用以评估超分辨率算法在带来视觉锐度提升的同时是否付出了引入不自然数字伪影（如棋盘格效应、过渡振铃）的物理代价。
+# 伪影评分（Artifact Score）越低，表明图像越符合真实红外热学边界。在对比不同算法分支时，若梯度强度上升的同时伴随着伪影评分的激增，则表明该方法的清晰度增益是以牺牲物理真实性为代价的。因此，超分辨率算法的最终评估应当遵循合取准则：在梯度响应平稳提升的前提下，子集交叉一致性误差（Split-Half NRMSE）与伪影评分需处于安全限值以内，且与 held-out 几何轮廓 Chamfer 距离不产生物理冲突。
