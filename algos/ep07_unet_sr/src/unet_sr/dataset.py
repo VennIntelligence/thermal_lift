@@ -252,6 +252,8 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         self.data_scale = int(scale)
         self.min_burst_frames = int(min_burst_frames)
         self.shift_noise_std_px = float(shift_noise_std_px)
+        if self.input_mode == "hybrid_drizzle2x" and patch_size_hr % self.data_scale != 0:
+            raise ValueError("hybrid_drizzle2x requires patch_size_hr divisible by the 2x data scale")
 
         effective_scale = 1 if (self.residual or self.input_mode == "hybrid_drizzle2x") else int(scale)
         if patch_size_hr <= 0 or patch_size_hr % effective_scale != 0:
@@ -311,20 +313,26 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
 
     def _build_hybrid_obs(
         self,
-        obs_1x: np.ndarray,
-        lr_burst: np.ndarray,
-        shifts: np.ndarray,
+        obs_up: np.ndarray,
+        entry: dict[str, Any],
         epoch: int,
         scene_index: int,
     ) -> np.ndarray:
-        """Build 8-channel 2x observation: 5ch fused↑2x + 3ch scatter drizzle@2x."""
+        """Build 8-channel 2x observation: 5ch fused↑2x + 3ch drizzle@2x.
 
-        from scipy.ndimage import zoom as scipy_zoom
+        Prefers precomputed ``drizzle_variants`` (one variant drawn per epoch,
+        see ``scripts/precompute_drizzle_variants.py``); falls back to on-the-fly
+        scatter drizzle from ``lr_burst`` for pools without variants.
+        """
 
         rng = np.random.default_rng([self.seed, epoch, scene_index, 0xBEEF])
-        burst_sub, shifts_sub = self._select_burst(lr_burst, shifts, rng)
-        drz = drizzle_features(burst_sub, shifts_sub, scale=self.data_scale, kernel="bilinear")
-        obs_up = scipy_zoom(obs_1x, (1, self.data_scale, self.data_scale), order=1).astype(np.float32)
+        variants = entry.get("_drz_variants")
+        if variants is not None:
+            k = int(rng.integers(0, variants.shape[0]))
+            drz = np.asarray(variants[k], dtype=np.float32)
+        else:
+            burst_sub, shifts_sub = self._select_burst(entry["_lr_burst"], entry["_shifts"], rng)
+            drz = drizzle_features(burst_sub, shifts_sub, scale=self.data_scale, kernel="bilinear")
         return np.concatenate([obs_up, drz], axis=0).astype(np.float32, copy=False)
 
     def _load_cached(self, scene_index: int) -> dict[str, Any]:
@@ -335,8 +343,7 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
                 epoch = self._epoch
                 if cached.get("_hybrid_epoch") != epoch:
                     cached["obs_features"] = self._build_hybrid_obs(
-                        cached["_obs_1x"], cached["_lr_burst"], cached["_shifts"],
-                        epoch, scene_index,
+                        cached["_obs_up"], cached, epoch, scene_index,
                     )
                     cached["_hybrid_epoch"] = epoch
             return cached
@@ -358,28 +365,37 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         hr_mask = np.asarray(scene["hr_mask"], dtype=np.float32)
 
         if self.input_mode == "hybrid_drizzle2x":
-            lr_burst = scene.get("lr_burst")
-            if lr_burst is None:
-                raise ValueError(
-                    f"scene {scene['scene_dir']} has no lr_burst; "
-                    "hybrid_drizzle2x requires save_lr_burst=true in pool config"
-                )
-            lr_burst = np.asarray(lr_burst, dtype=np.float32)
-            shifts = np.asarray(scene["shifts"], dtype=np.float32)
-            epoch = self._epoch
-            obs_hybrid = self._build_hybrid_obs(obs, lr_burst, shifts, epoch, scene_index)
+            from scipy.ndimage import zoom as scipy_zoom
+
+            obs_up = scipy_zoom(obs, (1, self.data_scale, self.data_scale), order=1).astype(np.float32)
             packed = {
                 "scene_dir": scene["scene_dir"],
                 "metadata": metadata,
-                "obs_features": obs_hybrid,
                 "hr_target": hr_target,
                 "hr_edge": hr_edge,
                 "hr_mask": hr_mask,
                 "_obs_1x": obs,
-                "_lr_burst": lr_burst,
-                "_shifts": shifts,
-                "_hybrid_epoch": epoch,
+                "_obs_up": obs_up,
             }
+            variants = scene.get("drizzle_variants")
+            if variants is not None:
+                # float16 mmap, sliced per epoch — never fully materialised.
+                packed["_drz_variants"] = variants
+            else:
+                lr_burst = scene.get("lr_burst")
+                if lr_burst is None:
+                    raise ValueError(
+                        f"scene {scene['scene_dir']} has no drizzle_variants and no lr_burst; "
+                        "hybrid_drizzle2x requires precomputed variants "
+                        "(scripts/precompute_drizzle_variants.py) or save_lr_burst=true"
+                    )
+                # Keep the float16 mmap as-is: _select_burst casts only the
+                # sampled subset to float32, avoiding ~305 MB/scene RAM.
+                packed["_lr_burst"] = lr_burst
+                packed["_shifts"] = np.asarray(scene["shifts"], dtype=np.float32)
+            epoch = self._epoch
+            packed["obs_features"] = self._build_hybrid_obs(obs_up, packed, epoch, scene_index)
+            packed["_hybrid_epoch"] = epoch
         elif self.residual:
             from scipy.ndimage import zoom
             obs_hr = zoom(obs, (1, self.data_scale, self.data_scale), order=1).astype(np.float32)
@@ -432,6 +448,9 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         rng = np.random.default_rng(self.seed + int(index) + self._epoch * len(self))
         y_lr = int(rng.integers(0, max_y + 1)) if max_y > 0 else 0
         x_lr = int(rng.integers(0, max_x + 1)) if max_x > 0 else 0
+        if self.input_mode == "hybrid_drizzle2x" and self.data_scale > 1:
+            y_lr = (y_lr // self.data_scale) * self.data_scale
+            x_lr = (x_lr // self.data_scale) * self.data_scale
         return y_lr, x_lr
 
     def _augment(
@@ -440,26 +459,33 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         target: np.ndarray,
         edge: np.ndarray,
         mask: np.ndarray,
+        lr_obs: np.ndarray | None,
         rng: np.random.Generator,
-    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray]:
+    ) -> tuple[np.ndarray, np.ndarray, np.ndarray, np.ndarray, np.ndarray | None]:
         """Random flip + 90-degree rotation for C,H,W obs and H,W target/edge/mask."""
         if rng.random() < 0.5:
             obs = obs[:, :, ::-1].copy()
+            if lr_obs is not None:
+                lr_obs = lr_obs[:, :, ::-1].copy()
             target = target[:, ::-1].copy()
             edge = edge[:, ::-1].copy()
             mask = mask[:, ::-1].copy()
         if rng.random() < 0.5:
             obs = obs[:, ::-1, :].copy()
+            if lr_obs is not None:
+                lr_obs = lr_obs[:, ::-1, :].copy()
             target = target[::-1, :].copy()
             edge = edge[::-1, :].copy()
             mask = mask[::-1, :].copy()
         k = int(rng.integers(0, 4))
         if k > 0:
             obs = np.rot90(obs, k, axes=(1, 2)).copy()
+            if lr_obs is not None:
+                lr_obs = np.rot90(lr_obs, k, axes=(1, 2)).copy()
             target = np.rot90(target, k, axes=(0, 1)).copy()
             edge = np.rot90(edge, k, axes=(0, 1)).copy()
             mask = np.rot90(mask, k, axes=(0, 1)).copy()
-        return obs, target, edge, mask
+        return obs, target, edge, mask, lr_obs
 
     def __getitem__(self, index: int) -> dict[str, Any]:
         if index < 0:
@@ -484,9 +510,19 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         target_patch = target[y_hr : y_hr + p_hr, x_hr : x_hr + p_hr]
         edge_patch = edge[y_hr : y_hr + p_hr, x_hr : x_hr + p_hr]
         mask_patch = mask[y_hr : y_hr + p_hr, x_hr : x_hr + p_hr]
+        lr_obs_patch: np.ndarray | None = None
+        if self.input_mode == "hybrid_drizzle2x":
+            y_1x = y_lr // self.data_scale
+            x_1x = x_lr // self.data_scale
+            p_1x = p_hr // self.data_scale
+            lr_obs_patch = scene["_obs_1x"][0:1, y_1x : y_1x + p_1x, x_1x : x_1x + p_1x]
+            if lr_obs_patch.shape != (1, p_1x, p_1x):
+                raise ValueError(
+                    f"lr_obs crop shape mismatch: got {lr_obs_patch.shape}, expected {(1, p_1x, p_1x)}"
+                )
         aug_rng = np.random.default_rng(self.seed + int(index) + self._epoch * len(self) + 8)
-        obs_patch, target_patch, edge_patch, mask_patch = self._augment(
-            obs_patch, target_patch, edge_patch, mask_patch, aug_rng,
+        obs_patch, target_patch, edge_patch, mask_patch, lr_obs_patch = self._augment(
+            obs_patch, target_patch, edge_patch, mask_patch, lr_obs_patch, aug_rng,
         )
 
         sample = {
@@ -495,6 +531,8 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
             "hr_edge": torch.from_numpy(edge_patch[None, :, :].astype(np.float32, copy=False)),
             "hr_mask": torch.from_numpy(mask_patch[None, :, :].astype(np.float32, copy=False)),
         }
+        if lr_obs_patch is not None:
+            sample["lr_obs"] = torch.from_numpy(lr_obs_patch.astype(np.float32, copy=False))
 
         if self._need_loss_weights:
             thin_np, gap_np = compute_mask_loss_weights_np(

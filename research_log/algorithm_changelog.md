@@ -8,6 +8,94 @@
 
 ## 变更记录
 
+### [ACL-019] 2026-06-11 — V9C: hybrid 输入下用合法 1x lr_obs 启用 forward consistency
+
+**问题诊断**:
+- ACL-016 为 V9A 引入 `hybrid_drizzle2x` 后，模型输入的第 0 通道变成了 `aligned_mean` 的 2x 上采结果，不再是 forward consistency 所需的合法 1x LR 观测。因此 ACL-016 在 config 中临时禁止 `hybrid_drizzle2x + forward_model_weight>0`。
+- V9B 证明 highpass-band forward consistency 在旧 1x 输入上无法压平真实数据漂移，但仍不能回答「hybrid 输入保留 2x 相位信息后，合法 1x 观测锚是否变得有效」。V9C 需要在 hybrid 输入下给 loss 单独提供原始 1x `aligned_mean` patch。
+- 风险点参考 ACL-014：crop origin 若不按完整倍率对齐，会让 1x/2x/target patch 出现半个 LR 像素错位；flip/rot90 若未同步到辅助观测，会让 forward 项使用错位 anchor。
+
+**修改内容**:
+1. `algos/ep07_unet_sr/src/unet_sr/dataset.py`: hybrid 路径缓存原始 1x `obs_features`，在 5ch 1x obs 上采为 2x 输入前保留 `obs[0:1]`；`__getitem__` 对 hybrid sample 额外返回 `lr_obs`，shape `(1, patch_size_hr//2, patch_size_hr//2)`。
+2. `dataset.py`: hybrid crop origin 在 2x 输入网格上强制偶数对齐，`lr_obs` 用 `(y//2, x//2)` 和半边长裁剪；`_augment` 扩展为同步变换 `lr_obs`，确保 flip/rot90 后观测锚与 target/pred 几何一致。
+3. `algos/ep07_unet_sr/src/unet_sr/losses.py`: `ContourSRLoss.forward` 新增可选 `lr_obs` 参数；当 `lr_obs is not None` 时，forward-model 项以 `lr_obs` 为观测参照，并显式使用 downsample scale=2，不复用 hybrid 模型的 scale=1。旧 `lr_observation` 路径保持兼容。
+4. `algos/ep07_unet_sr/src/unet_sr/train.py`: batch 含 `lr_obs` 且 `forward_model_weight>0` 时传入 loss；旧 `input_mode="lr"` 仍回退到 `obs[:, 0:1]`。
+5. `algos/ep07_unet_sr/src/unet_sr/config.py`: 解除 `hybrid_drizzle2x + forward_model_weight>0` 的禁令；改为要求该组合显式使用 `--scale 2`，由 dataset/train 走 `lr_obs` 路径。
+6. 测试覆盖 `lr_obs` shape/crop 对应关系、增广同步、偶数 origin、hybrid+AMP loss 有限、config 新校验，以及旧 LR 模式不返回 `lr_obs` 的回归。
+7. `algos/ep07_unet_sr/scripts/run_v9.md`: 补 V9C/V9D smoke/full 命令，并说明 V9C 的合法 1x anchor 与 hybrid 输入第 0 通道不同。
+
+**预期效果**:
+- V9C 可以在保留 hybrid 2x drizzle 输入相位信息的同时启用 highpass forward consistency，避免把上采 mean 当作物理观测导致非法锚定。
+- 如果 V9C 能压平后期 artifact/corr 漂移，说明 forward 锚在 hybrid 输入下开始可见漂移方向；若仍失败，则支持「loss-side anchor 仍不足」的结论。
+- 风险：forward 项仍只约束 1x 可见频段，高频 hallucination 仍可能落在 forward operator 零空间；若出现 ACL-005 式震荡，先降 `forward_model_weight` 到 0.05。
+
+**推荐参数**:
+
+```bash
+cd algos/ep07_unet_sr
+CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
+  --training-pool-dir ../../data/synthetic/training_pool_2x_aa_burst \
+  --output-dir outputs/ep07_v9c_hybrid_legal_fwd \
+  --input-mode hybrid_drizzle2x \
+  --scale 2 \
+  --batch-size 128 \
+  --num-workers 8 \
+  --total-steps 60000 \
+  --save-every 5000 \
+  --log-every 100 \
+  --compile \
+  --mse-loss-weight 0.3 \
+  --highpass-loss-weight 0.8 \
+  --structure-boost 2.0 \
+  --grad-vector-weight 0.15 \
+  --thin-boost 3.0 \
+  --gap-boost 2.0 \
+  --forward-model-weight 0.1 \
+  --forward-model-band highpass
+```
+
+**训练结果**: _(V9C 训练完成后回填)_
+- 输出目录: `outputs/ep07_v9c_hybrid_legal_fwd`
+- 代码验证: `cd algos/ep07_unet_sr && uv run pytest -q` → 47 passed。
+- 视觉效果: _TODO_
+- 关键指标: _TODO_
+- 结论: _TODO_
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `algos/ep07_unet_sr/src/unet_sr/losses.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/tests/test_dataset.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`, `algos/ep07_unet_sr/tests/test_config.py`, `algos/ep07_unet_sr/scripts/run_v9.md`
+
+---
+
+### [ACL-018] 2026-06-11 — V9A 数据管线：池侧预计算 drizzle 变体，修复首 batch 卡死 + 主机 OOM
+
+**问题诊断**:
+- ACL-016 的 hybrid_drizzle2x 把 drizzle 留在 DataLoader worker 内现场计算（ACL-016 已预警「DataLoader 吞吐可能成为瓶颈」），实测后果远超预期：
+  - `drizzle_features`（248 帧全幅 480×640 → 960×1280 scatter）实测 **2.7 s/scene**，且每 scene 每 epoch 重算一次；
+  - `_load_cached` 把 lr_burst cast 成 float32（**305 MB/scene**）整条塞进 LRU 缓存，16 scene/worker × 8 workers ≈ 47 GB（机器 60 GB）；
+  - 复现实验（bs=64 / 8 workers / prefetch=4）：**首 batch 162.6 s**，loader 进程树 RSS 37.8 GB、swap 8.5 GB 打满，batch 8 时 worker 被系统 OOM killer 杀掉。叠加 `--compile` 首步编译，表现为「第一步都跑不动」。
+
+**修改内容**:
+1. `scripts/precompute_drizzle_variants.py`（新增）: 池侧离线预计算。每 scene 生成 K=4 个 drizzle 变体存 `drizzle_variants_2x.npy`（(K,3,960,1280) float16，~30 MB/scene）。variant 0 = 全帧无噪声（canonical，与推理口径一致）；variant 1–3 = 随机抽 60–100% 帧 + shifts 加 σ=0.05 px 噪声，与原 `_select_burst` 增广分布一致。ProcessPool 并行、原子写、可断点续跑。
+2. `tcforge/storage.py`: `load_scene_compact` 发现 `drizzle_variants_{scale}x.npy` 时以 `mmap_mode="r"` 挂载到 `"drizzle_variants"` key。
+3. `dataset.py`: hybrid 模式优先用预计算变体——每 (seed, epoch, scene) 确定性抽 1 个变体（mmap 切片，不全量物化）；增广从「连续随机」降为「K 选 1 离散随机」（叠加随机裁剪/翻转/旋转仍在）。无变体文件时 fallback 到现场 drizzle，但 lr_burst 不再 cast float32，直接持有 float16 mmap，`_select_burst` 只物化抽中的子集。`obs_up`（5ch 1x↑2x）缓存复用，epoch 重建只做变体切片 + concat。
+4. 测试: 变体优先于 burst、无 lr_burst 也可跑、变体选择可复现、fallback 缓存保持 float16 mmap；原 burst 路径 5 个测试不变全过。
+
+**预期效果**（已实测验证）:
+- 冷加载 2.8 s → **0.52 s**/scene；epoch 重建 2.7 s → **0.006 s**；缓存 RAM ~370 MB → ~100 MB/scene（burst 不再驻留内存）。
+- variant 0 与全帧 drizzle 最大误差 0.0118（float16 量化步长内），变体间 mean abs diff ~0.01（增广有效）。
+- 风险：增广多样性从连续降为 K=4 离散；若过拟合迹象明显可加 `--num-variants` 重新预计算。
+
+**推荐参数**: 训练前先跑 `uv run python scripts/precompute_drizzle_variants.py --pool-dir data/synthetic/training_pool_2x_aa_burst --num-variants 4 --workers 14`（~25 min，磁盘 +59 GB）；训练 CLI 与 ACL-016 一致无变化。
+
+**训练结果**: _(TODO：V9A 训练完成后回填)_
+- 输出目录: `outputs/ep07_v9a_hybrid_drizzle`
+- 视觉效果: _TODO_
+- 关键指标: _TODO_
+- 结论: _TODO_
+
+**涉及文件**: `scripts/precompute_drizzle_variants.py`, `tcforge/src/tcforge/storage.py`, `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `algos/ep07_unet_sr/tests/test_dataset.py`, `algos/ep07_unet_sr/scripts/run_v9.md`
+
+---
+
 ### [ACL-017] 2026-06-11 — V9B: highpass-band forward consistency loss
 
 **问题诊断**:

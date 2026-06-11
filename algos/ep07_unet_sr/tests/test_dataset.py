@@ -24,8 +24,9 @@ def _make_pool(tmp_path: Path, *, scale: int = 4, with_burst: bool = False) -> P
     mask[hr_h // 4 : hr_h * 3 // 4, hr_w // 4 : hr_w * 3 // 4] = 1
     edge = np.zeros_like(mask)
     edge[hr_h // 4, hr_w // 4 : hr_w * 3 // 4] = 1
+    yy, xx = np.mgrid[:lr_h, :lr_w].astype(np.float32)
     obs = np.zeros((5, lr_h, lr_w), dtype=np.float32)
-    obs[0] = 20.0
+    obs[0] = 20.0 + yy * 10.0 + xx
     obs[2] = 1.0
     n_frames = 40 if with_burst else 3
     shifts = np.random.default_rng(42).uniform(-0.5, 0.5, (n_frames, 2)).astype(np.float32)
@@ -190,6 +191,7 @@ def test_hybrid_dataset_sample_shape(tmp_path: Path) -> None:
     assert sample["hr_target"].shape == (1, 8, 8)
     assert sample["hr_edge"].shape == (1, 8, 8)
     assert sample["hr_mask"].shape == (1, 8, 8)
+    assert sample["lr_obs"].shape == (1, 4, 4)
 
 
 def test_hybrid_dataset_augment_sync(tmp_path: Path) -> None:
@@ -241,6 +243,139 @@ def test_lr_mode_unchanged_with_input_mode_default(tmp_path: Path) -> None:
 
     assert np.allclose(s_legacy["obs_features"].numpy(), s_explicit["obs_features"].numpy())
     assert np.allclose(s_legacy["hr_target"].numpy(), s_explicit["hr_target"].numpy())
+    assert "lr_obs" not in s_legacy
+    assert "lr_obs" not in s_explicit
+
+
+def _write_drizzle_variants(pool: Path, *, num_variants: int = 4, scale: int = 2) -> np.ndarray:
+    """Write a synthetic drizzle_variants file with distinct per-variant content."""
+    lr_h, lr_w = 8, 10
+    variants = np.zeros((num_variants, 3, lr_h * scale, lr_w * scale), dtype=np.float16)
+    for k in range(num_variants):
+        variants[k, 0] = 20.0 + k  # distinct mean channel per variant
+        variants[k, 1] = 1.0
+    np.save(pool / "scene_0000" / f"drizzle_variants_{scale}x.npy", variants)
+    return variants
+
+
+def _augment_chw_like_dataset(
+    array: np.ndarray,
+    *,
+    seed: int,
+    index: int,
+    dataset_len: int,
+    epoch: int = 0,
+) -> np.ndarray:
+    out = array.copy()
+    rng = np.random.default_rng(seed + int(index) + epoch * dataset_len + 8)
+    if rng.random() < 0.5:
+        out = out[:, :, ::-1].copy()
+    if rng.random() < 0.5:
+        out = out[:, ::-1, :].copy()
+    k = int(rng.integers(0, 4))
+    if k > 0:
+        out = np.rot90(out, k, axes=(1, 2)).copy()
+    return out
+
+
+def test_hybrid_lr_obs_matches_even_crop_and_augmented_aligned_mean(tmp_path: Path) -> None:
+    """V9C: lr_obs is the legal 1x aligned_mean crop with synchronized augmentation."""
+    pool = _make_pool(tmp_path, scale=2, with_burst=True)
+    dataset = ThermalSRDataset(
+        pool, patch_size_hr=8, scale=2, seed=1,
+        patches_per_scene=4, input_mode="hybrid_drizzle2x",
+    )
+
+    sample = dataset[0]
+    y_2x = sample["metadata"]["patch_y_hr"]
+    x_2x = sample["metadata"]["patch_x_hr"]
+    assert y_2x % 2 == 0
+    assert x_2x % 2 == 0
+
+    scene = load_scene_compact(pool / "scene_0000")
+    unaugmented = np.asarray(scene["obs_features"], dtype=np.float32)[
+        0:1,
+        y_2x // 2 : y_2x // 2 + 4,
+        x_2x // 2 : x_2x // 2 + 4,
+    ]
+    expected = _augment_chw_like_dataset(
+        unaugmented,
+        seed=1,
+        index=0,
+        dataset_len=len(dataset),
+    )
+
+    assert not np.array_equal(expected, unaugmented)
+    np.testing.assert_allclose(sample["lr_obs"].numpy(), expected, rtol=0, atol=1e-6)
+
+
+def test_hybrid_crop_origin_forces_even_2x_grid(tmp_path: Path) -> None:
+    """V9C: hybrid 2x crop origins must map exactly to integer 1x lr_obs crops."""
+    pool = _make_pool(tmp_path, scale=2, with_burst=True)
+    dataset = ThermalSRDataset(
+        pool, patch_size_hr=8, scale=2, seed=42,
+        patches_per_scene=64, input_mode="hybrid_drizzle2x",
+    )
+    scene = dataset._load_cached(0)
+
+    origins = [dataset._crop_origin_lr(i, tuple(map(int, scene["obs_features"].shape[1:]))) for i in range(64)]
+
+    assert all(y % 2 == 0 and x % 2 == 0 for y, x in origins)
+
+
+def test_hybrid_dataset_uses_precomputed_variants(tmp_path: Path) -> None:
+    """V9A: precomputed drizzle variants are preferred over on-the-fly burst drizzle."""
+    pool = _make_pool(tmp_path, scale=2, with_burst=True)
+    variants = _write_drizzle_variants(pool)
+    dataset = ThermalSRDataset(
+        pool, patch_size_hr=8, scale=2, seed=5,
+        patches_per_scene=2, input_mode="hybrid_drizzle2x",
+    )
+    scene = dataset._load_cached(0)
+
+    assert "_drz_variants" in scene
+    assert "_lr_burst" not in scene
+    drz = scene["obs_features"][5:]  # channels 5-7 = drizzle
+    matches = [np.allclose(drz, variants[k].astype(np.float32)) for k in range(len(variants))]
+    assert sum(matches) == 1
+
+
+def test_hybrid_variants_work_without_lr_burst(tmp_path: Path) -> None:
+    """V9A: with variants present, lr_burst.npy is no longer required."""
+    pool = _make_pool(tmp_path, scale=2, with_burst=True)
+    _write_drizzle_variants(pool)
+    (pool / "scene_0000" / "lr_burst.npy").unlink()
+    dataset = ThermalSRDataset(
+        pool, patch_size_hr=8, scale=2, seed=5,
+        patches_per_scene=2, input_mode="hybrid_drizzle2x",
+    )
+    sample = dataset[0]
+    assert sample["obs_features"].shape == (8, 8, 8)
+
+
+def test_hybrid_variants_selection_deterministic_per_epoch(tmp_path: Path) -> None:
+    """V9A: variant choice is reproducible for the same (seed, epoch, scene)."""
+    pool = _make_pool(tmp_path, scale=2, with_burst=True)
+    _write_drizzle_variants(pool)
+    dataset = ThermalSRDataset(
+        pool, patch_size_hr=8, scale=2, seed=99,
+        patches_per_scene=2, input_mode="hybrid_drizzle2x",
+    )
+    s1 = dataset[0]
+    dataset._cache.clear()
+    s2 = dataset[0]
+    assert np.allclose(s1["obs_features"].numpy(), s2["obs_features"].numpy())
+
+
+def test_hybrid_burst_fallback_keeps_mmap_dtype(tmp_path: Path) -> None:
+    """V9A OOM fix: burst fallback must not materialise float32 full burst in cache."""
+    pool = _make_pool(tmp_path, scale=2, with_burst=True)
+    dataset = ThermalSRDataset(
+        pool, patch_size_hr=8, scale=2, seed=5,
+        patches_per_scene=2, input_mode="hybrid_drizzle2x",
+    )
+    scene = dataset._load_cached(0)
+    assert scene["_lr_burst"].dtype == np.float16
 
 
 def test_hybrid_dataset_epoch_changes_burst(tmp_path: Path) -> None:

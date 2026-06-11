@@ -336,11 +336,20 @@ def train(config: TrainingConfig) -> Path:
                     if pred.shape != target.shape:
                         raise RuntimeError(f"model output shape {pred.shape} does not match target {target.shape}")
                     if isinstance(criterion, ContourSRLoss):
-                        lr_mean = obs[:, 0:1, :, :]  # ch0 = aligned_mean
+                        lr_obs = None
+                        lr_mean = None
+                        if config.forward_model_weight > 0:
+                            if "lr_obs" in batch:
+                                lr_obs = _to_device_tensor(
+                                    batch["lr_obs"], device=device, channels_last=config.channels_last,
+                                )
+                            else:
+                                lr_mean = obs[:, 0:1, :, :]  # ch0 = aligned_mean on the native LR input grid
                         losses = criterion(
                             pred,
                             target,
                             lr_observation=lr_mean,
+                            lr_obs=lr_obs,
                             thin_weight=thin_weight,
                             gap_weight=gap_weight,
                         )

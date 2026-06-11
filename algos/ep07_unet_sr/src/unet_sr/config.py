@@ -134,11 +134,10 @@ class TrainingConfig:
             raise ValueError("forward_model_band_sigma must be >= 0")
         if self.input_mode not in ("lr", "hybrid_drizzle2x"):
             raise ValueError("input_mode must be 'lr' or 'hybrid_drizzle2x'")
-        if self.input_mode == "hybrid_drizzle2x" and self.forward_model_weight > 0:
+        if self.input_mode == "hybrid_drizzle2x" and self.forward_model_weight > 0 and self.scale != 2:
             raise ValueError(
-                "input_mode='hybrid_drizzle2x' with forward_model_weight > 0 is not supported: "
-                "hybrid 2x obs[:, 0:1] is upsampled mean, not a valid 1x LR observation. "
-                "v10 merge must provide the actual 1x aligned_mean patch separately."
+                "input_mode='hybrid_drizzle2x' with forward_model_weight > 0 requires --scale 2 "
+                "so the dataset can supply a legal 1x lr_obs patch for 2x→1x forward consistency."
             )
         if self.input_mode == "hybrid_drizzle2x":
             if self.in_channels == 5:

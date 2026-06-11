@@ -72,9 +72,25 @@ def test_config_input_mode_default_is_lr() -> None:
     assert cfg.in_channels == 5
 
 
-def test_config_rejects_hybrid_with_forward_model() -> None:
-    """V9A: hybrid + forward_model_weight > 0 is forbidden."""
-    with pytest.raises(ValueError, match="hybrid_drizzle2x.*forward_model_weight"):
+def test_config_allows_hybrid_with_forward_model_at_scale_2() -> None:
+    """V9C: hybrid + forward_model_weight is legal when scale=2 provides lr_obs."""
+    cfg = config_from_args([
+        "--training-pool-dir", "dummy_pool",
+        "--input-mode", "hybrid_drizzle2x",
+        "--scale", "2",
+        "--forward-model-weight", "0.1",
+        "--forward-model-band", "highpass",
+        "--thin-boost", "3.0", "--gap-boost", "2.0",
+    ])
+
+    assert cfg.input_mode == "hybrid_drizzle2x"
+    assert cfg.in_channels == 8
+    assert cfg.forward_model_weight == 0.1
+
+
+def test_config_rejects_hybrid_forward_model_without_2x_geometry() -> None:
+    """V9C: legal hybrid forward anchor requires explicit 2x→1x geometry."""
+    with pytest.raises(ValueError, match="requires --scale 2"):
         config_from_args([
             "--training-pool-dir", "dummy_pool",
             "--input-mode", "hybrid_drizzle2x",

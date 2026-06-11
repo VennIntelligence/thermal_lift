@@ -101,6 +101,9 @@ def load_scene_compact(scene_dir: str | Path) -> dict[str, Any]:
     lr_burst_path = root / "lr_burst.npy"
     if lr_burst_path.exists():
         result["lr_burst"] = np.load(lr_burst_path, mmap_mode="r")
+    drizzle_variants_path = root / f"drizzle_variants_{scale}x.npy"
+    if drizzle_variants_path.exists():
+        result["drizzle_variants"] = np.load(drizzle_variants_path, mmap_mode="r")
     optional_features = {
         "obs_features_4x": "obs_features_4x.npz",
         "obs_features_2x_up4x": "obs_features_2x_up4x.npz",

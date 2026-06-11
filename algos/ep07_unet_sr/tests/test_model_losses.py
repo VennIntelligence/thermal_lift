@@ -5,7 +5,7 @@ import torch
 import torch.nn as nn
 from torch.amp import GradScaler, autocast
 
-from unet_sr.losses import ContourSRLoss, ThermalSRLoss, sobel_edges
+from unet_sr.losses import ContourSRLoss, ThermalSRLoss, forward_model_loss, sobel_edges
 from unet_sr.model import ThermalSRUNet
 from unet_sr.mask_weights import compute_mask_loss_weights
 
@@ -201,6 +201,76 @@ def test_contour_sr_loss_with_highpass_band_forward_model() -> None:
     assert "forward_model" in values
     assert all(torch.isfinite(v) for v in values.values())
     assert pred.grad is not None
+
+
+def test_contour_sr_loss_lr_obs_uses_explicit_2x_downsample() -> None:
+    """V9C: hybrid model scale=1 still anchors pred to a 1x lr_obs via 2x downsample."""
+    loss = ContourSRLoss(
+        forward_model_weight=0.1,
+        forward_model_scale=1,
+        forward_model_band="highpass",
+    )
+    pred = torch.randn(2, 1, 64, 64, requires_grad=True)
+    target = torch.randn(2, 1, 64, 64)
+    lr_obs = torch.randn(2, 1, 32, 32)
+
+    values = loss(pred, target, lr_obs=lr_obs)
+    values["total"].backward()
+    expected_fm = forward_model_loss(
+        pred.detach(),
+        lr_obs,
+        scale=2,
+        psf_sigma_lr_px=loss.forward_model_psf_sigma,
+        band="highpass",
+        band_sigma_lr_px=loss.forward_model_band_sigma,
+    )
+
+    assert "forward_model" in values
+    assert torch.allclose(values["forward_model"].detach(), expected_fm)
+    assert all(torch.isfinite(v) for v in values.values())
+    assert pred.grad is not None
+
+
+def test_contour_sr_loss_rejects_2x_hybrid_channel_as_lr_observation() -> None:
+    """V9C: the upsampled hybrid channel is not a legal 1x forward-model observation."""
+    loss = ContourSRLoss(forward_model_weight=0.1, forward_model_scale=2)
+    pred = torch.randn(2, 1, 64, 64)
+    target = torch.randn(2, 1, 64, 64)
+    hybrid_ch0 = torch.randn(2, 1, 64, 64)
+
+    with pytest.raises(ValueError, match="forward-model shape mismatch"):
+        loss(pred, target, lr_observation=hybrid_ch0)
+
+
+def test_hybrid_contour_sr_loss_finite_under_cuda_amp() -> None:
+    """V9C: 8ch hybrid input + legal lr_obs forward anchor is finite under CUDA AMP."""
+    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+    if device.type != "cuda":
+        pytest.skip("CUDA required for hybrid AMP regression test")
+
+    model = ThermalSRUNet(in_channels=8, out_channels=1, base_channels=16, scale=1).to(device)
+    loss = ContourSRLoss(
+        grad_vector_weight=0.15,
+        forward_model_weight=0.1,
+        forward_model_scale=2,
+        forward_model_band="highpass",
+    )
+    optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
+    scaler = GradScaler(enabled=True)
+    obs = torch.randn(2, 8, 64, 64, device=device)
+    target = torch.randn(2, 1, 64, 64, device=device)
+    lr_obs = torch.randn(2, 1, 32, 32, device=device)
+
+    with autocast(device_type="cuda", dtype=torch.float16, enabled=True):
+        pred = model(obs)
+        values = loss(pred, target, lr_obs=lr_obs)
+
+    assert all(torch.isfinite(value) for value in values.values())
+    scaler.scale(values["total"]).backward()
+    scaler.unscale_(optimizer)
+    scaler.step(optimizer)
+    scaler.update()
+    optimizer.zero_grad(set_to_none=True)
 
 
 def test_forward_model_loss_highpass_cuda_amp() -> None:

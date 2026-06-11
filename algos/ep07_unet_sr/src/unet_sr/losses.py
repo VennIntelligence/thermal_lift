@@ -420,7 +420,8 @@ class ContourSRLoss(nn.Module):
         self,
         pred: torch.Tensor,
         target: torch.Tensor,
-        lr_observation: torch.Tensor | None = None,  # kept for API compat, unused
+        lr_observation: torch.Tensor | None = None,
+        lr_obs: torch.Tensor | None = None,
         thin_weight: torch.Tensor | None = None,
         gap_weight: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
@@ -481,12 +482,14 @@ class ContourSRLoss(nn.Module):
 
         fm_loss = pred.new_tensor(0.0)
         if self.forward_model_weight > 0:
-            if lr_observation is None:
-                raise ValueError("lr_observation is required when forward_model_weight > 0")
+            observation = lr_obs if lr_obs is not None else lr_observation
+            if observation is None:
+                raise ValueError("lr_observation or lr_obs is required when forward_model_weight > 0")
+            forward_scale = 2 if lr_obs is not None else self.forward_model_scale
             fm_loss = forward_model_loss(
                 pred,
-                lr_observation,
-                scale=self.forward_model_scale,
+                observation,
+                scale=forward_scale,
                 psf_sigma_lr_px=self.forward_model_psf_sigma,
                 band=self.forward_model_band,
                 band_sigma_lr_px=self.forward_model_band_sigma,
