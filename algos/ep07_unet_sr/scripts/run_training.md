@@ -226,119 +226,26 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
 
 ## 推荐训练命令（V9A / V9B 双槽并行归因实验）
 
-V9 相对 v8.1a 基线**每臂只改一个因子**（见 ACL-016 / ACL-017）：
+> **V9 复制粘贴启动命令以 [`run_v9.md`](run_v9.md) 为准**（含参数省略原则、smoke/全量、burst 池生成）。  
+> 本节仅保留摘要；变更记录见 ACL-016 / ACL-017。
+
+V9 相对 v8.1a 基线**每臂只改一个因子**：
 
 | 实验 | 槽位 | 单因子改动 | 训练池 |
 |---|---|---|---|
-| `V9B` | GPU 1 | 加 highpass-band forward consistency | 旧 `training_pool_2x_aa` |
-| `V9A` | GPU 0 | hybrid 2x drizzle 输入（8ch @ 2x 网格） | 新 `training_pool_2x_aa_burst`（含 `lr_burst`） |
+| `V9B` | GPU 1 | `--forward-model-weight 0.1 --forward-model-band highpass` | 旧 `training_pool_2x_aa` |
+| `V9A` | GPU 0 | `--input-mode hybrid_drizzle2x` | 新 `training_pool_2x_aa_burst`（含 `lr_burst`） |
 
-**共享 v8.1a loss 壳**（两臂除下表差异外保持一致）：
+两臂共享的 v8.1a conservative loss 壳（均不同于 CLI 默认，必须显式写出）：
 
 ```text
---hr-upsampler bilinear --hr-res-blocks 0
+--scale 2 --batch-size 128 --num-workers 8 --total-steps 60000
+--save-every 5000 --log-every 100 --compile
 --mse-loss-weight 0.3 --highpass-loss-weight 0.8 --structure-boost 2.0
---grad-vector-weight 0.15 --laplacian-weight 0.0
---thin-boost 3.0 --gap-boost 2.0
---edge-loss-weight 0.05 --ssim-loss-weight 0.15 --edge-coarse-weight 0.25
---forward-model-weight 0.0
---batch-size 128 --lr 2e-4 --total-steps 60000 --seed 42 --amp --compile
+--grad-vector-weight 0.15 --thin-boost 3.0 --gap-boost 2.0
 ```
 
-> hybrid 模式下 UNet 全程在 256×256（2x 网格）上运行，显存约为 v8.1a 的 ~4×；
-> OOM 时先把 `--batch-size` 降到 64。`input_mode=hybrid_drizzle2x` 与
-> `forward_model_weight > 0` 互斥（obs 第 0 通道是上采 mean，不是合法 1x LR 观测）。
-
-### V9B — highpass-band forward consistency（GPU 1，不依赖新池）
-
-相对 v8.1a **唯一差异**：`--forward-model-weight 0.1 --forward-model-band highpass`。
-
-```bash
-cd algos/ep07_unet_sr
-
-# smoke（200 步，48 帧 real_eval）
-CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
-    --training-pool-dir ../../data/synthetic/training_pool_2x_aa \
-    --output-dir outputs/ep07_v9b_smoke \
-    --scale 2 --total-steps 200 --save-every 100 \
-    --real-eval-frame-limit 48 \
-    --mse-loss-weight 0.3 --highpass-loss-weight 0.8 --structure-boost 2.0 \
-    --grad-vector-weight 0.15 --laplacian-weight 0.0 \
-    --thin-boost 3.0 --gap-boost 2.0 \
-    --edge-loss-weight 0.05 --ssim-loss-weight 0.15 --edge-coarse-weight 0.25 \
-    --forward-model-weight 0.1 --forward-model-psf-sigma 0.5 \
-    --forward-model-band highpass --forward-model-band-sigma 5.0 \
-    --amp --compile --device cuda
-
-# 全量
-CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
-    --training-pool-dir ../../data/synthetic/training_pool_2x_aa \
-    --output-dir outputs/ep07_v9b_fwd_consistency \
-    --scale 2 --total-steps 60000 --batch-size 128 \
-    --mse-loss-weight 0.3 --highpass-loss-weight 0.8 --structure-boost 2.0 \
-    --grad-vector-weight 0.15 --laplacian-weight 0.0 \
-    --thin-boost 3.0 --gap-boost 2.0 \
-    --edge-loss-weight 0.05 --ssim-loss-weight 0.15 --edge-coarse-weight 0.25 \
-    --forward-model-weight 0.1 --forward-model-psf-sigma 0.5 \
-    --forward-model-band highpass --forward-model-band-sigma 5.0 \
-    --amp --compile --device cuda
-```
-
-### V9A — 训练池重生成（CPU，与 V9B 并行）
-
-旧 `training_pool_2x_aa` 无 `lr_burst.npy`；V9A 必须用 scatter `drizzle_features` 保证 train/infer parity。
-配置：`configs/synthetic/training_pool_2x_burst.json`（`save_lr_burst: true`，`compute_classical_sr: false`）。
-
-```bash
-# 项目根目录 — mini 池（smoke / 单元测试，8 scenes）
-uv run python scripts/generate_training_pool.py \
-    --config configs/synthetic/training_pool_2x_burst.json \
-    --output-dir data/synthetic/training_pool_2x_aa_burst_mini8 \
-    --pool-size 8 --workers 4
-
-# 全量 1000 scenes（~152 GB lr_burst float16；生成前确认 df -h 余量 ≥ 250 GB）
-uv run python scripts/generate_training_pool.py \
-    --config configs/synthetic/training_pool_2x_burst.json \
-    --output-dir data/synthetic/training_pool_2x_aa_burst \
-    --pool-size 1000 --workers 14
-```
-
-### V9A — hybrid drizzle 训练（GPU 0，等 burst 池就绪）
-
-相对 v8.1a **唯一差异**：`--input-mode hybrid_drizzle2x` + burst 训练池；`forward_model_weight` 保持 0。
-
-```bash
-cd algos/ep07_unet_sr
-
-# smoke（mini 池）
-CUDA_VISIBLE_DEVICES=0 uv run python -m unet_sr.train \
-    --training-pool-dir ../../data/synthetic/training_pool_2x_aa_burst_mini8 \
-    --output-dir outputs/ep07_v9a_smoke \
-    --input-mode hybrid_drizzle2x \
-    --scale 2 --total-steps 200 --save-every 100 \
-    --real-eval-frame-limit 48 \
-    --mse-loss-weight 0.3 --highpass-loss-weight 0.8 --structure-boost 2.0 \
-    --grad-vector-weight 0.15 --laplacian-weight 0.0 \
-    --thin-boost 3.0 --gap-boost 2.0 \
-    --edge-loss-weight 0.05 --ssim-loss-weight 0.15 --edge-coarse-weight 0.25 \
-    --amp --compile --device cuda
-
-# 全量
-CUDA_VISIBLE_DEVICES=0 uv run python -m unet_sr.train \
-    --training-pool-dir ../../data/synthetic/training_pool_2x_aa_burst \
-    --output-dir outputs/ep07_v9a_hybrid_drizzle \
-    --input-mode hybrid_drizzle2x \
-    --scale 2 --total-steps 60000 --batch-size 128 \
-    --mse-loss-weight 0.3 --highpass-loss-weight 0.8 --structure-boost 2.0 \
-    --grad-vector-weight 0.15 --laplacian-weight 0.0 \
-    --thin-boost 3.0 --gap-boost 2.0 \
-    --edge-loss-weight 0.05 --ssim-loss-weight 0.15 --edge-coarse-weight 0.25 \
-    --amp --compile --device cuda
-```
-
-**验收对照**（详见 ACL-016 / ACL-017）：V9A 盯中心最细线与锯齿；V9B 盯 40K→60K 的
-`artifact_score` / `raw_control_corr` 漂移是否压平。最终 checkpoint 在 40–60K 区间按
-proxy + 视觉联合选优，不默认取 60K。
+其余（`hr_upsampler`、`seed`、`real_eval_*`、`edge_*`、`forward_model_weight=0` 等）与 CLI 默认相同，见 `run_v9.md` 省略表。
 
 ## 从检查点恢复
 

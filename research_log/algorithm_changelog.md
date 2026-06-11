@@ -34,7 +34,7 @@
 - 关键指标: _TODO_
 - 结论: _TODO_
 
-**涉及文件**: `losses.py`, `config.py`, `train.py`, `mask_weights.py`, `scripts/run_training.md`, `tests/test_model_losses.py`, `tests/test_config.py`
+**涉及文件**: `losses.py`, `config.py`, `train.py`, `mask_weights.py`, `scripts/run_v9.md`, `scripts/run_training.md`, `tests/test_model_losses.py`, `tests/test_config.py`
 
 ---
 
@@ -67,7 +67,7 @@
 - 关键指标: _TODO_
 - 结论: _TODO_
 
-**涉及文件**: `configs/synthetic/training_pool_2x_burst.json`, `dataset.py`, `config.py`, `train.py`, `inference.py`, `real_eval.py`, `mask_weights.py`, `scripts/run_training.md`, `tests/test_dataset.py`, `tests/test_config.py`, `tests/test_inference.py`
+**涉及文件**: `configs/synthetic/training_pool_2x_burst.json`, `dataset.py`, `config.py`, `train.py`, `inference.py`, `real_eval.py`, `mask_weights.py`, `scripts/run_v9.md`, `scripts/run_training.md`, `tests/test_dataset.py`, `tests/test_config.py`, `tests/test_inference.py`
 
 ---
 
