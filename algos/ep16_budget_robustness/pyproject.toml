@@ -1,0 +1,23 @@
+[project]
+name = "ep16-budget-robustness"
+version = "0.1.0"
+description = "EP16 CPU classical frame-budget and shift-robustness ablations"
+readme = "README.md"
+requires-python = ">=3.11"
+dependencies = [
+    "drizzle>=2.2",
+    "joblib>=1.4",
+    "matplotlib>=3.8",
+    "numpy>=1.26",
+    "pandas>=2.1",
+    "scipy>=1.12",
+    "thermal-core",
+    "tqdm>=4.66",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.sources]
+thermal-core = { path = "../../core", editable = true }
+
