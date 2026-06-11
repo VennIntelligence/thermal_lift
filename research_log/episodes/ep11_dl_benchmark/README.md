@@ -29,3 +29,7 @@ temperature accuracy, or 3x SR. The 3x setting is center-ROI display zoom only;
 the reconstruction grid remains EP07 2x. UNet@4000 is a synthetic-pretrained
 mid-training checkpoint, so any real-data advantage must be interpreted with
 domain-gap risk.
+
+## Progress
+
+- 2026-06-11: Added EP07 four-arm checkpoint-selection整理 for v6 / v8.1a / v8.1b / v9b. Scripts: `algos/ep07_unet_sr/scripts/extract_checkpoint_metrics.py`, `algos/ep07_unet_sr/scripts/plot_checkpoint_selection.py`; report: `reports/ep11_dl_benchmark/unet_checkpoint_selection.md`; generated artifacts under `output/ep11_dl_benchmark/checkpoint_selection/`, including GPU 1 unified EP11 reruns for the four recommended canonical checkpoints.
