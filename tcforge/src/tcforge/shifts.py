@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import csv
+import functools
 import json
 import os
 from pathlib import Path
@@ -103,25 +104,10 @@ def ideal_phase_grid(
     return _validate_shifts(shifts)
 
 
-def load_real_default_contour_refined(
-    path: str | Path | None = None,
-    *,
-    n_frames: int | None = None,
-    strict_success: bool = True,
-) -> np.ndarray:
-    """Load EP05 refined contour shifts from a CSV file.
-
-    ``n_frames`` is optional because the real clean input frame count can change
-    after repeat/quality gating. Synthetic profiles that need a fixed burst
-    length should call ``load_shift_profile()``, which repeats/trims explicitly.
-    """
-
-    csv_path = Path(path).expanduser() if path is not None else _default_real_shift_csv()
-    if not csv_path.exists():
-        raise FileNotFoundError(
-            "real_default_contour_refined CSV not found: "
-            f"{csv_path}. Pass path=..., set TCFORGE_REAL_SHIFT_CSV, or update {PATHS_CONFIG_REL}."
-        )
+@functools.lru_cache(maxsize=4)
+def _cached_load_contour_csv(csv_path_str: str, strict_success: bool) -> np.ndarray:
+    """Parse and cache contour alignment CSV. Keyed on resolved path string."""
+    csv_path = Path(csv_path_str)
     with csv_path.open("r", newline="", encoding="utf-8") as f:
         reader = csv.DictReader(f)
         rows = list(reader)
@@ -143,7 +129,30 @@ def load_real_default_contour_refined(
         [[float(row["refined_align_dx_px"]), float(row["refined_align_dy_px"])] for row in rows],
         dtype=np.float32,
     )
-    return _validate_shifts(shifts, n_frames=n_frames)
+    return shifts
+
+
+def load_real_default_contour_refined(
+    path: str | Path | None = None,
+    *,
+    n_frames: int | None = None,
+    strict_success: bool = True,
+) -> np.ndarray:
+    """Load EP05 refined contour shifts from a CSV file.
+
+    ``n_frames`` is optional because the real clean input frame count can change
+    after repeat/quality gating. Synthetic profiles that need a fixed burst
+    length should call ``load_shift_profile()``, which repeats/trims explicitly.
+    """
+
+    csv_path = Path(path).expanduser() if path is not None else _default_real_shift_csv()
+    if not csv_path.exists():
+        raise FileNotFoundError(
+            "real_default_contour_refined CSV not found: "
+            f"{csv_path}. Pass path=..., set TCFORGE_REAL_SHIFT_CSV, or update {PATHS_CONFIG_REL}."
+        )
+    shifts = _cached_load_contour_csv(str(csv_path.resolve()), strict_success)
+    return _validate_shifts(shifts.copy(), n_frames=n_frames)
 
 
 def load_shift_profile(

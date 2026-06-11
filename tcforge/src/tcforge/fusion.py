@@ -85,6 +85,10 @@ def fuse_burst_to_features(
     Channels are aligned mean, aligned median, coverage fraction, variance, and
     highpass fused mean. Shifts are ``[dx, dy]`` LR-pixel alignment shifts that
     move each observed frame into reference-frame coordinates.
+
+    Optimized: uses a single ``_aligned_stack`` call, then derives highpass from
+    the aligned stack (align → blur → subtract) instead of the old approach
+    (blur → subtract → re-align).
     """
 
     frames, shift_arr = _validate_burst_and_shifts(lr_burst, shifts)
@@ -93,6 +97,7 @@ def fuse_burst_to_features(
     if sigma < 0:
         raise ValueError("sigma_bg must be >= 0")
 
+    # Single alignment pass for all downstream statistics
     aligned, valid = _aligned_stack(frames, shift_arr, out_shape)
     valid_f = valid.astype(np.float32)
     counts = valid_f.sum(axis=0)
@@ -111,13 +116,26 @@ def fuse_burst_to_features(
         copy=False,
     )
 
-    blurred = np.empty_like(frames)
-    for idx, frame in enumerate(frames):
-        blurred[idx] = ndimage.gaussian_filter(frame, sigma=sigma, mode="nearest") if sigma > 0 else frame
-    highpass = frames - blurred
-    hp_aligned, hp_valid = _aligned_stack(highpass.astype(np.float32, copy=False), shift_arr, out_shape)
-    hp_counts = np.maximum(hp_valid.sum(axis=0, dtype=np.float32), 1.0)
-    highpass_fused = np.where(hp_valid, hp_aligned, 0.0).sum(axis=0, dtype=np.float32) / hp_counts
+    # Highpass: compute from aligned stack (no second warp needed)
+    # Blur each aligned frame, then subtract to get highpass, then fuse.
+    # Fill invalid pixels with aligned_mean before blurring so the cval=0
+    # boundary doesn't leak into the highpass through the Gaussian kernel.
+    if sigma > 0:
+        # Fill invalid regions with the local mean to neutralize boundary effects
+        fill_value = aligned_mean[None, :, :]  # (1, H, W) broadcast
+        aligned_filled = np.where(valid, aligned, fill_value)
+        # Vectorized: blur all aligned frames at once using 3D gaussian_filter
+        # with sigma=(0, sigma, sigma) — no temporal smoothing, spatial only
+        aligned_blurred = ndimage.gaussian_filter(
+            aligned_filled.astype(np.float32, copy=False),
+            sigma=(0.0, sigma, sigma),
+            mode="nearest",
+        ).astype(np.float32, copy=False)
+        hp_aligned = aligned_filled - aligned_blurred
+    else:
+        hp_aligned = np.zeros_like(aligned)
+    hp_counts = np.maximum(valid_f.sum(axis=0), 1.0)
+    highpass_fused = np.where(valid, hp_aligned, 0.0).sum(axis=0, dtype=np.float32) / hp_counts
 
     features = np.stack(
         [

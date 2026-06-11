@@ -49,26 +49,69 @@ def _block_average_from_blurred(
     Internal helper — callers are responsible for PSF blurring beforehand.
     This avoids redundant gaussian_filter calls when generating multi-frame
     bursts from the same HR scene.
+
+    Uses pure-numpy separable bilinear interpolation: the sampling coordinates
+    are separable (row coords independent of column, and vice versa), so 2D
+    bilinear interpolation decomposes into two 1D lookups.  This is much faster
+    than calling ``map_coordinates`` 16 times (scale=4).
     """
 
     scale = int(scale)
-    h_lr, w_lr = blurred.shape[0] // scale, blurred.shape[1] // scale
+    h_hr, w_hr = blurred.shape
+    h_lr, w_lr = h_hr // scale, w_hr // scale
     dx, dy = np.asarray(shift, dtype=np.float64)
-    yy0 = scale * (np.arange(h_lr, dtype=np.float64) + dy)
-    xx0 = scale * (np.arange(w_lr, dtype=np.float64) + dx)
-    acc = np.zeros((h_lr, w_lr), dtype=np.float64)
-    for oy in range(scale):
-        for ox in range(scale):
-            coords = np.meshgrid(yy0 + oy, xx0 + ox, indexing="ij")
-            acc += ndimage.map_coordinates(
-                blurred,
-                coords,
-                order=1,
-                mode="constant",
-                cval=0.0,
-                prefilter=False,
-            )
-    return (acc / float(scale * scale)).astype(np.float32, copy=False)
+
+    # All row/col sample positions for every sub-pixel offset within the block
+    # shape: (scale * h_lr,)
+    offsets = np.arange(scale, dtype=np.float64)
+    yy_all = (scale * (np.arange(h_lr, dtype=np.float64) + dy))[:, None] + offsets[None, :]  # (h_lr, scale)
+    xx_all = (scale * (np.arange(w_lr, dtype=np.float64) + dx))[:, None] + offsets[None, :]  # (w_lr, scale)
+    yy_flat = yy_all.ravel()  # (scale*h_lr,)
+    xx_flat = xx_all.ravel()  # (scale*w_lr,)
+
+    # Bilinear interpolation — separable decomposition
+    # Step 1: clamp and compute integer indices + fractional weights for rows
+    y0 = np.floor(yy_flat).astype(np.intp)
+    fy = (yy_flat - y0).astype(np.float32)
+    y0 = np.clip(y0, 0, h_hr - 1)
+    y1 = np.clip(y0 + 1, 0, h_hr - 1)
+
+    # Step 2: same for columns
+    x0 = np.floor(xx_flat).astype(np.intp)
+    fx = (xx_flat - x0).astype(np.float32)
+    x0 = np.clip(x0, 0, w_hr - 1)
+    x1 = np.clip(x0 + 1, 0, w_hr - 1)
+
+    # Step 3: boundary masking (set out-of-bounds to cval=0)
+    valid_y = (yy_flat >= 0.0) & (yy_flat <= h_hr - 1)
+    valid_x = (xx_flat >= 0.0) & (xx_flat <= w_hr - 1)
+
+    # Step 4: separable bilinear — interpolate along rows first, then columns
+    # Intermediate: for each (y_sample, x_col), compute row-interpolated value
+    #   interp_rows[yi, xj] = blurred[y0[yi], xj] * (1-fy[yi]) + blurred[y1[yi], xj] * fy[yi]
+    # Then average over block offsets.
+    # Since coords are separable, we can use advanced indexing efficiently.
+    #
+    # row_interp has shape (scale*h_lr, scale*w_lr)
+    # blurred[y0, :]  shape: (scale*h_lr, w_hr)  — gather rows
+    wy0 = (1.0 - fy)[:, None]  # (scale*h_lr, 1)
+    wy1 = fy[:, None]
+    rows_interp = blurred[y0, :] * wy0 + blurred[y1, :] * wy1  # (scale*h_lr, w_hr)
+
+    # Apply y validity mask (out-of-range rows → 0)
+    rows_interp *= valid_y[:, None]
+
+    # Now interpolate columns: gather from rows_interp at x0, x1
+    wx0 = 1.0 - fx  # (scale*w_lr,)
+    wx1 = fx
+    # result[yi, xj] = rows_interp[yi, x0[xj]] * wx0[xj] + rows_interp[yi, x1[xj]] * wx1[xj]
+    result = rows_interp[:, x0] * wx0[None, :] + rows_interp[:, x1] * wx1[None, :]
+    # Apply x validity mask
+    result *= valid_x[None, :]
+
+    # Reshape to (h_lr, scale, w_lr, scale) and average over the two scale dims
+    result = result.reshape(h_lr, scale, w_lr, scale).mean(axis=(1, 3))
+    return result.astype(np.float32, copy=False)
 
 
 def physical_block_average_forward(

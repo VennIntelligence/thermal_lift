@@ -7,6 +7,7 @@ import argparse
 import csv
 import json
 import logging
+import os
 import sys
 import traceback
 from collections.abc import Mapping, Sequence
@@ -60,6 +61,29 @@ MANIFEST_FIELDS = [
     "rotation_deg",
     "n_frames",
 ]
+
+
+# ── Worker initializer globals ───────────────────────────────────────────────
+# Pre-loaded in each worker process to avoid repeated config parsing and
+# shift CSV reads.  Set by _worker_init() via ProcessPoolExecutor initializer.
+_WORKER_CONFIG: dict[str, Any] | None = None
+_WORKER_SHIFTS: np.ndarray | None = None
+_WORKER_SHIFT_META: dict[str, Any] | None = None
+_WORKER_BURST_WORKERS: int = 1
+
+
+def _worker_init(
+    config_json: str,
+    shifts_arr: np.ndarray,
+    shift_meta: dict[str, Any],
+    burst_workers: int,
+) -> None:
+    """ProcessPoolExecutor initializer — pre-populate worker globals."""
+    global _WORKER_CONFIG, _WORKER_SHIFTS, _WORKER_SHIFT_META, _WORKER_BURST_WORKERS
+    _WORKER_CONFIG = json.loads(config_json)
+    _WORKER_SHIFTS = shifts_arr
+    _WORKER_SHIFT_META = shift_meta
+    _WORKER_BURST_WORKERS = burst_workers
 
 
 @dataclass(frozen=True)
@@ -247,7 +271,29 @@ def _load_or_fallback_shifts(config: dict[str, Any], *, n_frames: int, scale: in
         return shifts.astype(np.float32, copy=False), metadata
 
 
-def _generate_one_scene(plan: ScenePlan, config: dict[str, Any], output_dir: str) -> dict[str, Any]:
+def _generate_one_scene_worker(plan: ScenePlan, output_dir: str) -> dict[str, Any]:
+    """Entry point for ProcessPoolExecutor workers — reads globals from _worker_init."""
+    assert _WORKER_CONFIG is not None, "worker not initialized"
+    assert _WORKER_SHIFTS is not None, "worker shifts not initialized"
+    return _generate_one_scene(
+        plan,
+        _WORKER_CONFIG,
+        output_dir,
+        preloaded_shifts=_WORKER_SHIFTS,
+        preloaded_shift_meta=_WORKER_SHIFT_META,
+        burst_workers=_WORKER_BURST_WORKERS,
+    )
+
+
+def _generate_one_scene(
+    plan: ScenePlan,
+    config: dict[str, Any],
+    output_dir: str,
+    *,
+    preloaded_shifts: np.ndarray | None = None,
+    preloaded_shift_meta: dict[str, Any] | None = None,
+    burst_workers: int = 1,
+) -> dict[str, Any]:
     rng = np.random.default_rng(plan.seed)
     physics = config["physics_ranges"]
     scale = int(config["scale"])
@@ -311,7 +357,12 @@ def _generate_one_scene(plan: ScenePlan, config: dict[str, Any], output_dir: str
     )
     hr_edge = edge_map(hr_mask >= 0.5, edge_width_px=2)
 
-    shifts, shift_meta = _load_or_fallback_shifts(config, n_frames=n_frames, scale=scale)
+    # Use pre-loaded shifts when available (avoids 2000× CSV re-reads)
+    if preloaded_shifts is not None and preloaded_shift_meta is not None:
+        shifts = preloaded_shifts.copy()
+        shift_meta = dict(preloaded_shift_meta)
+    else:
+        shifts, shift_meta = _load_or_fallback_shifts(config, n_frames=n_frames, scale=scale)
     shift_jitter_std_px = float(config.get("shift_jitter_std_px", 0.0))
     if shift_jitter_std_px < 0:
         raise ValueError("shift_jitter_std_px must be >= 0")
@@ -329,7 +380,7 @@ def _generate_one_scene(plan: ScenePlan, config: dict[str, Any], output_dir: str
         psf_sigma_y_lr_px=psf_sigma_y_lr_px,
         psf_angle_deg=psf_angle_deg,
         scale=scale,
-        workers=1,  # Intentional: outer loop already uses ProcessPoolExecutor
+        workers=burst_workers,
     )
     if lr_burst.shape != (n_frames, *lr_shape):
         raise RuntimeError(f"unexpected LR burst shape: {lr_burst.shape}")
@@ -567,17 +618,43 @@ def _estimate_memory_per_worker(config: dict[str, Any]) -> float:
     return total / (1024 ** 3)
 
 
-def _generate_pool(config: dict[str, Any], output_dir: Path, *, num_scenes: int, workers: int, seed: int) -> Path:
+def _generate_pool(
+    config: dict[str, Any],
+    output_dir: Path,
+    *,
+    num_scenes: int,
+    workers: int,
+    seed: int,
+    burst_workers: int | None = None,
+) -> Path:
     _validate_config(config)
     output_dir.mkdir(parents=True, exist_ok=True)
     plans = _make_scene_plans(config, num_scenes, seed)
 
     worker_count = max(1, int(workers))
 
+    # Auto-compute burst workers: fill remaining CPU cores
+    cpu_count = os.cpu_count() or 1
+    if burst_workers is None:
+        burst_workers_resolved = max(1, cpu_count // worker_count)
+    else:
+        burst_workers_resolved = max(1, int(burst_workers))
+
     # P4: Print memory estimation so users can gauge worker count
     mem_per_worker_gb = _estimate_memory_per_worker(config)
     total_mem_gb = mem_per_worker_gb * worker_count
     print(f"Memory estimate: ~{mem_per_worker_gb:.1f} GB/worker × {worker_count} workers = ~{total_mem_gb:.1f} GB peak")
+    print(
+        f"Parallelism: {worker_count} scene workers × {burst_workers_resolved} burst threads/worker "
+        f"= {worker_count * burst_workers_resolved} logical threads (CPUs: {cpu_count})"
+    )
+
+    # Pre-load shifts once — shared across all workers via initializer
+    n_frames = int(config["n_frames_per_scene"])
+    scale = int(config["scale"])
+    preloaded_shifts, preloaded_shift_meta = _load_or_fallback_shifts(
+        config, n_frames=n_frames, scale=scale
+    )
 
     rows: list[dict[str, Any]] = []
 
@@ -599,25 +676,68 @@ def _generate_pool(config: dict[str, Any], output_dir: Path, *, num_scenes: int,
     if worker_count == 1:
         for plan in tqdm(remaining_plans, desc="Generating scenes"):
             try:
-                rows.append(_generate_one_scene(plan, config, str(output_dir)))
+                rows.append(_generate_one_scene(
+                    plan, config, str(output_dir),
+                    preloaded_shifts=preloaded_shifts,
+                    preloaded_shift_meta=preloaded_shift_meta,
+                    burst_workers=burst_workers_resolved,
+                ))
             except Exception:
                 tb = traceback.format_exc()
                 logger.error("Scene %s failed:\n%s", plan.scene_id, tb)
                 failed.append((plan.scene_id, tb))
     else:
-        with ProcessPoolExecutor(max_workers=worker_count) as executor:
-            future_to_plan = {
-                executor.submit(_generate_one_scene, plan, config, str(output_dir)): plan
-                for plan in remaining_plans
-            }
-            for future in tqdm(as_completed(future_to_plan), total=len(future_to_plan), desc="Generating scenes"):
-                plan = future_to_plan[future]
-                try:
-                    rows.append(future.result())
-                except Exception:
-                    tb = traceback.format_exc()
-                    logger.error("Scene %s failed:\n%s", plan.scene_id, tb)
-                    failed.append((plan.scene_id, tb))
+        # Serialize config as JSON string for initializer (avoids pickling)
+        config_json = json.dumps(config)
+        with ProcessPoolExecutor(
+            max_workers=worker_count,
+            initializer=_worker_init,
+            initargs=(config_json, preloaded_shifts, preloaded_shift_meta, burst_workers_resolved),
+            max_tasks_per_child=200,
+        ) as executor:
+            # Chunked submit: submit 2×workers tasks at a time to reduce
+            # memory pressure from thousands of pending Futures
+            chunk_size = max(1, 2 * worker_count)
+            future_to_plan: dict[Any, ScenePlan] = {}
+            plan_iter = iter(remaining_plans)
+            submitted = 0
+            total = len(remaining_plans)
+            pbar = tqdm(total=total, desc="Generating scenes")
+
+            def _submit_chunk() -> int:
+                """Submit up to chunk_size tasks, return count submitted."""
+                nonlocal submitted
+                count = 0
+                for plan in plan_iter:
+                    future = executor.submit(
+                        _generate_one_scene_worker, plan, str(output_dir)
+                    )
+                    future_to_plan[future] = plan
+                    submitted += 1
+                    count += 1
+                    if count >= chunk_size:
+                        break
+                return count
+
+            # Seed initial chunk
+            _submit_chunk()
+
+            while future_to_plan:
+                for future in as_completed(future_to_plan):
+                    plan = future_to_plan.pop(future)
+                    try:
+                        rows.append(future.result())
+                    except Exception:
+                        tb = traceback.format_exc()
+                        logger.error("Scene %s failed:\n%s", plan.scene_id, tb)
+                        failed.append((plan.scene_id, tb))
+                    pbar.update(1)
+                    # Refill: submit more tasks to keep workers busy
+                    if submitted < total:
+                        _submit_chunk()
+                    break  # Process one at a time to interleave submit/collect
+
+            pbar.close()
 
     if failed:
         print(f"\n⚠️  {len(failed)} scene(s) failed:")
@@ -675,6 +795,12 @@ def parse_args() -> argparse.Namespace:
     )
     parser.add_argument("--output-dir", type=Path, default=None, help="Override config output_dir.")
     parser.add_argument("--workers", type=int, default=1, help="Scene-level worker processes; default is conservative.")
+    parser.add_argument(
+        "--burst-workers",
+        type=int,
+        default=None,
+        help="Threads per worker for burst generation. Default: auto (cpu_count // workers).",
+    )
     parser.add_argument("--seed", type=int, default=None, help="Override config master seed.")
     parser.add_argument("--lr-shape", type=_parse_shape, default=None, help="Override LR shape as ROWS,COLS.")
     return parser.parse_args()
@@ -693,7 +819,11 @@ def main() -> None:
         raise ValueError("num_scenes must be > 0")
     output_dir = _resolve_path(args.output_dir if args.output_dir is not None else config["output_dir"])
     seed = int(args.seed if args.seed is not None else config.get("seed", 700700))
-    manifest_path = _generate_pool(config, output_dir, num_scenes=num_scenes, workers=args.workers, seed=seed)
+    burst_workers = getattr(args, 'burst_workers', None)
+    manifest_path = _generate_pool(
+        config, output_dir, num_scenes=num_scenes, workers=args.workers, seed=seed,
+        burst_workers=burst_workers,
+    )
     print(f"Generated {num_scenes} compact scenes")
     print(f"Output: {output_dir}")
     print(f"Manifest: {manifest_path}")

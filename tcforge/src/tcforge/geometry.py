@@ -94,6 +94,9 @@ def _rotate_coverage_mask(
     arr = np.asarray(mask, dtype=np.float32)
     if arr.ndim != 2:
         raise ValueError("mask must be 2D")
+    # Fast path: skip rotation for near-zero angles
+    if abs(float(angle_deg)) < 0.01:
+        return np.clip(arr, 0.0, 1.0).astype(np.float32, copy=False)
     rotated = ndimage.rotate(
         arr,
         float(angle_deg),
