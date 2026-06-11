@@ -28,11 +28,15 @@
 
 **推荐参数**: `--forward-model-weight 0.1 --forward-model-psf-sigma 0.5 --forward-model-band highpass --forward-model-band-sigma 5.0`（其余与 v8.1a 一致）
 
-**训练结果**: _(TODO：训练完成后回填)_
+**训练结果**: _(2026-06-11 回填)_
 - 输出目录: `outputs/ep07_v9b_fwd_consistency`
-- 视觉效果: _TODO_
-- 关键指标: _TODO_
-- 结论: _TODO_
+- 视觉效果: 与 v8.1a 同体感：膨胀/亮边相比 v8 时代明显收敛，膨胀-抑制达到可接受平衡，无 v8.1b 式条纹伪影；斜边残留均匀台阶状锯齿；中心最细 zigzag 线仍模糊（与 v8.1 A/B 不变性一致，输入信息瓶颈所致，非 loss 问题）。
+- 关键指标（real_eval 248 帧 zoom3x，与 EP11 同口径）:
+  - `artifact_score`: 10K 0.369 → 25K 0.605 → 40K 0.640 → 60K 0.655（对照 v8.1a: 0.390 → 0.551 → 0.627 → 0.643）
+  - `raw_control_corr`: 10K 0.758 → 25K 0.711 → 40K 0.697 → 60K 0.688（对照 v8.1a: 0.756 → 0.717 → 0.698 → 0.689）
+  - 40K→60K 漂移: artifact +0.0145 / corr −0.0082，与 v8.1a（+0.016 / −0.009）基本重合 → **漂移未压平，run_v9.md 验收标准未达成**
+  - `loss/forward_model` 自 10K 起躺平在 0.004–0.009 地板，同期 artifact 持续上爬 → 漂移方向位于 forward 算子（shift→PSF→下采样→带限 highpass）的零空间，观测一致性对该方向不可见
+- 结论: 带限 forward consistency（weight 0.1, band=highpass）单因子归因失败，对真实数据漂移无可测影响。结合 v8.1a / v8.1b / v9b 三臂漂移曲线几乎重合，确认漂移是「合成先验在真实分布上无监督外推」的结构性矛盾，loss 侧旋钮已证伪。后续处置：artifact/corr 降级为 checkpoint 选择器（Pareto + 视觉门控，不默认取 60K）；观测锚定若要有效需让锚可见漂移方向（如 hybrid 输入下以合法 LR 观测构造 forward 项），或从输入端解决（V9A, ACL-016）。
 
 **涉及文件**: `losses.py`, `config.py`, `train.py`, `mask_weights.py`, `scripts/run_v9.md`, `scripts/run_training.md`, `tests/test_model_losses.py`, `tests/test_config.py`
 
