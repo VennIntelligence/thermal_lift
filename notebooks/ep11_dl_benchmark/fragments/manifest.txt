@@ -1,4 +1,5 @@
 01_setup.py
 02_visual_comparison.py
+02b_center_zoom4x_comparison.py
 03_proxy_summary.py
 04_notes_and_boundary.py

@@ -45,6 +45,10 @@ DEFAULT_BASELINE_SWEEP = PROJECT_ROOT / "output" / "ep10_tgv_sr" / "sweep_result
 DEFAULT_BASELINE_SUMMARY = PROJECT_ROOT / "output" / "ep10_tgv_sr" / "run_summary.json"
 DEFAULT_OUTPUT_DIR = PROJECT_ROOT / "output" / "ep11_dl_benchmark"
 DEFAULT_EXPECTED_SHAPE = (960, 1280)
+EP10_SRC = PROJECT_ROOT / "algos" / "ep10_tgv_sr" / "src"
+DEFAULT_TGV_LAMBDA = 0.003
+DEFAULT_TGV_PSF_SIGMA = 0.50
+DEFAULT_TGV_ANISO_RATIO_Y = 1.5
 
 
 def _relative(path: Path) -> str:
@@ -144,6 +148,8 @@ def _build_model(cfg: dict[str, Any], state_dict: dict[str, torch.Tensor]) -> Th
         out_channels=int(cfg.get("out_channels", 1)),
         scale=model_scale,
         base_channels=int(cfg.get("base_channels", 48)),
+        hr_upsampler=str(cfg.get("hr_upsampler", "bilinear")),
+        hr_res_blocks=int(cfg.get("hr_res_blocks", 0)),
     )
     model.load_state_dict(state_dict)
     model.eval()
@@ -188,6 +194,71 @@ def _zoom_center(image: np.ndarray, *, center_fraction: float, zoom: float) -> n
     return ndimage.zoom(crop, zoom=float(zoom), order=1).astype(np.float32, copy=False)
 
 
+def _zoom_tag(zoom: float) -> str:
+    zoom_value = float(zoom)
+    if math.isclose(zoom_value, round(zoom_value), rel_tol=0.0, abs_tol=1e-6):
+        return f"zoom{int(round(zoom_value))}x"
+    return f"zoom{zoom_value:g}x"
+
+
+def _temperature_limits_shared(crops: list[np.ndarray]) -> tuple[float, float]:
+    finite = [crop[np.isfinite(crop)].ravel() for crop in crops if np.isfinite(crop).any()]
+    if not finite:
+        return 0.0, 1.0
+    values = np.concatenate(finite)
+    return float(np.percentile(values, 1.0)), float(np.percentile(values, 99.0))
+
+
+def tgv_highpass_to_temperature(
+    tgv_hp: np.ndarray,
+    raw_frames: np.ndarray,
+    *,
+    scale: int,
+    sigma_bg: float,
+) -> np.ndarray:
+    """Restore a Celsius HR temperature map from TGV highpass output."""
+
+    ref_idx = len(raw_frames) // 2
+    ref_temp_hr = bicubic_upsample(raw_frames[ref_idx], scale=scale).astype(np.float32, copy=False)
+    ref_hp_hr = highpass_preprocess(ref_temp_hr, sigma_bg=float(sigma_bg) * 2.0)
+    lowfreq = ref_temp_hr - ref_hp_hr
+    return (lowfreq + np.asarray(tgv_hp, dtype=np.float32)).astype(np.float32, copy=False)
+
+
+def reconstruct_tgv_highpass(
+    raw_frames: np.ndarray,
+    shifts: np.ndarray,
+    *,
+    sigma_bg: float,
+    lambda_tv: float,
+    psf_sigma: float,
+    aniso_ratio_y: float,
+    coverage_weighted: bool,
+    workers: int,
+) -> np.ndarray:
+    if str(EP10_SRC) not in sys.path:
+        sys.path.insert(0, str(EP10_SRC))
+    from ep10_tgv_sr import reconstruct_map_tgv  # noqa: WPS433
+
+    hp_frames = highpass_preprocess(raw_frames, sigma_bg=float(sigma_bg), workers=workers)
+    tgv_hp, _records = reconstruct_map_tgv(
+        hp_frames,
+        shifts,
+        lambda_tv=float(lambda_tv),
+        alpha_ratio=2.0,
+        psf_sigma=float(psf_sigma),
+        max_iter=100,
+        step_size=1.0,
+        use_fista=True,
+        workers=workers,
+        tgv_inner_iter=80,
+        tgv_device="cpu",
+        aniso_ratio_y=float(aniso_ratio_y),
+        coverage_weighted=bool(coverage_weighted),
+    )
+    return np.asarray(tgv_hp, dtype=np.float32)
+
+
 def save_highpass_comparison(
     unet_hp: np.ndarray,
     baseline_hp: np.ndarray,
@@ -218,7 +289,42 @@ def save_highpass_comparison(
         ax.set_xticks([])
         ax.set_yticks([])
     fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.035, pad=0.03).set_label("Highpass response [deg C]")
-    path = output_dir / "unet_vs_tgv_2x_center_zoom3x_highpass.png"
+    path = output_dir / f"unet_vs_tgv_2x_center_{_zoom_tag(zoom)}_highpass.png"
+    savefig_academic(fig, path)
+    return path
+
+
+def save_temperature_comparison(
+    unet_temp: np.ndarray,
+    baseline_temp: np.ndarray,
+    output_dir: Path,
+    *,
+    baseline_name: str,
+    zoom: float,
+    center_fraction: float,
+    step_label: str = "step 4000",
+) -> Path:
+    setup_academic_style()
+    panels = [
+        (f"UNet 2x @ EP07 {step_label}", _zoom_center(unet_temp, center_fraction=center_fraction, zoom=zoom)),
+        (baseline_name, _zoom_center(baseline_temp, center_fraction=center_fraction, zoom=zoom)),
+    ]
+    vmin, vmax = _temperature_limits_shared([panel for _, panel in panels])
+
+    fig, axes = plt.subplots(1, len(panels), figsize=(min(7.4, 2.6 * len(panels)), 3.0), squeeze=False)
+    for ax, (title, image) in zip(axes.ravel(), panels, strict=True):
+        im = ax.imshow(
+            image,
+            cmap=COLORMAPS["temperature"],
+            vmin=vmin,
+            vmax=vmax,
+            interpolation="nearest",
+        )
+        ax.set_title(title)
+        ax.set_xticks([])
+        ax.set_yticks([])
+    fig.colorbar(im, ax=axes.ravel().tolist(), fraction=0.035, pad=0.03).set_label("Temperature [deg C]")
+    path = output_dir / f"unet_vs_tgv_2x_center_{_zoom_tag(zoom)}_temperature.png"
     savefig_academic(fig, path)
     return path
 
@@ -245,7 +351,7 @@ def save_unet_temperature_view(
     ax.set_xticks([])
     ax.set_yticks([])
     fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04).set_label("Temperature [deg C]")
-    path = output_dir / f"unet_{step_label.replace(' ', '')}_center_zoom3x_temperature.png"
+    path = output_dir / f"unet_{step_label.replace(' ', '')}_center_{_zoom_tag(zoom)}_temperature.png"
     savefig_academic(fig, path)
     return path
 
@@ -388,8 +494,45 @@ def run(args: argparse.Namespace) -> pd.DataFrame:
         shifts = full_shifts[: len(metadata)]
     print(f"Loaded frames={raw_frames.shape}, shifts={shifts.shape}")
 
-    baseline = np.load(args.baseline_hr).astype(np.float32, copy=False)
-    print(f"Loaded baseline highpass ({args.baseline_name}): {args.baseline_hr} {baseline.shape}")
+    if args.reconstruct_tgv:
+        print(
+            "Running MAP-TGV reconstruction on CPU "
+            f"(lambda={args.tgv_lambda:g}, sigma={args.tgv_psf_sigma:g})"
+        )
+        baseline = reconstruct_tgv_highpass(
+            raw_frames,
+            shifts,
+            sigma_bg=float(args.highpass_sigma),
+            lambda_tv=float(args.tgv_lambda),
+            psf_sigma=float(args.tgv_psf_sigma),
+            aniso_ratio_y=float(args.tgv_aniso_ratio_y),
+            coverage_weighted=bool(args.tgv_coverage_weighted),
+            workers=int(args.workers),
+        )
+        np.save(output_dir / "tgv_best_hr_highpass.npy", baseline.astype(np.float32, copy=False))
+        baseline_temp = tgv_highpass_to_temperature(
+            baseline,
+            raw_frames,
+            scale=int(args.scale),
+            sigma_bg=float(args.highpass_sigma),
+        )
+        np.save(output_dir / "tgv_best_hr_temperature.npy", baseline_temp.astype(np.float32, copy=False))
+        print(f"Reconstructed TGV highpass shape={baseline.shape}")
+    else:
+        baseline = np.load(args.baseline_hr).astype(np.float32, copy=False)
+        print(f"Loaded baseline highpass ({args.baseline_name}): {args.baseline_hr} {baseline.shape}")
+        baseline_temp_path = args.baseline_temperature
+        if baseline_temp_path is not None and baseline_temp_path.exists():
+            baseline_temp = np.load(baseline_temp_path).astype(np.float32, copy=False)
+            print(f"Loaded baseline temperature: {baseline_temp_path} {baseline_temp.shape}")
+        else:
+            baseline_temp = tgv_highpass_to_temperature(
+                baseline,
+                raw_frames,
+                scale=int(args.scale),
+                sigma_bg=float(args.highpass_sigma),
+            )
+            np.save(output_dir / "tgv_best_hr_temperature.npy", baseline_temp.astype(np.float32, copy=False))
 
     cfg, state_dict, checkpoint_step = _load_checkpoint_config(args.checkpoint)
     residual = bool(cfg.get("residual", True))
@@ -416,6 +559,8 @@ def run(args: argparse.Namespace) -> pd.DataFrame:
         raise ValueError(f"UNet highpass shape {unet_hp.shape} != expected {expected_shape}")
     if baseline.shape != unet_hp.shape:
         raise ValueError(f"Baseline shape {baseline.shape} != UNet shape {unet_hp.shape}")
+    if baseline_temp.shape != unet_temp.shape:
+        raise ValueError(f"Baseline temperature shape {baseline_temp.shape} != UNet shape {unet_temp.shape}")
     if args.limit is None and unet_hp.shape != DEFAULT_EXPECTED_SHAPE:
         raise ValueError(f"Full EP11 shape {unet_hp.shape} != expected {DEFAULT_EXPECTED_SHAPE}")
     if not np.isfinite(unet_hp).any():
@@ -447,6 +592,15 @@ def run(args: argparse.Namespace) -> pd.DataFrame:
     raw_fig = save_unet_temperature_view(
         unet_temp,
         output_dir,
+        zoom=float(args.zoom),
+        center_fraction=float(args.center_fraction),
+        step_label=step_label,
+    )
+    temp_fig = save_temperature_comparison(
+        unet_temp,
+        baseline_temp,
+        output_dir,
+        baseline_name=str(args.baseline_name),
         zoom=float(args.zoom),
         center_fraction=float(args.center_fraction),
         step_label=step_label,
@@ -524,13 +678,15 @@ def run(args: argparse.Namespace) -> pd.DataFrame:
             "zoom": float(args.zoom),
             "zoom_role": "display zoom only; reconstruction scale remains 2x",
             "n_splits": int(args.n_splits),
-            "figures": [_relative(highpass_fig), _relative(raw_fig)],
+            "figures": [_relative(highpass_fig), _relative(temp_fig), _relative(raw_fig)],
+            "tgv_reconstructed": bool(args.reconstruct_tgv),
         },
     )
 
     print(summary.to_string(index=False))
     print(f"Wrote {_relative(unet_hp_path)}")
     print(f"Wrote {_relative(highpass_fig)}")
+    print(f"Wrote {_relative(temp_fig)}")
     print(f"Wrote {_relative(raw_fig)}")
     return summary
 
@@ -550,6 +706,12 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--overlap", type=int, default=32)
     parser.add_argument("--zoom", type=float, default=3.0)
     parser.add_argument("--center-fraction", type=float, default=1.0 / 3.0)
+    parser.add_argument("--baseline-temperature", type=Path, default=None)
+    parser.add_argument("--reconstruct-tgv", action="store_true")
+    parser.add_argument("--tgv-lambda", type=float, default=DEFAULT_TGV_LAMBDA)
+    parser.add_argument("--tgv-psf-sigma", type=float, default=DEFAULT_TGV_PSF_SIGMA)
+    parser.add_argument("--tgv-aniso-ratio-y", type=float, default=DEFAULT_TGV_ANISO_RATIO_Y)
+    parser.add_argument("--tgv-coverage-weighted", action=argparse.BooleanOptionalAction, default=True)
     parser.add_argument("--device", default="cuda:1")
     parser.add_argument("--allow-cuda0", action="store_true")
     parser.add_argument("--workers", type=int, default=4)

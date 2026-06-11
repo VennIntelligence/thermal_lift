@@ -249,7 +249,9 @@ name = "ep07-unet-sr"
 version = "0.1.0"
 source = { editable = "../ep07_unet_sr" }
 dependencies = [
+    { name = "matplotlib" },
     { name = "numpy" },
+    { name = "pandas" },
     { name = "pytest" },
     { name = "scikit-image" },
     { name = "scipy" },
@@ -261,7 +263,9 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "matplotlib", specifier = ">=3.8" },
     { name = "numpy", specifier = ">=1.26" },
+    { name = "pandas", specifier = ">=3.0.3" },
     { name = "pytest", specifier = ">=8.0" },
     { name = "scikit-image", specifier = ">=0.22" },
     { name = "scipy", specifier = ">=1.12" },
