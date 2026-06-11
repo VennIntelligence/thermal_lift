@@ -215,6 +215,7 @@ def maybe_log_real_eval(
     scale = int(training_config.scale)
     patch_size_hr = int(training_config.patch_size_hr)
     residual = bool(training_config.residual)
+    input_mode = str(getattr(training_config, "input_mode", "lr"))
     sigma_bg = float(config.highpass_sigma or training_config.highpass_sigma)
 
     model_was_training = model.training
@@ -230,6 +231,7 @@ def maybe_log_real_eval(
             device=str(device),
             residual=residual,
             sigma_bg=sigma_bg,
+            input_mode=input_mode,
         ).astype(np.float32, copy=False)
     if model_was_training:
         model.train()

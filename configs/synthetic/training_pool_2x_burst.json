@@ -1,0 +1,87 @@
+{
+  "dataset": "ThermalChipPhantom_v2",
+  "engine": "TCForge",
+  "version": "0.2.0",
+  "scale": 2,
+  "lr_shape": [480, 640],
+  "hr_shape": [960, 1280],
+  "pixel_size_um": 10.0,
+  "spatial_resolution_um": 20.0,
+  "forward_mode": "physical_block_average",
+  "n_frames_per_scene": 248,
+  "num_scenes": 1000,
+  "seed": 800800,
+  "output_dir": "data/synthetic/training_pool_2x_aa_burst",
+  "compute_classical_sr": false,
+  "physics_ranges": {
+    "psf_sigma_lr_px": [0.15, 0.55],
+    "noise_sigma_c": {"dist": "lognormal", "mean": 0.0724, "sigma_factor": 0.25},
+    "T_bg_c": [19.0, 23.0],
+    "delta_T_c_by_difficulty": {
+      "easy": [2.0, 5.0],
+      "medium": [1.0, 3.0],
+      "hard": [0.5, 2.0],
+      "stress": [0.3, 0.8]
+    },
+    "low_freq_amplitude_c": [0.02, 0.5],
+    "low_freq_sigma_px": 96.0,
+    "rotation_deg_center": 47.6,
+    "rotation_jitter_deg": 1.5
+  },
+  "difficulty_distribution": {
+    "easy": 200,
+    "medium": 400,
+    "hard": 300,
+    "stress": 100
+  },
+  "drift_distribution": {
+    "none": 300,
+    "scalar_offset": 250,
+    "lowfreq": 200,
+    "gain_offset": 100,
+    "temporal_trend": 150
+  },
+  "drift_parameters": {
+    "amplitude_c": [0.0, 0.3],
+    "lowfreq_sigma_px": 96.0,
+    "gain_sigma": 0.01,
+    "offset_sigma_c": 0.1,
+    "temporal_spatial_sigma_px": [0.0, 24.0]
+  },
+  "psf_randomization": {
+    "enabled": true,
+    "sigma_range": [0.15, 0.55],
+    "elliptical_probability": 0.30,
+    "airy_probability": 0.10
+  },
+  "noise_model": {
+    "model": "detector_realistic",
+    "fpn_sigma_px": [3.0, 12.0],
+    "stripe_sigma_c": [0.005, 0.025]
+  },
+  "detector_defects": {
+    "enabled": true,
+    "defect_rate": [0.0, 0.001],
+    "mode": "offset",
+    "hot_delta_c": [0.2, 0.8],
+    "cold_delta_c": [-0.8, -0.2]
+  },
+  "shift_profile": "real_default_contour_refined",
+  "shift_jitter_std_px": 0.02,
+  "shift_fallback_profile": "ideal_phase_grid",
+  "storage": {
+    "format": "compact",
+    "obs_features_resolution": "1x",
+    "obs_features_dtype": "float16",
+    "compress_features": true,
+    "save_lr_burst": true,
+    "save_hr_temperature": false
+  },
+  "obs_features_channels": [
+    "aligned_mean",
+    "aligned_median",
+    "coverage",
+    "variance",
+    "highpass_fused"
+  ]
+}

@@ -7,6 +7,7 @@ import math
 import numpy as np
 import torch
 
+from tcforge.classical_sr import drizzle_features
 from tcforge.fusion import fuse_burst_to_features
 
 
@@ -120,19 +121,40 @@ def infer_from_burst(
     sigma_bg: float = 5.0,
     residual: bool = False,
     classical_sr: np.ndarray | None = None,
+    input_mode: str = "lr",
 ) -> np.ndarray:
     """Fuse an LR burst and run tiled UNet inference.
 
     When *residual* is True, *classical_sr* must be provided (or it is
     computed via shift-and-add internally) and the model output is added
     to it.
+
+    When *input_mode* is ``"hybrid_drizzle2x"``, 5ch fused features are
+    upsampled to 2x and concatenated with 3ch scatter drizzle at 2x,
+    yielding an 8ch input at 2x grid.  The model operates at scale=1
+    (direct prediction, no residual add).
     """
+
+    if input_mode == "hybrid_drizzle2x":
+        from scipy.ndimage import zoom
+        features_1x = fuse_burst_to_features(lr_burst, shifts, sigma_bg=sigma_bg)
+        features_up = zoom(features_1x, (1, scale, scale), order=1).astype(np.float32)
+        drz = drizzle_features(lr_burst, shifts, scale=scale, kernel="bilinear")
+        features = np.concatenate([features_up, drz], axis=0)
+        return infer_full_frame(
+            model,
+            features,
+            scale=1,
+            patch_size_hr=patch_size_hr,
+            overlap=overlap,
+            device=device,
+            residual=False,
+        )
 
     features = fuse_burst_to_features(lr_burst, shifts, sigma_bg=sigma_bg)
 
     if residual:
         from scipy.ndimage import zoom
-        # Upsample fused features from LR to HR
         features_hr = zoom(features, (1, scale, scale), order=1).astype(np.float32)
         if classical_sr is None:
             from tcforge.classical_sr import shift_and_add

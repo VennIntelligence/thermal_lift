@@ -58,6 +58,38 @@ class ConvBlock(nn.Module):
         return self.se(self.net(x))
 
 
+def _icnr_init(conv: nn.Conv2d, *, scale: int) -> None:
+    """Initialize sub-pixel conv weights to start near nearest-neighbor upsample."""
+
+    if scale <= 0:
+        raise ValueError("scale must be positive")
+    out_channels, in_channels, kh, kw = conv.weight.shape
+    groups = scale * scale
+    if out_channels % groups != 0:
+        raise ValueError("conv out_channels must be divisible by scale^2 for ICNR")
+    subkernel = conv.weight.new_empty(out_channels // groups, in_channels, kh, kw)
+    nn.init.kaiming_normal_(subkernel, nonlinearity="linear")
+    with torch.no_grad():
+        conv.weight.copy_(subkernel.repeat_interleave(groups, dim=0))
+        if conv.bias is not None:
+            conv.bias.zero_()
+
+
+class HRResBlock(nn.Module):
+    """Lightweight HR-space residual refinement without normalization."""
+
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.net = nn.Sequential(
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+            nn.SiLU(inplace=True),
+            nn.Conv2d(channels, channels, kernel_size=3, padding=1),
+        )
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x + self.net(x)
+
+
 class ThermalSRUNet(nn.Module):
     """Compact UNet with SE attention for thermal super-resolution.
 
@@ -72,13 +104,20 @@ class ThermalSRUNet(nn.Module):
         out_channels: int = 1,
         base_channels: int = 48,
         scale: int = 4,
+        hr_upsampler: str = "bilinear",
+        hr_res_blocks: int = 0,
     ) -> None:
         super().__init__()
         if scale <= 0:
             raise ValueError("scale must be positive")
         if base_channels <= 0:
             raise ValueError("base_channels must be positive")
+        if hr_upsampler not in ("bilinear", "pixelshuffle"):
+            raise ValueError("hr_upsampler must be 'bilinear' or 'pixelshuffle'")
+        if hr_res_blocks < 0:
+            raise ValueError("hr_res_blocks must be >= 0")
         self.scale = int(scale)
+        self.hr_upsampler = str(hr_upsampler)
 
         c1 = int(base_channels)
         c2 = c1 * 2
@@ -98,12 +137,20 @@ class ThermalSRUNet(nn.Module):
         self.up1 = nn.Conv2d(c2, c1, kernel_size=1)
         self.dec1 = ConvBlock(c1 + c1, c1)
 
-        self.hr_refine = nn.Sequential(
-            nn.Conv2d(c1, c1, kernel_size=3, padding=1),
-            nn.GroupNorm(_group_count(c1), c1),
-            nn.SiLU(inplace=True),
-            nn.Conv2d(c1, out_channels, kernel_size=3, padding=1),
-        )
+        if self.hr_upsampler == "bilinear":
+            self.hr_refine = nn.Sequential(
+                nn.Conv2d(c1, c1, kernel_size=3, padding=1),
+                nn.GroupNorm(_group_count(c1), c1),
+                nn.SiLU(inplace=True),
+                nn.Conv2d(c1, out_channels, kernel_size=3, padding=1),
+            )
+        else:
+            self.pixel_shuffle_conv = nn.Conv2d(c1, c1 * self.scale * self.scale, kernel_size=3, padding=1)
+            _icnr_init(self.pixel_shuffle_conv, scale=self.scale)
+            self.pixel_shuffle = nn.PixelShuffle(self.scale)
+            refine_layers: list[nn.Module] = [HRResBlock(c1) for _ in range(int(hr_res_blocks))]
+            refine_layers.append(nn.Conv2d(c1, out_channels, kernel_size=3, padding=1))
+            self.hr_refine = nn.Sequential(*refine_layers)
 
     @staticmethod
     def _upsample_to(x: torch.Tensor, ref: torch.Tensor) -> torch.Tensor:
@@ -124,5 +171,8 @@ class ThermalSRUNet(nn.Module):
         d1 = self.up1(self._upsample_to(d2, e1))
         d1 = self.dec1(torch.cat([d1, e1], dim=1))
 
-        hr = F.interpolate(d1, scale_factor=self.scale, mode="bilinear", align_corners=False)
+        if self.hr_upsampler == "bilinear":
+            hr = F.interpolate(d1, scale_factor=self.scale, mode="bilinear", align_corners=False)
+        else:
+            hr = self.pixel_shuffle(self.pixel_shuffle_conv(d1))
         return self.hr_refine(hr)

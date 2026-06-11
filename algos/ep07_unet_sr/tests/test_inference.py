@@ -36,3 +36,25 @@ def test_infer_from_burst_fuses_before_inference() -> None:
 
     assert out.shape == (32, 40)
     assert np.allclose(out, 21.0, atol=1e-5)
+
+
+class IdentityRefine(torch.nn.Module):
+    """8ch → 1ch identity: returns mean of first channel."""
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x[:, :1]
+
+
+def test_infer_from_burst_hybrid_drizzle2x_shape() -> None:
+    """V9A: hybrid_drizzle2x inference produces correct HR output shape."""
+    model = IdentityRefine()
+    burst = np.ones((40, 8, 10), dtype=np.float32) * 21.0
+    shifts = np.random.default_rng(42).uniform(-0.3, 0.3, (40, 2)).astype(np.float32)
+
+    out = infer_from_burst(
+        model, burst, shifts,
+        scale=2, patch_size_hr=8, overlap=2,
+        device="cpu", input_mode="hybrid_drizzle2x",
+    )
+
+    assert out.shape == (16, 20)
+    assert np.isfinite(out).all()

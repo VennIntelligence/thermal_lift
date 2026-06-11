@@ -15,6 +15,8 @@ class TrainingConfig:
     in_channels: int = 5
     out_channels: int = 1
     base_channels: int = 64
+    hr_upsampler: str = "bilinear"
+    hr_res_blocks: int = 0
     patch_size_hr: int = 256
     batch_size: int = 4
     num_workers: int = 4
@@ -35,6 +37,9 @@ class TrainingConfig:
     laplacian_weight: float = 0.0
     forward_model_weight: float = 0.0
     forward_model_psf_sigma: float = 0.5
+    forward_model_band: str = "full"
+    forward_model_band_sigma: float = 5.0
+    input_mode: str = "lr"
     lr_warmup_steps: int = 500
     log_every: int = 50
     save_every: int = 1_000
@@ -65,6 +70,8 @@ class TrainingConfig:
         if self.device == "cpu" and self.amp:
             print("AMP requested on CPU; disabling AMP.")
             self.amp = False
+        if self.residual and self.input_mode == "hybrid_drizzle2x":
+            raise ValueError("residual and hybrid_drizzle2x modes are mutually exclusive")
         if self.residual and self.in_channels == 5:
             self.in_channels = 6
             print("Residual mode: auto-set in_channels 5 → 6 (5 fused + 1 classical_sr)")
@@ -72,9 +79,13 @@ class TrainingConfig:
             raise ValueError("scale must be positive")
         if self.in_channels <= 0 or self.out_channels <= 0:
             raise ValueError("channel counts must be positive")
+        if self.hr_upsampler not in ("bilinear", "pixelshuffle"):
+            raise ValueError("hr_upsampler must be 'bilinear' or 'pixelshuffle'")
+        if self.hr_res_blocks < 0:
+            raise ValueError("hr_res_blocks must be >= 0")
         if self.patch_size_hr <= 0:
             raise ValueError("patch_size_hr must be positive")
-        effective_scale = 1 if self.residual else self.scale
+        effective_scale = 1 if (self.residual or self.input_mode == "hybrid_drizzle2x") else self.scale
         if self.patch_size_hr % effective_scale != 0:
             raise ValueError("patch_size_hr must be divisible by scale")
         if self.batch_size <= 0:
@@ -117,6 +128,22 @@ class TrainingConfig:
             raise ValueError("forward_model_weight must be >= 0")
         if self.forward_model_psf_sigma < 0:
             raise ValueError("forward_model_psf_sigma must be >= 0")
+        if self.forward_model_band not in ("full", "highpass"):
+            raise ValueError("forward_model_band must be 'full' or 'highpass'")
+        if self.forward_model_band_sigma < 0:
+            raise ValueError("forward_model_band_sigma must be >= 0")
+        if self.input_mode not in ("lr", "hybrid_drizzle2x"):
+            raise ValueError("input_mode must be 'lr' or 'hybrid_drizzle2x'")
+        if self.input_mode == "hybrid_drizzle2x" and self.forward_model_weight > 0:
+            raise ValueError(
+                "input_mode='hybrid_drizzle2x' with forward_model_weight > 0 is not supported: "
+                "hybrid 2x obs[:, 0:1] is upsampled mean, not a valid 1x LR observation. "
+                "v10 merge must provide the actual 1x aligned_mean patch separately."
+            )
+        if self.input_mode == "hybrid_drizzle2x":
+            if self.in_channels == 5:
+                self.in_channels = 8
+                print("Hybrid drizzle 2x mode: auto-set in_channels 5 → 8 (5 fused↑2x + 3 drizzle@2x)")
         if self.lr_warmup_steps < 0:
             raise ValueError("lr_warmup_steps must be >= 0")
         if self.patches_per_scene <= 0:
@@ -176,6 +203,18 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--device", default=TrainingConfig.device)
     parser.add_argument("--scale", type=int, default=TrainingConfig.scale)
     parser.add_argument("--base-channels", type=int, default=TrainingConfig.base_channels)
+    parser.add_argument(
+        "--hr-upsampler",
+        default=TrainingConfig.hr_upsampler,
+        choices=["bilinear", "pixelshuffle"],
+        help="Final HR upsampler head. Use pixelshuffle for V8_1B; default preserves legacy bilinear.",
+    )
+    parser.add_argument(
+        "--hr-res-blocks",
+        type=int,
+        default=TrainingConfig.hr_res_blocks,
+        help="Number of no-norm HR residual refine blocks after PixelShuffle (default: 0).",
+    )
     parser.add_argument("--lr", type=float, default=TrainingConfig.lr)
     parser.add_argument("--weight-decay", type=float, default=TrainingConfig.weight_decay)
     parser.add_argument("--edge-loss-weight", type=float, default=TrainingConfig.edge_loss_weight)
@@ -213,6 +252,28 @@ def build_arg_parser() -> argparse.ArgumentParser:
                              "downsampled must match LR observation (default: 0.0, disabled).")
     parser.add_argument("--forward-model-psf-sigma", type=float, default=TrainingConfig.forward_model_psf_sigma,
                         help="PSF Gaussian sigma at LR pixel scale for forward model loss (default: 0.5).")
+    parser.add_argument(
+        "--forward-model-band",
+        default=TrainingConfig.forward_model_band,
+        choices=["full", "highpass"],
+        help="Forward model frequency band: 'full' (legacy) or 'highpass' (subtract σ blur, "
+             "avoids low-freq gradient conflict with structure losses).",
+    )
+    parser.add_argument(
+        "--forward-model-band-sigma",
+        type=float,
+        default=TrainingConfig.forward_model_band_sigma,
+        help="Gaussian sigma (LR px) for highpass band in forward model (default: 5.0, "
+             "matches pipeline σ_bg=5 convention).",
+    )
+    parser.add_argument(
+        "--input-mode",
+        default=TrainingConfig.input_mode,
+        choices=["lr", "hybrid_drizzle2x"],
+        help="Input mode: 'lr' (5ch 1x obs, default) or 'hybrid_drizzle2x' "
+             "(8ch 2x: 5ch fused↑2x + 3ch scatter drizzle@2x). "
+             "Hybrid requires training pool with lr_burst.npy.",
+    )
     parser.add_argument("--lr-warmup-steps", type=int, default=TrainingConfig.lr_warmup_steps,
                         help="Linear LR warmup from 0 to target LR over this many steps (default: 500).")
     parser.add_argument("--log-every", type=int, default=TrainingConfig.log_every)
@@ -342,6 +403,8 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         output_dir=args.output_dir,
         scale=args.scale,
         base_channels=args.base_channels,
+        hr_upsampler=args.hr_upsampler,
+        hr_res_blocks=args.hr_res_blocks,
         patch_size_hr=args.patch_size_hr,
         batch_size=args.batch_size,
         num_workers=args.num_workers,
@@ -362,6 +425,9 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         laplacian_weight=args.laplacian_weight,
         forward_model_weight=args.forward_model_weight,
         forward_model_psf_sigma=args.forward_model_psf_sigma,
+        forward_model_band=args.forward_model_band,
+        forward_model_band_sigma=args.forward_model_band_sigma,
+        input_mode=args.input_mode,
         lr_warmup_steps=args.lr_warmup_steps,
         log_every=args.log_every,
         save_every=args.save_every,

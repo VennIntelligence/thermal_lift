@@ -114,6 +114,66 @@ def _gaussian_kernel_2d(size: int, sigma: float, channels: int, device: torch.de
     return k2d.expand(channels, 1, size, size).contiguous()
 
 
+def _ssim_float32(
+    pred_f: torch.Tensor,
+    target_f: torch.Tensor,
+    *,
+    window_size: int,
+    sigma: float,
+    data_range: float | None,
+    eps: float,
+) -> torch.Tensor:
+    """Gaussian-window SSIM core in float32 (AMP-safe statistics)."""
+
+    channels = pred_f.shape[1]
+    kernel = _gaussian_kernel_2d(window_size, sigma, channels, pred_f.device, pred_f.dtype)
+    if data_range is None:
+        data_range = float(target_f.max() - target_f.min()) + eps
+
+    c1 = (0.01 * data_range) ** 2
+    c2 = (0.03 * data_range) ** 2
+    pad = window_size // 2
+    mu_p = F.conv2d(pred_f, kernel, padding=pad, groups=channels)
+    mu_t = F.conv2d(target_f, kernel, padding=pad, groups=channels)
+
+    mu_p_sq = mu_p * mu_p
+    mu_t_sq = mu_t * mu_t
+    mu_pt = mu_p * mu_t
+
+    sigma_p_sq = F.conv2d(pred_f * pred_f, kernel, padding=pad, groups=channels) - mu_p_sq
+    sigma_t_sq = F.conv2d(target_f * target_f, kernel, padding=pad, groups=channels) - mu_t_sq
+    sigma_pt = F.conv2d(pred_f * target_f, kernel, padding=pad, groups=channels) - mu_pt
+
+    sigma_p_sq = sigma_p_sq.clamp(min=0.0)
+    sigma_t_sq = sigma_t_sq.clamp(min=0.0)
+
+    numerator = (2.0 * mu_pt + c1) * (2.0 * sigma_pt + c2)
+    denominator = (mu_p_sq + mu_t_sq + c1) * (sigma_p_sq + sigma_t_sq + c2)
+    return (numerator / (denominator + eps)).mean()
+
+
+@torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
+def _ssim_cuda(
+    pred: torch.Tensor,
+    target: torch.Tensor,
+    window_size: int,
+    sigma: float,
+    data_range: float,
+    eps: float,
+) -> torch.Tensor:
+    """CUDA SSIM forward: inputs cast once to fp32 without nested autocast(False)."""
+
+    dr = None if data_range < 0 else data_range
+    return _ssim_float32(
+        pred,
+        target,
+        window_size=window_size,
+        sigma=sigma,
+        data_range=dr,
+        eps=eps,
+    )
+
+
 def ssim(
     pred: torch.Tensor,
     target: torch.Tensor,
@@ -133,44 +193,18 @@ def ssim(
     if pred.ndim != 4:
         raise ValueError("input must be (B, C, H, W)")
 
-    channels = pred.shape[1]
+    dr_flag = -1.0 if data_range is None else float(data_range)
+    if pred.is_cuda:
+        return _ssim_cuda(pred, target, window_size, sigma, dr_flag, eps)
 
-    # Disable autocast: F.conv2d under AMP would cast float32 inputs back to fp16,
-    # causing NaN in the Gaussian-windowed statistics.
-    with torch.amp.autocast(device_type=pred.device.type, enabled=False):
-        pred_f = pred.float()
-        target_f = target.float()
-
-        kernel = _gaussian_kernel_2d(window_size, sigma, channels, pred_f.device, pred_f.dtype)
-
-        # Estimate data range from target if not given
-        if data_range is None:
-            data_range = float(target_f.max() - target_f.min()) + eps
-
-        c1 = (0.01 * data_range) ** 2
-        c2 = (0.03 * data_range) ** 2
-
-        pad = window_size // 2
-        mu_p = F.conv2d(pred_f, kernel, padding=pad, groups=channels)
-        mu_t = F.conv2d(target_f, kernel, padding=pad, groups=channels)
-
-        mu_p_sq = mu_p * mu_p
-        mu_t_sq = mu_t * mu_t
-        mu_pt = mu_p * mu_t
-
-        sigma_p_sq = F.conv2d(pred_f * pred_f, kernel, padding=pad, groups=channels) - mu_p_sq
-        sigma_t_sq = F.conv2d(target_f * target_f, kernel, padding=pad, groups=channels) - mu_t_sq
-        sigma_pt = F.conv2d(pred_f * target_f, kernel, padding=pad, groups=channels) - mu_pt
-
-        # Clamp variances to avoid negative values from numerical precision
-        sigma_p_sq = sigma_p_sq.clamp(min=0.0)
-        sigma_t_sq = sigma_t_sq.clamp(min=0.0)
-
-        numerator = (2.0 * mu_pt + c1) * (2.0 * sigma_pt + c2)
-        denominator = (mu_p_sq + mu_t_sq + c1) * (sigma_p_sq + sigma_t_sq + c2)
-
-        # Stay in float32 — avoids fp16 gradient overflow in AMP backward
-        return (numerator / (denominator + eps)).mean()
+    return _ssim_float32(
+        pred.float(),
+        target.float(),
+        window_size=window_size,
+        sigma=sigma,
+        data_range=data_range,
+        eps=eps,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -230,24 +264,36 @@ class ThermalSRLoss(nn.Module):
 # Gaussian blur for highpass computation
 # ---------------------------------------------------------------------------
 
+def _gaussian_blur_2d_float32(x_f: torch.Tensor, sigma: float) -> torch.Tensor:
+    """Separable Gaussian blur core in float32."""
+
+    ks = int(4 * sigma + 0.5) * 2 + 1
+    coords = torch.arange(ks, device=x_f.device, dtype=torch.float32) - (ks - 1) / 2.0
+    g = torch.exp(-coords.square() / (2.0 * sigma * sigma))
+    g = g / g.sum()
+    c = x_f.shape[1]
+    pad = ks // 2
+    k_h = g.view(1, 1, 1, -1).expand(c, 1, 1, ks).contiguous()
+    k_v = g.view(1, 1, -1, 1).expand(c, 1, ks, 1).contiguous()
+    out = F.conv2d(F.pad(x_f, (pad, pad, 0, 0), mode="reflect"), k_h, groups=c)
+    return F.conv2d(F.pad(out, (0, 0, pad, pad), mode="reflect"), k_v, groups=c)
+
+
+@torch.amp.custom_fwd(cast_inputs=torch.float32, device_type="cuda")
+def _gaussian_blur_2d_cuda(x: torch.Tensor, sigma: float) -> torch.Tensor:
+    """CUDA blur forward: single fp32 cast, no nested autocast(False) bubble."""
+
+    return _gaussian_blur_2d_float32(x, sigma)
+
+
 def gaussian_blur_2d(x: torch.Tensor, sigma: float) -> torch.Tensor:
-    """Separable Gaussian blur for BCHW tensors. AMP-safe (float32 internal)."""
+    """Separable Gaussian blur for BCHW tensors. AMP-safe via custom_fwd fp32 ops."""
 
     if sigma <= 0:
         return x
-    with torch.amp.autocast(device_type=x.device.type, enabled=False):
-        x_f = x.float()
-        ks = int(4 * sigma + 0.5) * 2 + 1
-        coords = torch.arange(ks, device=x_f.device, dtype=torch.float32) - (ks - 1) / 2.0
-        g = torch.exp(-coords.square() / (2.0 * sigma * sigma))
-        g = g / g.sum()
-        c = x_f.shape[1]
-        pad = ks // 2
-        k_h = g.view(1, 1, 1, -1).expand(c, 1, 1, ks).contiguous()
-        k_v = g.view(1, 1, -1, 1).expand(c, 1, ks, 1).contiguous()
-        out = F.conv2d(F.pad(x_f, (pad, pad, 0, 0), mode="reflect"), k_h, groups=c)
-        out = F.conv2d(F.pad(out, (0, 0, pad, pad), mode="reflect"), k_v, groups=c)
-        return out
+    if x.is_cuda:
+        return _gaussian_blur_2d_cuda(x, sigma)
+    return _gaussian_blur_2d_float32(x.float(), sigma)
 
 
 def forward_model_loss(
@@ -256,8 +302,18 @@ def forward_model_loss(
     *,
     scale: int = 2,
     psf_sigma_lr_px: float = 0.5,
+    band: str = "full",
+    band_sigma_lr_px: float = 5.0,
 ) -> torch.Tensor:
-    """Blur HR prediction by the PSF and block-average to the LR observation."""
+    """Blur HR prediction by the PSF and block-average to the LR observation.
+
+    When *band* is ``"highpass"``, both the downsampled prediction and the
+    observation are highpass-filtered (subtract Gaussian blur at
+    *band_sigma_lr_px*) before computing MSE.  This restricts the consistency
+    constraint to the high-frequency band where edge brightness and width live,
+    avoiding the low-frequency gradient conflict that caused oscillation
+    plateaus with full-band forward model (ACL-005).
+    """
 
     if pred.ndim != 4 or lr_observation.ndim != 4:
         raise ValueError("pred and lr_observation must have shape (B, C, H, W)")
@@ -266,10 +322,16 @@ def forward_model_loss(
         raise ValueError("scale must be > 0")
     if pred.shape[-2] % s != 0 or pred.shape[-1] % s != 0:
         raise ValueError("pred spatial shape must be divisible by scale")
+    if band not in ("full", "highpass"):
+        raise ValueError(f"band must be 'full' or 'highpass', got {band!r}")
     blurred = gaussian_blur_2d(pred, float(psf_sigma_lr_px) * s)
     down = F.avg_pool2d(blurred, kernel_size=s, stride=s)
     if down.shape != lr_observation.shape:
         raise ValueError(f"forward-model shape mismatch: {down.shape} vs {lr_observation.shape}")
+    if band == "highpass":
+        sigma = float(band_sigma_lr_px)
+        down = down - gaussian_blur_2d(down, sigma)
+        lr_observation = lr_observation - gaussian_blur_2d(lr_observation, sigma)
     return F.mse_loss(down, lr_observation)
 
 
@@ -315,6 +377,8 @@ class ContourSRLoss(nn.Module):
         forward_model_weight: float = 0.0,
         forward_model_psf_sigma: float = 1.0,
         forward_model_scale: int = 2,
+        forward_model_band: str = "full",
+        forward_model_band_sigma: float = 5.0,
     ) -> None:
         super().__init__()
         for name, val in [
@@ -329,11 +393,14 @@ class ContourSRLoss(nn.Module):
             ("laplacian_weight", laplacian_weight),
             ("forward_model_weight", forward_model_weight),
             ("forward_model_psf_sigma", forward_model_psf_sigma),
+            ("forward_model_band_sigma", forward_model_band_sigma),
         ]:
             if val < 0:
                 raise ValueError(f"{name} must be >= 0")
         if int(forward_model_scale) <= 0:
             raise ValueError("forward_model_scale must be > 0")
+        if forward_model_band not in ("full", "highpass"):
+            raise ValueError(f"forward_model_band must be 'full' or 'highpass', got {forward_model_band!r}")
         self.highpass_weight = float(highpass_weight)
         self.highpass_sigma = float(highpass_sigma)
         self.edge_weight = float(edge_weight)
@@ -346,6 +413,8 @@ class ContourSRLoss(nn.Module):
         self.forward_model_weight = float(forward_model_weight)
         self.forward_model_psf_sigma = float(forward_model_psf_sigma)
         self.forward_model_scale = int(forward_model_scale)
+        self.forward_model_band = str(forward_model_band)
+        self.forward_model_band_sigma = float(forward_model_band_sigma)
 
     def forward(
         self,
@@ -419,6 +488,8 @@ class ContourSRLoss(nn.Module):
                 lr_observation,
                 scale=self.forward_model_scale,
                 psf_sigma_lr_px=self.forward_model_psf_sigma,
+                band=self.forward_model_band,
+                band_sigma_lr_px=self.forward_model_band_sigma,
             )
 
         total = (

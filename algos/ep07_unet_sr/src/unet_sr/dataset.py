@@ -12,8 +12,11 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, Sampler
 
+from tcforge.classical_sr import drizzle_features
 from tcforge.reconstruct import reconstruct_hr_temperature
 from tcforge.storage import load_scene_compact
+
+from .mask_weights import compute_mask_loss_weights_np
 
 
 
@@ -227,7 +230,13 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         patches_per_scene: int = 64,
         max_scene_cache: int = 4,
         residual: bool = False,
+        input_mode: str = "lr",
         return_metadata: bool = True,
+        thin_boost: float = 1.0,
+        gap_boost: float = 1.0,
+        loss_weight_max_width_px: int = 3,
+        min_burst_frames: int = 30,
+        shift_noise_std_px: float = 0.05,
     ) -> None:
         if scale <= 0:
             raise ValueError("scale must be positive")
@@ -235,12 +244,16 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
             raise ValueError("patches_per_scene must be positive")
         if max_scene_cache <= 0:
             raise ValueError("max_scene_cache must be positive")
+        if input_mode not in ("lr", "hybrid_drizzle2x"):
+            raise ValueError(f"input_mode must be 'lr' or 'hybrid_drizzle2x', got {input_mode!r}")
 
         self.residual = bool(residual)
+        self.input_mode = str(input_mode)
         self.data_scale = int(scale)
+        self.min_burst_frames = int(min_burst_frames)
+        self.shift_noise_std_px = float(shift_noise_std_px)
 
-        # In residual mode, input and output are both at HR resolution
-        effective_scale = 1 if self.residual else int(scale)
+        effective_scale = 1 if (self.residual or self.input_mode == "hybrid_drizzle2x") else int(scale)
         if patch_size_hr <= 0 or patch_size_hr % effective_scale != 0:
             raise ValueError("patch_size_hr must be positive and divisible by effective scale")
 
@@ -252,9 +265,11 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         self.patches_per_scene = int(patches_per_scene)
         self.max_scene_cache = int(max_scene_cache)
         self.return_metadata = bool(return_metadata)
+        self.thin_boost = float(thin_boost)
+        self.gap_boost = float(gap_boost)
+        self.loss_weight_max_width_px = int(loss_weight_max_width_px)
+        self._need_loss_weights = self.thin_boost > 1.0 or self.gap_boost > 1.0
         self._cache: OrderedDict[int, dict[str, Any]] = OrderedDict()
-        # Shared epoch counter: survives fork into persistent DataLoader workers.
-        # Main process writes via set_epoch(); workers read in __getitem__.
         self._shared_epoch = mp.Value("i", 0)
 
     def __len__(self) -> int:
@@ -274,10 +289,56 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         """Current epoch, readable from any worker process."""
         return self._shared_epoch.value
 
+    def _select_burst(
+        self,
+        lr_burst: np.ndarray,
+        shifts: np.ndarray,
+        rng: np.random.Generator,
+    ) -> tuple[np.ndarray, np.ndarray]:
+        """Randomly subsample burst frames and add shift noise for augmentation."""
+
+        n_frames = lr_burst.shape[0]
+        keep_frac = rng.uniform(0.6, 1.0)
+        n_keep = max(self.min_burst_frames, int(round(n_frames * keep_frac)))
+        n_keep = min(n_keep, n_frames)
+        indices = rng.choice(n_frames, size=n_keep, replace=False)
+        indices.sort()
+        burst_sub = np.asarray(lr_burst[indices], dtype=np.float32)
+        shifts_sub = shifts[indices].copy()
+        if self.shift_noise_std_px > 0:
+            shifts_sub += rng.normal(0, self.shift_noise_std_px, size=shifts_sub.shape).astype(np.float32)
+        return burst_sub, shifts_sub
+
+    def _build_hybrid_obs(
+        self,
+        obs_1x: np.ndarray,
+        lr_burst: np.ndarray,
+        shifts: np.ndarray,
+        epoch: int,
+        scene_index: int,
+    ) -> np.ndarray:
+        """Build 8-channel 2x observation: 5ch fused↑2x + 3ch scatter drizzle@2x."""
+
+        from scipy.ndimage import zoom as scipy_zoom
+
+        rng = np.random.default_rng([self.seed, epoch, scene_index, 0xBEEF])
+        burst_sub, shifts_sub = self._select_burst(lr_burst, shifts, rng)
+        drz = drizzle_features(burst_sub, shifts_sub, scale=self.data_scale, kernel="bilinear")
+        obs_up = scipy_zoom(obs_1x, (1, self.data_scale, self.data_scale), order=1).astype(np.float32)
+        return np.concatenate([obs_up, drz], axis=0).astype(np.float32, copy=False)
+
     def _load_cached(self, scene_index: int) -> dict[str, Any]:
         cached = self._cache.get(scene_index)
         if cached is not None:
             self._cache.move_to_end(scene_index)
+            if self.input_mode == "hybrid_drizzle2x":
+                epoch = self._epoch
+                if cached.get("_hybrid_epoch") != epoch:
+                    cached["obs_features"] = self._build_hybrid_obs(
+                        cached["_obs_1x"], cached["_lr_burst"], cached["_shifts"],
+                        epoch, scene_index,
+                    )
+                    cached["_hybrid_epoch"] = epoch
             return cached
 
         scene = load_scene_compact(self.scene_paths[scene_index])
@@ -294,8 +355,32 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         if hr_target.shape != hr_edge.shape:
             raise ValueError(f"hr_target/hr_edge shape mismatch: {hr_target.shape} vs {hr_edge.shape}")
 
-        if self.residual:
-            # Upsample obs features from LR to HR, concat classical SR
+        hr_mask = np.asarray(scene["hr_mask"], dtype=np.float32)
+
+        if self.input_mode == "hybrid_drizzle2x":
+            lr_burst = scene.get("lr_burst")
+            if lr_burst is None:
+                raise ValueError(
+                    f"scene {scene['scene_dir']} has no lr_burst; "
+                    "hybrid_drizzle2x requires save_lr_burst=true in pool config"
+                )
+            lr_burst = np.asarray(lr_burst, dtype=np.float32)
+            shifts = np.asarray(scene["shifts"], dtype=np.float32)
+            epoch = self._epoch
+            obs_hybrid = self._build_hybrid_obs(obs, lr_burst, shifts, epoch, scene_index)
+            packed = {
+                "scene_dir": scene["scene_dir"],
+                "metadata": metadata,
+                "obs_features": obs_hybrid,
+                "hr_target": hr_target,
+                "hr_edge": hr_edge,
+                "hr_mask": hr_mask,
+                "_obs_1x": obs,
+                "_lr_burst": lr_burst,
+                "_shifts": shifts,
+                "_hybrid_epoch": epoch,
+            }
+        elif self.residual:
             from scipy.ndimage import zoom
             obs_hr = zoom(obs, (1, self.data_scale, self.data_scale), order=1).astype(np.float32)
             classical_sr = scene.get("classical_sr")
@@ -306,21 +391,29 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
                 )
             classical_sr = np.asarray(classical_sr, dtype=np.float32)
             obs = np.concatenate([obs_hr, classical_sr[None, :, :]], axis=0)
+            packed = {
+                "scene_dir": scene["scene_dir"],
+                "metadata": metadata,
+                "obs_features": obs,
+                "hr_target": hr_target,
+                "hr_edge": hr_edge,
+                "hr_mask": hr_mask,
+            }
+        else:
+            packed = {
+                "scene_dir": scene["scene_dir"],
+                "metadata": metadata,
+                "obs_features": obs,
+                "hr_target": hr_target,
+                "hr_edge": hr_edge,
+                "hr_mask": hr_mask,
+            }
 
-        if hr_target.shape != (obs.shape[1] * self.scale, obs.shape[2] * self.scale):
+        if packed["hr_target"].shape != (packed["obs_features"].shape[1] * self.scale, packed["obs_features"].shape[2] * self.scale):
             raise ValueError(
                 f"scene {scene['scene_dir']} has incompatible obs/target shapes: "
-                f"{obs.shape} -> {hr_target.shape} at effective scale {self.scale}"
+                f"{packed['obs_features'].shape} -> {packed['hr_target'].shape} at effective scale {self.scale}"
             )
-        hr_mask = np.asarray(scene["hr_mask"], dtype=np.float32)
-        packed = {
-            "scene_dir": scene["scene_dir"],
-            "metadata": metadata,
-            "obs_features": obs,
-            "hr_target": hr_target,
-            "hr_edge": hr_edge,
-            "hr_mask": hr_mask,
-        }
         self._cache[scene_index] = packed
         self._cache.move_to_end(scene_index)
         while len(self._cache) > self.max_scene_cache:
@@ -402,6 +495,18 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
             "hr_edge": torch.from_numpy(edge_patch[None, :, :].astype(np.float32, copy=False)),
             "hr_mask": torch.from_numpy(mask_patch[None, :, :].astype(np.float32, copy=False)),
         }
+
+        if self._need_loss_weights:
+            thin_np, gap_np = compute_mask_loss_weights_np(
+                mask_patch,
+                thin_boost=self.thin_boost,
+                gap_boost=self.gap_boost,
+                max_width_px=self.loss_weight_max_width_px,
+            )
+            if thin_np is not None:
+                sample["thin_weight"] = torch.from_numpy(thin_np.astype(np.float32, copy=False))
+            if gap_np is not None:
+                sample["gap_weight"] = torch.from_numpy(gap_np.astype(np.float32, copy=False))
 
         if self.return_metadata:
             metadata = scene["metadata"]

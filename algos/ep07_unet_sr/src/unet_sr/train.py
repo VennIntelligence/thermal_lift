@@ -13,7 +13,6 @@ from pathlib import Path
 import numpy as np
 import torch
 import torch.distributed as dist
-from scipy import ndimage
 from torch.amp import GradScaler, autocast
 from torch.nn.utils import clip_grad_norm_
 from torch.nn.parallel import DistributedDataParallel as DDP
@@ -78,69 +77,6 @@ def _to_device_tensor(tensor: torch.Tensor, *, device: torch.device, channels_la
     if channels_last and out.ndim == 4:
         out = out.contiguous(memory_format=torch.channels_last)
     return out
-
-
-def _narrow_gap_mask(binary: np.ndarray, *, max_width_px: int) -> np.ndarray:
-    """Detect background pixels with structure on opposing sides nearby."""
-
-    bg = ~binary
-    if not np.any(bg):
-        return np.zeros_like(binary, dtype=bool)
-    bg_dist = ndimage.distance_transform_edt(bg)
-    width_est = 2.0 * bg_dist - 1.0
-    narrow = bg & (width_est <= float(max_width_px))
-    radius = max(1, int(max_width_px) + 1)
-
-    left = np.zeros_like(binary, dtype=bool)
-    right = np.zeros_like(binary, dtype=bool)
-    up = np.zeros_like(binary, dtype=bool)
-    down = np.zeros_like(binary, dtype=bool)
-    for offset in range(1, radius + 1):
-        left[:, offset:] |= binary[:, :-offset]
-        right[:, :-offset] |= binary[:, offset:]
-        up[offset:, :] |= binary[:-offset, :]
-        down[:-offset, :] |= binary[offset:, :]
-    between_structures = (left & right) | (up & down)
-    return narrow & between_structures
-
-
-def _make_mask_loss_weights(
-    hr_mask: torch.Tensor,
-    *,
-    thin_boost: float,
-    gap_boost: float,
-    max_width_px: int = 3,
-) -> tuple[torch.Tensor | None, torch.Tensor | None]:
-    """Build optional thin-structure and narrow-gap loss multipliers.
-
-    The input mask may be soft coverage; distance transforms operate on the
-    thresholded support so AA edge pixels do not become their own morphology.
-    """
-
-    need_thin = float(thin_boost) > 1.0
-    need_gap = float(gap_boost) > 1.0
-    if not need_thin and not need_gap:
-        return None, None
-    if hr_mask.ndim != 4:
-        raise ValueError("hr_mask must have shape (B, C, H, W)")
-
-    mask_np = hr_mask.detach().cpu().numpy()
-    thin = np.ones(mask_np.shape, dtype=np.float32) if need_thin else None
-    gap = np.ones(mask_np.shape, dtype=np.float32) if need_gap else None
-    for index in np.ndindex(mask_np.shape[:2]):
-        binary = mask_np[index] >= 0.5
-        if need_thin:
-            struct_dist = ndimage.distance_transform_edt(binary)
-            width_est = 2.0 * struct_dist - 1.0
-            thin_roi = binary & (width_est <= float(max_width_px))
-            thin[index][thin_roi] = float(thin_boost)  # type: ignore[index]
-        if need_gap:
-            gap_roi = _narrow_gap_mask(binary, max_width_px=max_width_px)
-            gap[index][gap_roi] = float(gap_boost)  # type: ignore[index]
-
-    thin_tensor = None if thin is None else torch.from_numpy(thin)
-    gap_tensor = None if gap is None else torch.from_numpy(gap)
-    return thin_tensor, gap_tensor
 
 
 def _save_checkpoint(
@@ -251,8 +187,16 @@ def train(config: TrainingConfig) -> Path:
         patches_per_scene=config.patches_per_scene,
         max_scene_cache=config.max_scene_cache,
         residual=config.residual,
+        input_mode=config.input_mode,
         return_metadata=False,
+        thin_boost=config.thin_boost,
+        gap_boost=config.gap_boost,
     )
+    if is_main and (config.thin_boost > 1.0 or config.gap_boost > 1.0):
+        print(
+            "Thin/gap loss weights precomputed in DataLoader workers "
+            f"(thin_boost={config.thin_boost:g}, gap_boost={config.gap_boost:g})"
+        )
     sampler = SceneInterleavedSampler(
         n_scenes=len(dataset.scene_paths),
         patches_per_scene=dataset.patches_per_scene,
@@ -275,12 +219,14 @@ def train(config: TrainingConfig) -> Path:
         prefetch_factor=config.prefetch_factor if config.num_workers > 0 else None,
     )
 
-    model_scale = 1 if config.residual else config.scale
+    model_scale = 1 if (config.residual or config.input_mode == "hybrid_drizzle2x") else config.scale
     model = ThermalSRUNet(
         in_channels=config.in_channels,
         out_channels=config.out_channels,
         base_channels=config.base_channels,
         scale=model_scale,
+        hr_upsampler=config.hr_upsampler,
+        hr_res_blocks=config.hr_res_blocks,
     ).to(device)
     if config.channels_last and device.type == "cuda":
         model = model.to(memory_format=torch.channels_last)
@@ -304,6 +250,8 @@ def train(config: TrainingConfig) -> Path:
             forward_model_weight=config.forward_model_weight,
             forward_model_psf_sigma=config.forward_model_psf_sigma,
             forward_model_scale=config.scale,
+            forward_model_band=config.forward_model_band,
+            forward_model_band_sigma=config.forward_model_band_sigma,
         )
     else:
         criterion = ThermalSRLoss(edge_weight=config.edge_loss_weight, ssim_weight=config.ssim_loss_weight)
@@ -341,8 +289,11 @@ def train(config: TrainingConfig) -> Path:
         n_params = sum(p.numel() for p in _unwrap_model(model).parameters())
         print(f"Model parameters: {n_params:,}")
         print(f"Loss function: {config.loss_type}")
+        print(f"HR upsampler: {config.hr_upsampler} (hr_res_blocks={config.hr_res_blocks})")
         if config.residual:
             print(f"Residual mode: {config.in_channels}ch@{config.scale}x input → model(scale=1) → residual + classical_sr")
+        if config.input_mode == "hybrid_drizzle2x":
+            print(f"Hybrid drizzle 2x mode: {config.in_channels}ch@2x input (5ch fused↑2x + 3ch drizzle@2x) → model(scale=1) → direct predict")
 
     model.train()
     progress = tqdm(
@@ -367,15 +318,14 @@ def train(config: TrainingConfig) -> Path:
                 target = _to_device_tensor(batch["hr_target"], device=device, channels_last=config.channels_last)
                 thin_weight = gap_weight = None
                 if isinstance(criterion, ContourSRLoss):
-                    thin_cpu, gap_cpu = _make_mask_loss_weights(
-                        batch["hr_mask"],
-                        thin_boost=config.thin_boost,
-                        gap_boost=config.gap_boost,
-                    )
-                    if thin_cpu is not None:
-                        thin_weight = _to_device_tensor(thin_cpu, device=device, channels_last=config.channels_last)
-                    if gap_cpu is not None:
-                        gap_weight = _to_device_tensor(gap_cpu, device=device, channels_last=config.channels_last)
+                    if "thin_weight" in batch:
+                        thin_weight = _to_device_tensor(
+                            batch["thin_weight"], device=device, channels_last=config.channels_last,
+                        )
+                    if "gap_weight" in batch:
+                        gap_weight = _to_device_tensor(
+                            batch["gap_weight"], device=device, channels_last=config.channels_last,
+                        )
 
                 with autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
                     pred = model(obs)

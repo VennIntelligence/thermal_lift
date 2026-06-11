@@ -12,6 +12,7 @@ dependencies = [
     "tqdm>=4.66",
     "pytest>=8.0",
     "tcforge",
+    "thermal-core",
     "tensorboard>=2.15",
     "matplotlib>=3.8",
     "pandas>=3.0.3",
@@ -22,6 +23,7 @@ package = true
 
 [tool.uv.sources]
 tcforge = { path = "../../tcforge", editable = true }
+thermal-core = { path = "../../core", editable = true }
 
 [build-system]
 requires = ["hatchling"]

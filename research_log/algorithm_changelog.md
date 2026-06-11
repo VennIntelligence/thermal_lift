@@ -8,6 +8,111 @@
 
 ## 变更记录
 
+### [ACL-017] 2026-06-11 — V9B: highpass-band forward consistency loss
+
+**问题诊断**:
+- v8.1a conservative loss 把 `forward_model_weight` 降到 0 后，loss 中没有任何一项把输出锚定到观测；synthetic loss 收敛后，网络在结构 loss 先验驱动下持续把边画亮、对比拉大（real_eval artifact 0.39→0.64，corr 0.76→0.69 单调漂移）。
+- 全频 forward model 的梯度经过 PSF 低通对所有频段施加「拉回模糊解」的力，与 highpass/grad_vector 在同一像素上方向冲突（v6 ACL-005 3K 步震荡平台的根因）。
+
+**修改内容**:
+1. `losses.py`: `forward_model_loss` 新增 `band: str = "full"` 和 `band_sigma_lr_px: float = 5.0` 参数。`band="highpass"` 时，对 downsampled pred 和 obs 各减去 σ=band_sigma 的高斯模糊后再算 MSE，放过低频段。高斯模糊复用 ACL-011 `custom_fwd` 包装。
+2. `ContourSRLoss`: 透传 `forward_model_band` / `forward_model_band_sigma`。
+3. `config.py`: 新增 `--forward-model-band {full,highpass}`（默认 full）和 `--forward-model-band-sigma`（默认 5.0）CLI 参数。
+4. `train.py`: 传递新参数到 ContourSRLoss。
+5. 测试: band=full 回归（与旧实现数值一致）、highpass DC 不变性、HF 扰动检测、AMP 有限性。
+
+**预期效果**:
+- 带限版只在边缘亮度/宽度所在的高频段施加观测一致性，低频由 synthetic MSE 锚定，两者不打架。
+- 在合成域中该项不增加信息量，但改变函数族——惩罚重投影偏离输入观测的解，使迁移到真实数据后抑制 40K+ 漂移。
+- 风险：若出现震荡平台或整体变钝，先降 `forward_model_weight` 到 0.05 重跑。
+
+**推荐参数**: `--forward-model-weight 0.1 --forward-model-psf-sigma 0.5 --forward-model-band highpass --forward-model-band-sigma 5.0`（其余与 v8.1a 一致）
+
+**训练结果**: _(TODO：训练完成后回填)_
+- 输出目录: `outputs/ep07_v9b_fwd_consistency`
+- 视觉效果: _TODO_
+- 关键指标: _TODO_
+- 结论: _TODO_
+
+**涉及文件**: `losses.py`, `config.py`, `train.py`, `mask_weights.py`, `scripts/run_training.md`, `tests/test_model_losses.py`, `tests/test_config.py`
+
+---
+
+### [ACL-016] 2026-06-11 — V9A: hybrid 2x drizzle 输入模式
+
+**问题诊断**:
+- v8.1a/b 两臂中心最细线模糊完全相同，与 loss 温度和 HR head 无关。根因：5 个输入通道全部是 1x 网格统计量（aligned_mean/median/coverage/variance/highpass），248 帧的亚像素相位信息在进网络前已坍缩。
+- EP15 M4 证明 2x 网格经典方法能恢复 12 µm 频带信息（bare/MAP-TV split-half FRC 0.575→0.947）——信息在数据里，只是没喂给网络。
+
+**修改内容**:
+1. `configs/synthetic/training_pool_2x_burst.json`: 新增训练池配置，`save_lr_burst=true`、`compute_classical_sr=false`。场景几何/物理参数与旧池一致。
+2. `dataset.py`: 新增 `input_mode="hybrid_drizzle2x"` 模式。加载 `lr_burst + shifts`；每 (scene, epoch) 随机保留 60-100% 帧（`min_burst_frames=30`）并加 `shift_noise_std_px=0.05` 高斯噪声；调 `drizzle_features(scale=2, kernel="bilinear")` 得 3 通道 @ 960×1280；5ch 1x obs 上采到 2x；拼成 8ch @ 2x。Effective scale=1，同坐标裁剪 patch。
+3. `config.py`: 新增 `--input-mode {lr,hybrid_drizzle2x}` CLI 参数。hybrid 自动设 `in_channels=8`。校验禁止 hybrid + `forward_model_weight>0`（obs[:, 0:1] 不是合法 1x LR 观测）。
+4. `model.py`: 无改动（`scale=1` + `in_channels=8` 由构造参数覆盖）。
+5. `train.py`: 根据 `input_mode` 推导 `model_scale`；传递 `input_mode` 到 dataset。
+6. `inference.py`: `infer_from_burst` 新增 hybrid 路径：1x fused↑2x + scatter drizzle@2x → 8ch → tile 推理（scale=1）。
+7. `real_eval.py`: 从 `training_config.input_mode` 自动走对应推理路径。
+8. 测试: hybrid 样本形状 (8,256,256)、增强同步、burst 子集可复现/下限生效、epoch 切换产生不同 burst、旧路径 `input_mode="lr"` 回归。
+
+**预期效果**:
+- 中心最细线：亚像素信息直接进网络，不再依赖合成先验猜测。
+- 边缘锯齿：2x drizzle 通道编码边缘亚像素位置，网络不必把边吸附到 1x 网格。
+- 风险：drizzle lattice 格纹可能被网络当结构学习；DataLoader 吞吐可能成为瓶颈。
+
+**推荐参数**: `--input-mode hybrid_drizzle2x --training-pool-dir data/synthetic/training_pool_2x_aa_burst`（其余与 v8.1a 一致，`forward_model_weight=0`）
+
+**训练结果**: _(TODO：训练完成后回填)_
+- 输出目录: `outputs/ep07_v9a_hybrid_drizzle`
+- 视觉效果: _TODO_
+- 关键指标: _TODO_
+- 结论: _TODO_
+
+**涉及文件**: `configs/synthetic/training_pool_2x_burst.json`, `dataset.py`, `config.py`, `train.py`, `inference.py`, `real_eval.py`, `mask_weights.py`, `scripts/run_training.md`, `tests/test_dataset.py`, `tests/test_config.py`, `tests/test_inference.py`
+
+---
+
+### [ACL-015] 2026-06-10 — EP07 v8.1 A/B 归因实验：loss 降温 vs PixelShuffle head
+
+**问题诊断**:
+- v8 AA 训练池消除了部分二值 target 锯齿，但真实数据 `eval_real` 在 30K 之后出现更醒目的亮边、边缘膨胀和细密 2x 相位网格。
+- 当前现象不是单点问题：final HR head 使用 bilinear upsample 后接带 GroupNorm 的 3x3 refine，容易放大 2x 相位纹理；同时 `structure_boost=4`、`grad_vector=0.3`、`thin_boost=6`、`gap_boost=4`、`laplacian=0.1`、全频 `forward_model=0.1` 叠加后，边缘区域 loss 权重过热，鼓励网络把边缘画亮画宽。
+- 直接把 PixelShuffle、forward consistency、warmup 和多项权重一起改，会导致下一轮仍无法判断主因。
+
+**修改内容**:
+1. 设计两条并行训练线：
+   - `V8_1A`: 保留现有 bilinear HR head，只把 loss 降温，用于验证膨胀是否主要来自结构权重过热。
+   - `V8_1B`: 使用 PixelShuffle + ICNR + 1 个无归一化 HR residual block，并使用与 A 完全相同的 conservative loss，用于隔离 final upsampler/head 的 2x 相位伪影贡献。
+2. `model.py`: 为 `ThermalSRUNet` 增加 `hr_upsampler={bilinear,pixelshuffle}` 和 `hr_res_blocks` 参数；默认保持旧 bilinear 行为，PixelShuffle 分支显式启用。
+3. `config.py` / `train.py`: 将 HR upsampler 参数纳入 CLI、config.json 和模型构造，保证训练产物可复现。
+4. `scripts/run_training.md`: 写入 V8_1A / V8_1B 推荐命令。
+5. 测试覆盖默认 bilinear 输出尺寸、PixelShuffle 输出尺寸和无 BatchNorm 约束。
+
+**预期效果**:
+- 若 A 已明显压住亮边/膨胀，说明 loss 过热是主因；若 B 相比 A 进一步减少 2x 网格，说明 PixelShuffle head 对 final 相位纹理有效。
+- 若 A/B 都变软，说明 conservative loss 降温过度，下一轮再考虑 highpass-only forward model 或结构权重 warmup。
+- 风险: PixelShuffle 分支不能加载旧 bilinear checkpoint；必须通过 config 中的 `hr_upsampler` 重建模型。
+
+**推荐参数**:
+- `V8_1A`: `--hr-upsampler bilinear --mse-loss-weight 0.3 --highpass-loss-weight 0.8 --structure-boost 2.0 --grad-vector-weight 0.15 --laplacian-weight 0.0 --forward-model-weight 0.0 --thin-boost 3.0 --gap-boost 2.0`
+- `V8_1B`: `--hr-upsampler pixelshuffle --hr-res-blocks 1` 加同一套 V8_1A loss 参数。
+
+**训练结果**: _(2026-06-11 回填)_
+- 输出目录: `outputs/ep07_v8_1a_loss_cooldown`, `outputs/ep07_v8_1b_pixelshuffle`
+- 视觉效果:
+  - **V8_1A (bilinear + conservative loss)**: 10K 中心棋盘纹最重（类似 v8 初期），20K 后除中心外棋盘消失、无膨胀；30–40K 棋盘减小、边框由糊变清晰但开始膨胀；60K 对比度最大、边框最膨胀。中心区域只有最细的几条线仍糊，稍粗的线锐利可辨结构；边缘锯齿相对 1B 有改善。
+  - **V8_1B (PixelShuffle + 同一 loss)**: 10K 有晕染但比 v8 初版轻；20K 提亮、对比度增强、边框膨胀；30K 边框收回变清晰；至 60K 对比度持续增强。边缘锯齿未改善，且中等边框之间出现条纹状亮色伪影；中心区域同样模糊。
+- 关键指标（synthetic loss 两臂均在 ~40–45K 收敛后平坦；real_eval 248 帧 zoom3x）:
+  - `eval_real/artifact_score`（越小越好）随训练**单调上升**: 1A 0.390(10K)→0.643(60K)，1B 0.413→0.709；1B 全程高于 1A。
+  - `eval_real/raw_control_corr`（与 raw bicubic 控制图的 highpass 相关，反映观测保真）**单调下降**: 1A 0.756→0.689，1B 0.747→0.667。对照 EP10 TGV 的 0.916 / artifact 0.695，UNet 输出对真实观测的锚定明显偏弱。
+- 结论:
+  1. **PixelShuffle head 归因失败**: 1B 未减轻锯齿，反而引入新的条纹伪影且 artifact_score 全程更高 → final upsampler 不是 2x 相位伪影/锯齿主因，后续保留 bilinear head，放弃 PixelShuffle 分支。
+  2. **Loss 降温部分有效**: 1A 锯齿改善、早期无膨胀，说明结构权重过热确实贡献了亮边/膨胀；但 40K 后 synthetic loss 已平坦而真实数据上对比度/膨胀仍持续漂移（artifact ↑ / corr ↓），说明**缺失观测一致性约束**（`forward_model_weight=0`）使无约束方向在合成先验驱动下继续漂移。
+  3. **中心最细线模糊对两臂完全不变** → 与 loss 温度和 HR head 无关，指向前端输入信息瓶颈：5 个输入通道全部是 1x 网格统计量，248 帧的亚像素相位信息在进网络前已被坍缩；而 EP10/EP15 证明 2x 网格经典方法可恢复 12 µm 频带信息（FRC 0.575→0.947）。下一步主攻方向为 2x-grid drizzle/classical-SR 输入通道 + 温和 highpass-band forward consistency。
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/model.py`, `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep11_dl_benchmark/scripts/run_unet_vs_drizzle_2x.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`, `algos/ep07_unet_sr/tests/test_config.py`, `algos/ep07_unet_sr/scripts/run_training.md`
+
+---
+
 ### [ACL-014] 2026-06-10 — 修复 EP12 4x 增强后 drizzle/coverage 错位并默认启用 burst augmentation
 
 **问题诊断**:
@@ -116,6 +221,52 @@ CUDA_VISIBLE_DEVICES=0 uv run python scripts/run_m4_deconv_anchor.py --chunk-siz
 - 结论: M4 是有限正向、但不强阳性的经典基准。后续 4x 网络必须同时优于 MAP-TV 的 FRC 频带一致性和 zigzag FWHM / dip 指标，否则不予采纳。
 
 **涉及文件**: `algos/ep15_info_limit/scripts/run_m4_deconv_anchor.py`
+
+---
+
+### [ACL-011] 2026-06-10 — SSIM / Gaussian blur 改用 custom_fwd，消除 AMP 气泡
+
+**问题诊断**:
+- `ContourSRLoss` 中 `ssim()` 与 `gaussian_blur_2d()` 在 AMP 训练步内使用 `autocast(enabled=False)` + 手动 `.float()`，会在 fp16 主通路中插入 fp32 子图，造成 dtype 切换气泡并降低 GPU 吞吐。
+- 原注释指出 fp16 Gaussian 统计会 NaN，因此不能简单删掉 fp32 保护。
+
+**修改内容**:
+1. `losses.py`: 抽取 `_ssim_float32` / `_gaussian_blur_2d_float32` 核心实现。
+2. CUDA 路径改用 `@torch.amp.custom_fwd(cast_inputs=torch.float32)` 包装 `_ssim_cuda` / `_gaussian_blur_2d_cuda`，在 AMP 上下文内一次性 cast 到 fp32，避免嵌套 `autocast(False)`。
+3. CPU 路径保持显式 `.float()` fallback。
+4. 新增 `test_contour_sr_loss_finite_under_cuda_amp` 回归测试。
+
+**预期效果**:
+- 保持 SSIM / highpass 统计数值稳定（无 fp16 NaN），同时减少 AMP 气泡、略降 loss 段 kernel 切换开销。
+
+**推荐参数**: 无需 CLI 变更。
+
+**训练结果**: _(v8 重训后填写)_
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/losses.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`
+
+---
+
+### [ACL-010] 2026-06-10 — thin/gap 权重图下沉 DataLoader worker，消除主进程 CPU 瓶颈
+
+**问题诊断**:
+- v8 在 `train.py` 主进程对整 batch 调用 `_make_mask_loss_weights`（逐样本 scipy EDT），batch=128 时约 600 ms/step，GPU 利用率降至 ~50%。
+- 增加 `num_workers` 无效：瓶颈发生在 DataLoader 返回之后的主线程串行段，与 worker 并行无关。
+
+**修改内容**:
+1. 新增 `mask_weights.py`：抽取单 patch 与 batch 版权重图计算逻辑。
+2. `dataset.py`：当 `thin_boost>1` 或 `gap_boost>1` 时，在 `__getitem__` 内对每个 patch 预计算 `thin_weight` / `gap_weight`，由 DataLoader worker 并行执行。
+3. `train.py`：删除主进程 batch 级权重计算，直接消费 batch 中预计算张量。
+
+**预期效果**:
+- mask 权重 CPU 成本分散到 worker，并与 GPU 步通过 prefetch 重叠，恢复 v6 水平 GPU 利用率，同时保留 thin/gap loss 语义。
+- 单 patch EDT（256×256）比 batch=128 主进程循环更轻；总 CPU 算力需求不变，但不再阻塞 GPU。
+
+**推荐参数**: 沿用 v8 `--thin-boost 6 --gap-boost 4`；`num_workers` 保持 v6 水平（6–8）即可。
+
+**训练结果**: _(v8 重训后填写)_
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/mask_weights.py`, `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/tests/test_dataset.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`
 
 ---
 
