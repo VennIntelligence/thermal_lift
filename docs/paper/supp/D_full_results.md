@@ -114,7 +114,7 @@ artifact（↓）/ raw_control_corr（↑），源 `output/ep07_v9_review/ep07_e
 - companion 轨迹图：`output/paper_figures/fig03s_v9a_trajectory.*`（S-F3；V9A 不进主图 F3——红线：proxy 跨输入不可横比）。
 - ⬜ **S-F5 终选**：等 V9C/V10 落地后统一挑「每臂 4 帧（early/canonical/30K/60K）」组版（选帧脚本已就绪，`render_comparison_panels.py` 参数化 checkpoint 列表）。
 
-**D.3 资产依赖**：`output/ep07_v9_review/`（CSV+PNG+cache）；`algos/ep07_unet_sr/outputs/*/eval_real/`；`output/paper_figures/fig03*.{png,pdf}`。
+**D.3 资产依赖**：`output/ep07_v9_review/`（CSV+PNG+cache）；`algos/ep07_unet_sr/outputs/*/eval_real/`；`output/paper_figures/fig03*.{png,pdf}`；学术排版条带 **S-F10** `output/paper_figures/figS10_v9a_strip.{png,pdf}`（`scripts/paper_figures/figS10_v9a_strip.py`，06-12 落地）。
 **D.3 待回填**：⬜ V9C 指标行与视觉帧（等今晚 60K）；⬜ V10 三臂轨迹（等 GPU 实验）；⬜ S-F5 终选组版。
 
 ---
@@ -235,7 +235,7 @@ fused(λ) = (1−λ)·anchor + λ·unet_pred，λ ∈ {0, 0.1, …, 1.0}；ancho
 3. **边界**：fine-window 局部口径 + TGV 参照非 GT（D.0）；λ 在窗口上选出，无独立验证窗 → 终稿如引用「最优 λ」须加 selection-on-test caveat，或 ⬜ 在第二个 held-out 窗口复核（CPU 几分钟，脚本支持改窗口参数）。
 4. ⬜ **V10 对照行**（等 GPU 实验）：三臂 λ∈{0.02,0.05,0.15}（G1.5 标定后定）各自工作点叠加进 `fusion_pareto_overlay.png` 同图。
 
-**D.7 资产依赖**：`algos/ep07_unet_sr/scripts/v9_review/run_fusion_baseline.py`；`output/ep07_v9_review/fusion_*.{csv,md,png}`；`output/ep10_tgv_sr/best_hr_temperature.npy`；cache npy（E.2 重建链）。
+**D.7 资产依赖**：`algos/ep07_unet_sr/scripts/v9_review/run_fusion_baseline.py`；`output/ep07_v9_review/fusion_*.{csv,md,png}`；`output/ep10_tgv_sr/best_hr_temperature.npy`；cache npy（E.2 重建链）；学术排版 Pareto 图 **S-F9** `output/paper_figures/figS09_fusion_pareto.{png,pdf}`（`scripts/paper_figures/figS09_fusion_pareto.py`，06-12 落地）。
 **D.7 待回填**：⬜ 第二验证窗复核；⬜ V10 三臂叠加与判定句。
 
 ---

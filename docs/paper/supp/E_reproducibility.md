@@ -60,7 +60,7 @@ uv run python scripts/build_all_notebooks.py --execute   # 全部 EP notebook + 
 | 图表 | 脚本 + 命令 | 环境 | 输入依赖 | 耗时 |
 |---|---|---|---|---|
 | F1 系统+标定链 | `uv run python scripts/paper_figures/fig01_system_calibration.py`（无参） | root | `configs/*.json`、`m3_sigma/sigma_summary.json` | 秒级 |
-| F2 FRC 曲线+控制组 | ⬜ **脚本待写** `scripts/paper_figures/fig02_frc.py`——从 `m2_frc/{frc_curve,frc_controls,frc_band_table}.csv` 重绘 CVPR 风格（数据齐，纯排版） | root | `output/ep15_info_limit/m2_frc/` | 秒级 |
+| F2 FRC 曲线+控制组 | `uv run python scripts/paper_figures/fig02_frc.py`（同时产出 supp 档案版 figS01） | root | `output/ep15_info_limit/m2_frc/` | 秒级 |
 | F3 null-space drift | `uv run python scripts/plot_drift_trajectories_paper.py [--refresh]` | ep07 | `checkpoint_selection/{checkpoint_metrics,forward_loss_curves}.csv` | 秒级；⬜ V9D/V9C 落地后 `--refresh` 终稿 |
 | F4 Pareto+选点 | `uv run python scripts/plot_checkpoint_selection.py --input-csv ... --output-dir ...` | ep07 | `checkpoint_metrics.csv`（先跑 `extract_checkpoint_metrics.py --arms ...`） | 分钟级；⬜ V9 系列臂扩展后重出 |
 | F5/F0 主视觉对比 | ⬜ 等统一 harness + canonical 选点 + 客户许可（形态：全幅 or 中心 ROI 脱敏） | ep07 | T1 同源 | — |
@@ -85,19 +85,22 @@ checkpoint 列表参数化（`--checkpoint LABEL=RUN:STEP:MODE`）→ ⬜ V9C/V1
 
 | supp 资产 | 重建 | 环境 |
 |---|---|---|
-| S-F1 FRC 全档案 | `uv run python scripts/run_m2_frc.py`（~分钟级，CPU） | ep15 |
-| S-F2 PSF 三路证据链 | EP09 notebook（`build_all_notebooks.py` 内）+ `run_m3_sigma_arbitration.py`；⬜ 组合图排版脚本待写 | root/ep15 |
+| S-F1 FRC 档案图 | `uv run python scripts/paper_figures/fig02_frc.py`（数据由 ep15 `run_m2_frc.py` 产出） | root |
+| S-F2 PSF 三路证据链图 | `uv run python scripts/paper_figures/figS02_psf_evidence.py`（数据由 EP09 管线 + `run_m3_sigma_arbitration.py` 产出） | root |
 | S-F4 视觉 gate panels | `plot_checkpoint_selection.py`（同 F4） | ep07 |
 | S-F8 / D.5 三个矩阵 | `run_ep16_classical.py`（同 F7） | ep16 |
+| S-F9 融合 Pareto | `uv run python scripts/paper_figures/figS09_fusion_pareto.py`（数据由 `v9_review/run_fusion_baseline.py` 产出） | root |
+| S-F10 V9A 演化条带 | `uv run python scripts/paper_figures/figS10_v9a_strip.py`（cache npy 由 `v9_review/run_pareto_sweep.py` 产出） | root |
 | D.2 M4 锚全套 | `uv run python scripts/run_m4_deconv_anchor.py --device cuda`（~76 min GPU） | ep15 |
 | D.4.2 EP12 gate | `uv run python scripts/run_ep07x2up_vs_ep12_4x.py` | ep12_benchmark |
 | S-T3 合成参数表 | supp C.1 表格（来源 `configs/synthetic/*.json`，无需运行） | — |
+| 策展 notebook（主文/supp 图） | `uv run python scripts/build_notebook.py notebooks/paper_{main,supp}_figures --execute` | root |
 
 ### E.2.4 训练复现（学习臂）
 
 各臂完整 CLI 存档于 `algos/ep07_unet_sr/scripts/{run_training.md, run_v9.md, run_v10.md}`；单臂 60K 约 10–20 h（bs 与卡型相关）。⬜ V10 三臂命令以 `run_v10.md` 为准（λ 取值待 smoke 标定，`tmp/codex_next_move_prompt.md` G1.5）。
 
-**E.2 待回填**：⬜ F2 排版脚本；⬜ S-F2 组合脚本；⬜ T1/T2 harness 命令与最终耗时；⬜ V10 命令冻结。
+**E.2 待回填**：⬜ T1/T2 harness 命令与最终耗时；⬜ V10 命令冻结。（F2/S-F1/S-F2/S-F9/S-F10 排版脚本已于 06-12 落地 `scripts/paper_figures/`。）
 
 ---
 
