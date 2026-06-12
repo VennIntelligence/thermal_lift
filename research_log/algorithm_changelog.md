@@ -143,11 +143,10 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
 
 **推荐参数**: 训练前先跑 `uv run python scripts/precompute_drizzle_variants.py --pool-dir data/synthetic/training_pool_2x_aa_burst --num-variants 4 --workers 14`（~25 min，磁盘 +59 GB）；训练 CLI 与 ACL-016 一致无变化。
 
-**训练结果**: _(TODO：V9A 训练完成后回填)_
+**训练结果**: _(2026-06-12 回填)_
 - 输出目录: `outputs/ep07_v9a_hybrid_drizzle`
-- 视觉效果: _TODO_
-- 关键指标: _TODO_
-- 结论: _TODO_
+- 管线表现: 预计算变体方案有效——V9A 全程无首 batch 卡死、无 OOM kill，~49 min/5K steps 稳定推进至 60K（中途一次人为中断，35K checkpoint 续跑）。V9C 复用同一管线同样稳定。
+- 算法结果见 ACL-016 回填；本条仅覆盖数据管线。
 
 **涉及文件**: `scripts/precompute_drizzle_variants.py`, `tcforge/src/tcforge/storage.py`, `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `algos/ep07_unet_sr/tests/test_dataset.py`, `algos/ep07_unet_sr/scripts/run_v9.md`
 
@@ -182,6 +181,7 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
   - 40K→60K 漂移: artifact +0.0145 / corr −0.0082，与 v8.1a（+0.016 / −0.009）基本重合 → **漂移未压平，run_v9.md 验收标准未达成**
   - `loss/forward_model` 自 10K 起躺平在 0.004–0.009 地板，同期 artifact 持续上爬 → 漂移方向位于 forward 算子（shift→PSF→下采样→带限 highpass）的零空间，观测一致性对该方向不可见
 - 结论: 带限 forward consistency（weight 0.1, band=highpass）单因子归因失败，对真实数据漂移无可测影响。结合 v8.1a / v8.1b / v9b 三臂漂移曲线几乎重合，确认漂移是「合成先验在真实分布上无监督外推」的结构性矛盾，loss 侧旋钮已证伪。后续处置：artifact/corr 降级为 checkpoint 选择器（Pareto + 视觉门控，不默认取 60K）；观测锚定若要有效需让锚可见漂移方向（如 hybrid 输入下以合法 LR 观测构造 forward 项），或从输入端解决（V9A, ACL-016）。
+- **V9D 补充** _(2026-06-12 回填，`outputs/ep07_v9d_fwd_fullband`)_: full-band anchor（`--forward-model-band full`，其余同 V9B）60K 跑完，artifact 0.677 / corr 0.677，漂移同样未压平且终点比 V9B（0.655/0.688）更差；1K–28K 阶段 artifact/corr 大幅震荡（如 20K artifact 0.575/corr 0.642 后又回弹），与 ACL-005 全频低通梯度冲突一致。V9B+V9D 合并证据：**loss 侧 forward 锚定路线（无论 band）正式关闭**。
 
 **涉及文件**: `losses.py`, `config.py`, `train.py`, `mask_weights.py`, `scripts/run_v9.md`, `scripts/run_training.md`, `tests/test_model_losses.py`, `tests/test_config.py`
 
@@ -210,11 +210,14 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
 
 **推荐参数**: `--input-mode hybrid_drizzle2x --training-pool-dir data/synthetic/training_pool_2x_aa_burst`（其余与 v8.1a 一致，`forward_model_weight=0`）
 
-**训练结果**: _(TODO：训练完成后回填)_
-- 输出目录: `outputs/ep07_v9a_hybrid_drizzle`
-- 视觉效果: _TODO_
-- 关键指标: _TODO_
-- 结论: _TODO_
+**训练结果**: _(2026-06-12 回填，60K 完成)_
+- 输出目录: `outputs/ep07_v9a_hybrid_drizzle`（35K 处中断后以 batch_size=64 续跑至 60K）
+- 视觉效果: 中心最细 zigzag「梯子」区呈现明显的训练阶段 Pareto 权衡——10K/20K 时梯子内部条纹部分可分辨（与输入 drizzle 通道、EP10 TGV 一致）；60K 时粗 zigzag 线最锐利、对比最大，但中心梯子重新糊成橙色团块，粗细线交融，与 v8.1a 60K 体感相同。
+- 关键指标（real_eval 248 帧, contour_refined）:
+  - `artifact_score` / `raw_control_corr`: 10K 0.446/0.719 → 20K 0.514/0.702 → 30K 0.660/0.663 → 60K 0.646/0.669。
+  - **漂移在 30K 后压平甚至轻微回头**（30K→60K artifact −0.014 / corr +0.007），是 v8.1a/v9b/v9d 中唯一不单调恶化的臂；但平台位置 corr 0.669 低于 v8.1a 60K 的 0.689，run_v9.md「corr 上升」验收标准在 60K 不达成。
+  - 中心细线窗口 highpass corr（vs TGV | vs 输入 drizzle 通道，诊断脚本 `tmp/v9a_review/`）: **10K 0.966/0.973 → 60K 0.935/0.925**，v8.1a 60K 为 0.936/0.926 → hybrid 输入在 10K 时几乎完整透传了中心细线信息，60K 时被合成结构先验抹回 v8.1a 水平。
+- 结论: **输入瓶颈假设证实，但训练后期合成先验会重新吃掉输入里的真实细节**。中心细线信息确实存在于 drizzle 输入通道中（ACL-015 推断正确），V9A 早期 checkpoint 能保留它；漂移机制现在精确定位为「结构 loss 先验逐步覆盖观测保真，把真实细纹理当模糊清理掉」。处置：① V9A 最终 checkpoint 不取 60K，在 10K–25K 区间做 Pareto + 视觉联合选优；② 下一个单因子实验方向是结构权重后期退火或 residual-to-drizzle 参数化，而不是更长训练。
 
 **涉及文件**: `configs/synthetic/training_pool_2x_burst.json`, `dataset.py`, `config.py`, `train.py`, `inference.py`, `real_eval.py`, `mask_weights.py`, `scripts/run_v9.md`, `scripts/run_training.md`, `tests/test_dataset.py`, `tests/test_config.py`, `tests/test_inference.py`
 
