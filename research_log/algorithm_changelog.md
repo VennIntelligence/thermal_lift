@@ -216,7 +216,7 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
 - 关键指标（real_eval 248 帧, contour_refined）:
   - `artifact_score` / `raw_control_corr`: 10K 0.446/0.719 → 20K 0.514/0.702 → 30K 0.660/0.663 → 60K 0.646/0.669。
   - **漂移在 30K 后压平甚至轻微回头**（30K→60K artifact −0.014 / corr +0.007），是 v8.1a/v9b/v9d 中唯一不单调恶化的臂；但平台位置 corr 0.669 低于 v8.1a 60K 的 0.689，run_v9.md「corr 上升」验收标准在 60K 不达成。
-  - 中心细线窗口 highpass corr（vs TGV | vs 输入 drizzle 通道，诊断脚本 `tmp/v9a_review/`）: **10K 0.966/0.973 → 60K 0.935/0.925**，v8.1a 60K 为 0.936/0.926 → hybrid 输入在 10K 时几乎完整透传了中心细线信息，60K 时被合成结构先验抹回 v8.1a 水平。
+  - 中心细线窗口 highpass corr（vs TGV | vs 输入 drizzle 通道，诊断脚本 `algos/ep07_unet_sr/scripts/v9_review/`（原 `tmp/v9a_review/`，已迁移））: **10K 0.966/0.973 → 60K 0.935/0.925**，v8.1a 60K 为 0.936/0.926 → hybrid 输入在 10K 时几乎完整透传了中心细线信息，60K 时被合成结构先验抹回 v8.1a 水平。
 - 结论: **输入瓶颈假设证实，但训练后期合成先验会重新吃掉输入里的真实细节**。中心细线信息确实存在于 drizzle 输入通道中（ACL-015 推断正确），V9A 早期 checkpoint 能保留它；漂移机制现在精确定位为「结构 loss 先验逐步覆盖观测保真，把真实细纹理当模糊清理掉」。处置：① V9A 最终 checkpoint 不取 60K，在 10K–25K 区间做 Pareto + 视觉联合选优；② 下一个单因子实验方向是结构权重后期退火或 residual-to-drizzle 参数化，而不是更长训练。
 
 **涉及文件**: `configs/synthetic/training_pool_2x_burst.json`, `dataset.py`, `config.py`, `train.py`, `inference.py`, `real_eval.py`, `mask_weights.py`, `scripts/run_v9.md`, `scripts/run_training.md`, `tests/test_dataset.py`, `tests/test_config.py`, `tests/test_inference.py`

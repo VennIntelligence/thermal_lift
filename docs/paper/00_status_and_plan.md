@@ -26,7 +26,7 @@
 | `08_limitations_conclusion.md` | 限制与结论（§7） | EN | 初稿 |
 | `09_figures_tables_assets.md` | figure/table → 仓库资产路径映射 + 生产状态 | 中文 | ✅ 已落盘（06-11） |
 | `10_writing_handover.md` | **写作交接总控**：逐节要点 + supp 材料清单 + 分派状态 | 中文 | ✅ 已落盘（06-11） |
-| `supp/A–E_*.md` | Supplementary 草稿（理论/数据/方法/结果/复现） | EN | ⬜ 按 10 号文档清单起草 |
+| `supp/A–E_*.md` | Supplementary 草稿（理论/数据/方法/结果/复现） | 中文（迁 LaTeX 译英） | ✍️ 五份已落盘（06-12），缺口 ⬜ 占位；新增 D.0 fine-window 口径 + D.7 融合 baseline 专节 |
 
 ## 投稿靶子（2026-06-11 决策）
 
@@ -61,6 +61,10 @@
 ## 待办与风险
 
 - [ ] 客户许可：论文展示芯片热像（可脱敏：匿名型号、仅中心 ROI）——**本周去问**
+- [ ] 主文数字微修（supp 起草时核出，见 `supp/B_system_data.md` B.1.2 / `supp/D_full_results.md` D.5.1）：
+  ① §3.2 跨 session 跳变「median 3.55 °C (49×)」→ audit 权威「median 2.91 / max 4.16 °C (40×/57×)」，`AGENTS.md` 同步；
+  ② §6.4「corr 0.772 at N=248」→ CSV 原值 0.771
+- [ ] D.7 融合 baseline 的 λ 选择需第二验证窗复核（CPU 几分钟，防 selection-on-test）
 - [ ] 指标口径统一（见状态板最后一行）
 - [ ] V9A 若证伪输入论点，§6 叙事降级为「锚定与输入双阴性 + 协议仍然成立」——协议与零空间发现不依赖 V9A 阳性
 - [ ] 参考文献：`03_related_work.md` 目前是 `[REF: ...]` 占位，迁 LaTeX 前补 `paper/aaai/refs.bib`

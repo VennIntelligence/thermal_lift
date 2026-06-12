@@ -113,9 +113,12 @@
 | S-F6 | 负结果档案图（PixelShuffle 条纹 / 4x 失败 / AVI 排除审计） | EP11/EP12/EP01 输出 | 🔧 选图整理 |
 | S-F7 | 对齐管线与 gate（Chamfer 0.381→0.240→0.134；EP04 角色表） | `output/ep05_*` / `output/ep04_*` | 🔧 |
 | S-F8 | E3 对齐源消融 + F7 全曲线 | `output/ep16_budget_robustness/` | ✅ 经典臂完成 |
+| S-F9 | 零训练融合 baseline Pareto 叠加（V9A 轨迹 + 融合曲线 + TGV/drizzle 参考点） | `output/ep07_v9_review/fusion_pareto_overlay.png`（重建 `v9_review/run_fusion_baseline.py`） | ✅ 当前稿；V10 落地后叠 V10 工作点 |
+| S-F10 | V9A checkpoint 演化条带 + fine-zigzag 输入/输出/经典面板 | `output/ep07_v9_review/{v9a_checkpoint_strip,fine_zigzag_final_panel}.png` | ✅ 数据稿；进 supp 前过学术排版 |
 | S-T1 | T1 扩展版（全 checkpoint × 全列） | 统一 harness 输出 | ⬜ |
 | S-T2 | TGV/MAP-TV 参数网格全表 | `output/ep10_tgv_sr/sweep_results.csv` 等 | ✅ |
-| S-T3 | TCForge 合成参数全表 / 训练 config 对照表 | 各 run `config.json` | 🔧 汇总即可 |
+| S-T3 | TCForge 合成参数全表 / 训练 config 对照表 | 各 run `config.json`（supp C.1/C.3 已成表） | ✅ 已汇总进 supp 草稿 |
+| S-T4 | 融合 baseline λ 扫描全表 + fine-window 四指标口径表 | `output/ep07_v9_review/{fusion_baseline_metrics,v9a_pareto_metrics}.csv`（supp D.0/D.7 已成表） | ✅ |
 
 ## 生产排程依赖
 

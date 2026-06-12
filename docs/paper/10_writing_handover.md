@@ -111,55 +111,60 @@
 ## 3. Supplementary 材料清单（technical appendix）
 
 > 草稿落盘位置：`docs/paper/supp/` 下按块建文件（`A_theory.md`、`B_system_data.md`、
-> `C_method_details.md`、`D_full_results.md`、`E_reproducibility.md`），同样英文。
-> 标 ★ 的条目**不依赖任何未完成实验，现在即可起草**。
+> `C_method_details.md`、`D_full_results.md`、`E_reproducibility.md`）。
+> **2026-06-12 更新**：五份草稿已全部落盘，按用户决策先以**中文**成稿（迁 LaTeX 时译英），
+> 缺口在文内以「⬜ 待回填（等 XX）」占位；新增 D.0（fine-window 诊断口径）与
+> D.7（零训练融合 baseline 专节，决策：supp 专节 + 主文 §6 一句话引用）。
+> 标 ★ 的条目**不依赖任何未完成实验**。
 
 ### A. 理论与推导（A_theory.md）
 
 | 条目 | 内容与验收标准 | 素材来源 | 状态 |
 |---|---|---|---|
-| ★A.1 MTF/SNR 可行性 | Gaussian PSF MTF(f)=exp(−2π²σ²f²) × 10 µm box sinc 的闭式推导；2x/4x Nyquist 数值表（σ=0.2/0.35/0.5 → 0.454/0.089/0.007；4x ≤0.042）；有效 SNR=ΔT·MTF/noise 判据 → 2x 条件可行、4x 出界；与 EP12 4x 失败互证。验收：表格数值与 `04` §3.3 一致 | `output/ep03_theoretical_limits/`、`reports/ep03_*/theoretical_limits_report.md` | ⬜ 可写 |
-| ★A.2 观测算子与零空间 | A=D·B·H·S 的离散定义；零空间刻画（B·H 的带限衰减 + D 的混叠折叠）；**Proposition 1**: A·δx_null=0 ⇒ 任意观测域 loss 对 δx_null 恒盲（证明 3 行）；两曲线诊断的充分条件陈述（floor + 持续 proxy 漂移 ⇒ 漂移含零空间分量）；可选：A†A 投影直接测量 checkpoint 差的 range/null 分解（GPU-light，可在训练间隙跑） | `04` §3.4、`06` §5.3、`algos/ep06_sr_poc/src/common/forward_model.py` | ⬜ 可写 |
-| ★A.3 proxy 反相关的构造性论证 | artifact score 与 raw-control corr 都是同一 highpass 残差的泛函：写出两者定义式，证明沿「边缘增亮/增宽」扰动方向一阶变化符号相反；推论：联合最大化不可行，只能作温度计与选点准则 | `06` §5.2、`algos/ep06_sr_poc/src/common/metrics.py`、EP11 harness `_pearson_finite` | ⬜ 可写 |
-| ★A.4 FRC 方法学 | phase-stratified split-half 定义；1/7 与 half-bit 判据公式及出处；四个控制组（bicubic 正、shift-shuffle 负、acquisition-drift、zero-coverage 统计）的设计逻辑与各自失效模式；为何只主张 17.0 µm cutoff | `algos/ep15_info_limit/scripts/run_m2_frc.py`、`output/ep15_info_limit/m2_frc/` | ⬜ 可写 |
-| ★A.5 标定不确定度传播 | θ=47.6°±0.1° 经 coordinate_to_shift 的位移误差传播（40 µm command 处 ~0.007 px，给闭式）；PSF σ∈[0.2,0.5] 区间对 MTF/反卷积强度的影响范围；AVI 独立方向验证（θ≈47.14°，CI 覆盖）作为 consistency check 的角色与边界 | `configs/stage_calibration.json`、`core/src/thermal_core/displacement.py`、`reports/ep02_*/calibration_report.md` | ⬜ 可写 |
+| ★A.1 MTF/SNR 可行性 | Gaussian PSF MTF(f)=exp(−2π²σ²f²) × 10 µm box sinc 的闭式推导；2x/4x Nyquist 数值表（σ=0.2/0.35/0.5 → 0.454/0.089/0.007；4x ≤0.042）；有效 SNR=ΔT·MTF/noise 判据 → 2x 条件可行、4x 出界；与 EP12 4x 失败互证。验收：表格数值与 `04` §3.3 一致 | `output/ep03_theoretical_limits/`、`reports/ep03_*/theoretical_limits_report.md` | ✍️ 已起草（06-12 中文稿） |
+| ★A.2 观测算子与零空间 | A=D·B·H·S 的离散定义；零空间刻画（B·H 的带限衰减 + D 的混叠折叠）；**Proposition 1**: A·δx_null=0 ⇒ 任意观测域 loss 对 δx_null 恒盲（证明 3 行）；两曲线诊断的充分条件陈述（floor + 持续 proxy 漂移 ⇒ 漂移含零空间分量）；可选：A†A 投影直接测量 checkpoint 差的 range/null 分解（GPU-light，可在训练间隙跑） | `04` §3.4、`06` §5.3、`algos/ep06_sr_poc/src/common/forward_model.py` | ✍️ 已起草（06-12 中文稿） |
+| ★A.3 proxy 反相关的构造性论证 | artifact score 与 raw-control corr 都是同一 highpass 残差的泛函：写出两者定义式，证明沿「边缘增亮/增宽」扰动方向一阶变化符号相反；推论：联合最大化不可行，只能作温度计与选点准则 | `06` §5.2、`algos/ep06_sr_poc/src/common/metrics.py`、EP11 harness `_pearson_finite` | ✍️ 已起草（06-12 中文稿） |
+| ★A.4 FRC 方法学 | phase-stratified split-half 定义；1/7 与 half-bit 判据公式及出处；四个控制组（bicubic 正、shift-shuffle 负、acquisition-drift、zero-coverage 统计）的设计逻辑与各自失效模式；为何只主张 17.0 µm cutoff | `algos/ep15_info_limit/scripts/run_m2_frc.py`、`output/ep15_info_limit/m2_frc/` | ✍️ 已起草（06-12 中文稿） |
+| ★A.5 标定不确定度传播 | θ=47.6°±0.1° 经 coordinate_to_shift 的位移误差传播（40 µm command 处 ~0.007 px，给闭式）；PSF σ∈[0.2,0.5] 区间对 MTF/反卷积强度的影响范围；AVI 独立方向验证（θ≈47.14°，CI 覆盖）作为 consistency check 的角色与边界 | `configs/stage_calibration.json`、`core/src/thermal_core/displacement.py`、`reports/ep02_*/calibration_report.md` | ✍️ 已起草（06-12 中文稿） |
 
 ### B. 系统与数据细节（B_system_data.md）
 
 | 条目 | 内容 | 素材 | 状态 |
 |---|---|---|---|
-| ★B.1 数据审计 | 263→255→248 链条；3 温度段与跨 session 跳变 3.55 °C（49× noise）；命名解码规则与 acquisition_order 教训；AVI/BMP 排除依据（8-bit、67% 重复） | `reports/ep01_data_processing/audit_report.md` | ⬜ 可写 |
-| ★B.2 对齐管线与 gate | highpass NCC 初始化 + contour refinement 细节；Chamfer 0.381→0.240→0.134 px；EP04 84+390 锚点 × 13 扫描线分级表（alignment-input / holdout / target-not-truth 三角色）；相位 bin 保持性 | `reports/ep04_*/validation_report.md`、`reports/ep05_*/displacement_reassessment.md`、`configs/alignment/` | ⬜ 可写 |
-| B.3 微扫描运动学 | raster 各向异性（行内 gap 1 vs 行间 ~16）的热漂移含义；Y-only 标定失效教训（为何 stage 不是 truth 的实证） | `AGENTS.md` 硬教训 12、EP02 报告 | ⬜ 可写 |
+| ★B.1 数据审计 | 263→255→248 链条；3 温度段与跨 session 边界跳变（audit 权威口径**中位 2.91 / 最大 4.16 °C**；主文/AGENTS 的 3.55 为旧口径待修，见 supp B.1.2 警告框）；命名解码规则与 acquisition_order 教训；AVI/BMP 排除依据（8-bit、67% 重复） | `reports/ep01_data_processing/audit_report.md` | ✍️ 已起草（06-12 中文稿） |
+| ★B.2 对齐管线与 gate | highpass NCC 初始化 + contour refinement 细节；Chamfer 0.381→0.240→0.134 px；EP04 84+390 锚点 × 13 扫描线分级表（alignment-input / holdout / target-not-truth 三角色）；相位 bin 保持性 | `reports/ep04_*/validation_report.md`、`reports/ep05_*/displacement_reassessment.md`、`configs/alignment/` | ✍️ 已起草（06-12 中文稿） |
+| B.3 微扫描运动学 | raster 各向异性（行内 gap 1 vs 行间 ~16）的热漂移含义；Y-only 标定失效教训（为何 stage 不是 truth 的实证） | `AGENTS.md` 硬教训 12、EP02 报告 | ✍️ 已起草（06-12 中文稿） |
 
 ### C. 方法细节（C_method_details.md）
 
 | 条目 | 内容 | 素材 | 状态 |
 |---|---|---|---|
-| ★C.1 TCForge 合成平台全参数 | 场景几何分布、4×SSAA coverage AA、温度渲染、PSF/box/noise/shift 重放、burst pool K=4 变体表 | `tcforge/src/`、`05` §4.2、训练 pool 构建脚本 | ⬜ 可写 |
-| ★C.2 网络与损失 | UNet 结构表；损失全公式（MSE/highpass/SSIM/grad-vector/edge + thin/gap 权重）与 hot vs conservative 两组权重对照；PixelShuffle 负结果细节 | `algos/ep07_unet_sr/src/.../losses.py`、各 run `config.json` | ⬜ 可写 |
-| C.3 训练 config 对照表 | v6/v8.1a/v8.1b/v9b/v9a/v9c/v9d 全字段差异表（input_mode/in_channels/anchor/band/pool/save_every…） | 各 `outputs/*/config.json`（v9c 待跑） | 🔄 等 V9C |
-| ★C.4 经典方法实现细节 | drizzle pixfrac/kernel；MAP-TV FISTA + σ,λ 选择；TGV 各向异性椭圆对偶球投影 + coverage 归一化推导与伪代码 | `algos/ep10_drizzle/`、`algos/ep10_tgv_sr/src/`、`algos/ep15_info_limit/scripts/run_m4_*.py` | ⬜ 可写 |
-| ★C.5 checkpoint 选择伪代码 | 归一化 proxy 对 → 理想点距离 top-3（≥5K 间隔）→ 末端对照 → 视觉 gate；完整伪代码 + 超参 | `algos/ep07_unet_sr/scripts/plot_checkpoint_selection.py` | ⬜ 可写 |
+| ★C.1 TCForge 合成平台全参数 | 场景几何分布、4×SSAA coverage AA、温度渲染、PSF/box/noise/shift 重放、burst pool K=4 变体表 | `tcforge/src/`、`05` §4.2、训练 pool 构建脚本 | ✍️ 已起草（06-12 中文稿） |
+| ★C.2 网络与损失 | UNet 结构表；损失全公式（MSE/highpass/SSIM/grad-vector/edge + thin/gap 权重）与 hot vs conservative 两组权重对照；PixelShuffle 负结果细节 | `algos/ep07_unet_sr/src/.../losses.py`、各 run `config.json` | ✍️ 已起草（06-12 中文稿） |
+| C.3 训练 config 对照表 | v6/v8.1a/v8.1b/v9b/v9a/v9c/v9d 全字段差异表（input_mode/in_channels/anchor/band/pool/save_every…） | 各 `outputs/*/config.json`（v9c config 已落盘） | ✍️ 已起草（差异表已填；V9C/V10 训练结果待回填） |
+| ★C.4 经典方法实现细节 | drizzle pixfrac/kernel；MAP-TV FISTA + σ,λ 选择；TGV 各向异性椭圆对偶球投影 + coverage 归一化推导与伪代码 | `algos/ep10_drizzle/`、`algos/ep10_tgv_sr/src/`、`algos/ep15_info_limit/scripts/run_m4_*.py` | ✍️ 已起草（06-12 中文稿） |
+| ★C.5 checkpoint 选择伪代码 | 归一化 proxy 对 → 理想点距离 top-3（≥5K 间隔）→ 末端对照 → 视觉 gate；完整伪代码 + 超参 | `algos/ep07_unet_sr/scripts/plot_checkpoint_selection.py` | ✍️ 已起草（06-12 中文稿） |
 
 ### D. 完整实验结果（D_full_results.md）
 
 | 条目 | 内容 | 素材 | 状态 |
 |---|---|---|---|
-| D.1 T1/T2 扩展版 | 全臂 × 全 checkpoint × 全列；TGV/MAP-TV 全参数网格表 | 统一 harness 重跑产物 + `output/ep10_tgv_sr/sweep_results.csv` | ⬜ 等 harness |
-| D.2 FRC 全档案 | band×seed 全表、控制组完整曲线、MAP-TV 前后 split-half 对照 | `output/ep15_info_limit/m2_frc/`、`m4_deconv_anchor/` | ★ 可整理 |
-| D.3 漂移视觉演化 | 各臂 step 序列 eval_real 选帧（漂移肉眼可见化）+ v9a companion 轨迹 | `algos/ep07_unet_sr/outputs/*/eval_real/`、Task B `fig03s` | 🔄 |
-| D.4 负结果档案 | PixelShuffle 条纹证据、4x 网络失败 + MTF 界互证、loss-side anchoring 无效（v9b/v9d 对照）、AVI 排除 | EP11/EP12 输出、`research_log/algorithm_changelog.md` | 🔄 等 V9D |
-| D.5 budget/robustness 全曲线 | E1/E2/E3 全部曲线与表（经典臂 + 后补 GPU 臂） | Task C `output/ep16_budget_robustness/` | 🔄 |
-| D.6 视觉 gate panel 全集 | 四臂（+V9 系列）panel 图 | `checkpoint_selection/panel_*.png` | ✅ 选编 |
+| D.0 fine-window 诊断口径（新增） | 中心细线窗口定义 + 四指标（hp_corr_input/tgv、sharp_p95、lattice）+ 限制声明 | `algos/ep07_unet_sr/scripts/v9_review/common.py` | ✍️ 已起草（06-12 中文稿） |
+| D.1 T1/T2 扩展版 | 全臂 × 全 checkpoint × 全列；TGV/MAP-TV 全参数网格表 | 统一 harness 重跑产物 + `output/ep10_tgv_sr/sweep_results.csv` | ⬜ 等 harness（占位节已建，partial 数据已索引） |
+| D.2 FRC 全档案 | band×seed 全表、控制组完整曲线、MAP-TV 前后 split-half 对照 | `output/ep15_info_limit/m2_frc/`、`m4_deconv_anchor/` | ✍️ 已起草（06-12 中文稿） |
+| D.3 漂移视觉演化 | V9 全系数值轨迹表 + 各臂 step 序列 eval_real 选帧 + v9a companion 轨迹 | `output/ep07_v9_review/`、`algos/ep07_unet_sr/outputs/*/eval_real/`、Task B `fig03s` | ✍️ 已起草（V9C 行与 S-F5 终选待回填） |
+| D.4 负结果档案 | PixelShuffle 条纹证据、4x 网络失败 + MTF 界互证、loss-side anchoring 无效（v9b+v9d 已闭合）、AVI 排除 | EP11/EP12 输出、`research_log/algorithm_changelog.md` | ✍️ 已起草（V9D 已落地；仅 V9C 判定句待补） |
+| D.5 budget/robustness 全曲线 | E1/E2/E3 全部曲线与表（经典臂 + 后补 GPU 臂） | Task C `output/ep16_budget_robustness/` | ✍️ 已起草（经典臂全表已抄录聚合；GPU 臂待跑） |
+| D.6 视觉 gate panel 全集 | 四臂（+V9 系列）panel 图 | `checkpoint_selection/panel_*.png` | ✍️ 已起草（选编原则已定；V9 panel 待选点） |
+| D.7 零训练融合 baseline（新增） | fused(λ) 扫描全表 + 支配 TGV 结论 + V10 对照前沿定位 + selection-on-test caveat | `output/ep07_v9_review/fusion_*.{csv,md,png}` | ✍️ 已起草（V10 叠加行与第二验证窗待回填） |
 
 ### E. 复现包（E_reproducibility.md）
 
 | 条目 | 内容 | 状态 |
 |---|---|---|
-| ★E.1 代码与环境 | 仓库结构、各 algo venv（UV/conda）矩阵、core 共享层、`build_all_notebooks.py` 一键重建 | ⬜ 可写（`AGENTS.md` 已有蓝本） |
-| ★E.2 实验命令清单 | 每个图/表 → 生成脚本 + CLI + venv + 预计耗时 | ⬜ 随 Task A/B/C 落地逐条补 |
-| E.3 数据声明 | 数据不公开的说明 + 脱敏策略 + 合成平台可公开（TCForge 让协议可复现） | ⬜ 等客户许可结论 |
+| ★E.1 代码与环境 | 仓库结构、各 algo venv（UV/conda）矩阵、core 共享层、`build_all_notebooks.py` 一键重建 | ✍️ 已起草（06-12 中文稿，蓝本 `AGENTS.md`） |
+| ★E.2 实验命令清单 | 每个图/表 → 生成脚本 + CLI + venv + 预计耗时 | ✍️ 已起草（F2/S-F2 排版脚本与 T1 harness 命令待补） |
+| E.3 数据声明 | 数据不公开的说明 + 脱敏策略 + 合成平台可公开（TCForge 让协议可复现） | ⬜ 框架已起草，等客户许可结论 |
 
 ## 4. 任务分派状态（2026-06-11 夜）
 
@@ -167,7 +172,7 @@
 |---|---|---|---|
 | 写作基建 | 本文档 + `09_figures_tables_assets.md` 落盘 | 主线 | ✅ 本次 |
 | 图表 | F1 / F3 / F7 经典臂 → `todos/paper_prompts.md` Task A/B/C | Codex 并行 | 🔄 待启动 |
-| 写作 | Supp ★ 条目起草（A.1–A.5 优先，其次 B/C/E） | 任何写作智能体 | ⬜ 即可领取 |
+| 写作 | Supp ★ 条目起草（A.1–A.5 优先，其次 B/C/E） | 主线（06-12） | ✅ A–E 五份中文草稿落盘 `docs/paper/supp/`，缺口 ⬜ 占位 |
 | 写作 | §2 文献补全（`[REF:]` → refs.bib） | 任何写作智能体 | ⬜ 即可领取 |
 | 实验 | V9A 视觉 gate + 选点（落地后） | 待派 | ⬜ 06-12 晨 |
 | 实验 | 统一 harness 全臂重跑 → T1/T2/F5 | 待派（需 GPU 窗口） | ⬜ |
