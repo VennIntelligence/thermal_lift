@@ -81,7 +81,7 @@
 
 出处：`theoretical_limits_report.md` L108–115。口径：CRB 是乐观理论下界，不替代真实 alignment 误差（L117–121, L153）；EP04 实测 A-class split-half ~0.027 px（supp B.2）与 16 帧 CRB 同量级，作 consistency check。
 
-**A.1 资产依赖**：`reports/ep03_theoretical_limits/theoretical_limits_report.md`（权威）；`core/src/thermal_core/ep03.py`（公式实现）；`output/ep03_theoretical_limits/{mtf_psf_attenuation.csv, mtf_snr_recoverability.csv, mtf_psf_frequency_response.png, mtf_snr_recoverability_heatmap.png}`（重建：`uv run python scripts/build_ep03_cache.py`）。
+**A.1 资产依赖**：`reports/ep03_theoretical_limits/theoretical_limits_report.md`（权威）；`core/src/thermal_core/ep03.py`（公式实现）；`output/ep03_theoretical_limits/{mtf_psf_attenuation.csv, mtf_snr_recoverability.csv}`（重建：`uv run python scripts/build_ep03_cache.py`）；**配图 S-F15** `output/paper_figures/figS15{a,b}_*.png`（MTF 频响 + SNR_eff 热图，收编自 EP03，06-12）。
 **A.1 待回填**：无——素材齐全。⬜ 仅终稿排版时决定是否将 MTF 频响曲线重绘为 supp 图（S 系列，CVPR 风格）。
 
 ---
@@ -309,5 +309,5 @@ Route spread 1.01 px > 0.05 px 容差 → EP09 gate **不通过**，σ 状态 pr
 | 噪声底 | 0.0724 °C | 可恢复对比度下限 | A.5.5 |
 | 热漂移 | session 内首尾 −0.60 °C；跨 session 中位 2.91 °C | session 门控 + 分层 split 设计动机 | supp B.1/B.3 |
 
-**A.5 资产依赖**：`configs/stage_calibration.json`、`configs/psf_calibration.json`、`configs/noise_floor.json`；`core/src/thermal_core/displacement.py`；`reports/ep02_displacement_calibration/calibration_report.md`；`reports/ep09_psf_calibration/`；`output/ep15_info_limit/m3_sigma/sigma_summary.json`（重建：`run_m3_sigma_arbitration.py`）；S-F2（PSF 三路证据链图，资产在 `output/ep09_psf_calibration/` + `m3_sigma/`，⬜ 组合排版待做）。
+**A.5 资产依赖**：`configs/stage_calibration.json`、`configs/psf_calibration.json`、`configs/noise_floor.json`；`core/src/thermal_core/displacement.py`；`reports/ep02_displacement_calibration/calibration_report.md`；`reports/ep09_psf_calibration/`；`output/ep15_info_limit/m3_sigma/sigma_summary.json`（重建：`run_m3_sigma_arbitration.py`）；**配图 S-F2** `output/paper_figures/figS02_psf_evidence.{png,pdf}`（06-12 落地）；**配图 S-F12** `output/paper_figures/figS12_theta_forest.png`（AVI θ forest plot，收编自 EP02，支撑 A.5.2）。
 **A.5 待回填**：无——可成稿。

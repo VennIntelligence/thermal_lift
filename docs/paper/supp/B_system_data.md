@@ -72,7 +72,7 @@ is_sr_usable = (session == 2) AND (R == 0) AND (480×640 且无 NaN/Inf)
 
 角色边界：AVI 仅用于位移**方向**的独立 consistency check（supp A.5.2）；绝不作 SR 数值输入（`AGENTS.md` 硬教训 3）。
 
-**B.1 资产依赖**：`reports/ep01_data_processing/audit_report.md`（权威）；`core/src/thermal_core/{io.py, ep01.py}`；`scripts/rename_data.py`；`data/processed/frame_audit.csv`（重建：`scripts/build_ep01_cache.py`）。
+**B.1 资产依赖**：`reports/ep01_data_processing/audit_report.md`（权威）；`core/src/thermal_core/{io.py, ep01.py}`；`scripts/rename_data.py`；`data/processed/frame_audit.csv`（重建：`scripts/build_ep01_cache.py`）；**配图 S-F11** `output/paper_figures/figS11{a,b}_*.png`（假 session 教训 + raster 采集序网格，收编自 EP01，06-12）。
 **B.1 待回填**：⬜ 主文/`AGENTS.md` 跨 session 跳变数字统一（见 B.1.2 警告框）。
 
 ---
@@ -160,7 +160,7 @@ is_sr_usable = (session == 2) AND (R == 0) AND (480×640 且无 NaN/Inf)
 
 （`displacement_reassessment.md` L70–102）数据驱动修正**没有破坏** stage 设计的相位均匀性 → 2x 重建的相位多样性前提成立。**风险注记**：contour refined 在 3x/4x 网格出现 phase collapse（3x 仅 4/5、4x 仅 4/12 占用）→ 不能作为高倍率可行性证据（与 A.1.5 4x 出界结论同向）。
 
-**B.2 资产依赖**：`reports/ep04_global_validation/validation_report.md`、`reports/ep05_sr_reassessment/displacement_reassessment.md`、`reports/ep02_displacement_calibration/calibration_report.md`（EP02 对照表）；`configs/alignment/{contour_alignment_results.csv, paths.json}`；`core/src/thermal_core/{ep03.py, ep04.py, displacement.py}`；S-F7（对齐链与 gate 图，🔧 选图整理，源 `output/ep04_*`、`output/ep05_*`）。
+**B.2 资产依赖**：`reports/ep04_global_validation/validation_report.md`、`reports/ep05_sr_reassessment/displacement_reassessment.md`、`reports/ep02_displacement_calibration/calibration_report.md`（EP02 对照表）；`configs/alignment/{contour_alignment_results.csv, paths.json}`；`core/src/thermal_core/{ep03.py, ep04.py, displacement.py}`；**配图 S-F7** `output/paper_figures/figS07{a,b,c}_*.png`（五步链 Chamfer / 相位 bin / gate 空间分布，✅ 已选编收编 06-12；(c) 全幅热像受客户许可约束）。
 **B.2 待回填**：无——可成稿。⬜ 主文 §3.3 是否保留 EP04 表格由压页结果定（handover §2 建议细节全下沉到本节）。
 
 ---
@@ -215,5 +215,5 @@ is_sr_usable = (session == 2) AND (R == 0) AND (480×640 且无 NaN/Inf)
 
 （设计值对照：2 µm 命令 = 0.2 px 幅值；行内实测略低，端到端与 4.0 px 设计同量级——细步进的逐步可见位移系统性小于命令值，是「prior 而非 truth」的又一证据。）
 
-**B.3 资产依赖**：`reports/ep02_displacement_calibration/calibration_report.md`、`reports/ep05_sr_reassessment/displacement_reassessment.md`、`reports/ep01_data_processing/audit_report.md`；`AGENTS.md` 硬教训 7/11/12。
+**B.3 资产依赖**：`reports/ep02_displacement_calibration/calibration_report.md`、`reports/ep05_sr_reassessment/displacement_reassessment.md`、`reports/ep01_data_processing/audit_report.md`；`AGENTS.md` 硬教训 7/11/12；**配图 S-F13** `output/paper_figures/figS13_cumulative_trajectory.png`（实测累计轨迹，收编自 EP05，06-12）。
 **B.3 待回填**：无——可成稿。

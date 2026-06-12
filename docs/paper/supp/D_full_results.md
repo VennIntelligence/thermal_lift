@@ -70,7 +70,7 @@ V9 系列复盘引入的中心细线窗口诊断，是 D.7/D.8 的指标基础�
 
 median FWHM **114 → 100 µm**、dip 0.929 → 0.934、3/3 剖面保持分离；逐剖面混合（2 宽 1 显著窄）→ 论文措辞钉死「limited contour enhancement」（`zigzag_profile_metrics.csv`；禁写边界第 6 条）。
 
-**D.2 资产依赖**：`output/ep15_info_limit/{m2_frc/, m4_deconv_anchor/}` 全套 CSV/PNG（S-F1）；重建 `run_m2_frc.py` / `run_m4_deconv_anchor.py`。
+**D.2 资产依赖**：`output/ep15_info_limit/{m2_frc/, m4_deconv_anchor/}` 全套 CSV/PNG；**配图 S-F1** `output/paper_figures/figS01_frc_archive.{png,pdf}`；**配图 S-F14** `output/paper_figures/figS14{a,b}_*.png`（zigzag 剖面对照 + 四臂 highpass，收编自 M4，06-12）；重建 `run_m2_frc.py` / `run_m4_deconv_anchor.py` + `collect_promoted_supp.py`。
 **D.2 待回填**：无——可成稿。
 
 ---

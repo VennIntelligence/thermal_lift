@@ -112,10 +112,15 @@
 | S-F4 | 四臂 checkpoint 视觉 gate panel | `checkpoint_selection/panel_*.png` | ✅ |
 | S-F5 | 各 arm step 序列视觉演化（漂移可视化） | `algos/ep07_unet_sr/outputs/*/eval_real/` | ✅ 选图即可 |
 | S-F6 | 负结果档案图（PixelShuffle 条纹 / 4x 失败 / AVI 排除审计） | EP11/EP12/EP01 输出 | 🔧 选图整理 |
-| S-F7 | 对齐管线与 gate（Chamfer 0.381→0.240→0.134；EP04 角色表） | `output/ep05_*` / `output/ep04_*` | 🔧 |
+| S-F7 | 对齐管线与 gate：五步链 Chamfer + 2x 相位 bin 占用 + gate 空间分布 | `output/paper_figures/figS07{a,b,c}_*.png`（收编自 `ep05_alignment_sr_capacity/` 与 `ep04_global_validation/`，`collect_promoted_supp.py`） | ✅ 选编收编（06-12）；⚠️ (c) 全幅热像受客户许可约束 |
 | S-F8 | E3 对齐源消融 + F7 全曲线 | `output/ep16_budget_robustness/` | ✅ 经典臂完成 |
 | S-F9 | 零训练融合 baseline Pareto 叠加（V9A 轨迹 + 4 条融合曲线 + 支配象限 + TGV/drizzle 参考点） | `output/paper_figures/figS09_fusion_pareto.{png,pdf}`（`scripts/paper_figures/figS09_fusion_pareto.py`；源 `output/ep07_v9_review/*.csv`） | ✅ CVPR 风格（06-12）；V10 落地后叠 V10 工作点 |
 | S-F10 | V9A fine-window 演化条带（TGV/v8.1a 参照 + 5K–60K 序列，per-panel 归一化 + 保真/锐度标注） | `output/paper_figures/figS10_v9a_strip.{png,pdf}`（`scripts/paper_figures/figS10_v9a_strip.py`；源 cache npy + `output/ep10_tgv_sr/best_hr_temperature.npy`） | ✅ CVPR 风格（06-12）；诊断原稿仍在 `output/ep07_v9_review/` |
+| S-F11 | 数据审计链：文件名序 vs 采集序（13 假 session 教训）+ raster 采集序网格 | `output/paper_figures/figS11{a,b}_*.png`（收编自 `ep01_data_processing/`） | ✅ 选编收编（06-12） |
+| S-F12 | AVI θ 验证 forest plot（16 AVI × 两特征域 + 合并 CI + X/Y 系统差） | `output/paper_figures/figS12_theta_forest.png`（收编自 `ep02_displacement_calibration/`） | ✅ 选编收编（06-12） |
+| S-F13 | 主 session 累计位移轨迹（raster 几何 + 慢漂移可视化） | `output/paper_figures/figS13_cumulative_trajectory.png`（收编自 `ep05_sr_reassessment/`） | ✅ 选编收编（06-12） |
+| S-F14 | MAP-TV 锚结构证据：zigzag 三剖面对照 + 四臂 highpass 全景 | `output/paper_figures/figS14{a,b}_*.png`（收编自 `ep15_info_limit/m4_deconv_anchor/`） | ✅ 选编收编（06-12） |
+| S-F15 | MTF 频响 + 有效 SNR 可恢复性热图（2x 可行/4x 出界边界） | `output/paper_figures/figS15{a,b}_*.png`（收编自 `ep03_theoretical_limits/`） | ✅ 选编收编（06-12） |
 | S-T1 | T1 扩展版（全 checkpoint × 全列） | 统一 harness 输出 | ⬜ |
 | S-T2 | TGV/MAP-TV 参数网格全表 | `output/ep10_tgv_sr/sweep_results.csv` 等 | ✅ |
 | S-T3 | TCForge 合成参数全表 / 训练 config 对照表 | 各 run `config.json`（supp C.1/C.3 已成表） | ✅ 已汇总进 supp 草稿 |
@@ -124,9 +129,12 @@
 ## 策展 Notebook（图表展示与解读层）
 
 - `notebooks/paper_main_figures/`（F1–F7 + 待定稿占位表）与
-  `notebooks/paper_supp_figures/`（S-F1/2/3/4/8/9/10 + 占位表）——
+  `notebooks/paper_supp_figures/`（S-F1/2/3/4/7/8/9/10/11/12/13/14/15 + 占位表）——
   fragments 入 Git，构建命令 `uv run python scripts/build_notebook.py notebooks/paper_{main,supp}_figures --execute`。
   每张图附教程式解读（是什么/怎么看/异常是否正常/能得出什么）与重建命令。
+- **Episode 图收编机制**: `scripts/paper_figures/collect_promoted_supp.py` 把 EP01–EP15
+  管线中已达学术标准且支撑 supp 叙事的图按稳定 figSxx 编号拷贝进
+  `output/paper_figures/`（含 provenance manifest），LaTeX 单目录引用、episode 管线保持唯一生产源。
 
 ## 生产排程依赖
 
