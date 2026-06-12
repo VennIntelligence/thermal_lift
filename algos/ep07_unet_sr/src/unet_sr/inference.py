@@ -10,6 +10,8 @@ import torch
 from tcforge.classical_sr import drizzle_features
 from tcforge.fusion import fuse_burst_to_features
 
+from .dataset import HYBRID_DRIZZLE_MEAN_CHANNEL
+
 
 def _positions(length: int, patch: int, step: int) -> list[int]:
     if patch <= 0 or step <= 0:
@@ -41,12 +43,17 @@ def infer_full_frame(
     overlap: int = 32,
     device: str = "cuda",
     residual: bool = False,
+    residual_channel: int | None = None,
 ) -> np.ndarray:
     """Run tiled full-frame inference from observation features.
 
     When *residual* is True, the model operates at the target resolution
     (scale=1 internally) and its output is added to the last channel of
     *obs_features* (the classical SR baseline).
+
+    When *residual_channel* is set, each tiled model output is added to that
+    same-resolution input channel before overlap blending.  This is used by
+    V10 residual-over-observation inference over hybrid drizzle channel 5.
     """
 
     features = np.asarray(obs_features, dtype=np.float32)
@@ -54,6 +61,10 @@ def infer_full_frame(
         raise ValueError("obs_features must have shape (C, H_lr, W_lr)")
     if scale <= 0:
         raise ValueError("scale must be positive")
+    if residual and residual_channel is not None:
+        raise ValueError("residual and residual_channel modes are mutually exclusive")
+    if residual_channel is not None and not (0 <= int(residual_channel) < features.shape[0]):
+        raise ValueError(f"residual_channel out of range for {features.shape[0]} input channels")
     if patch_size_hr <= 0 or patch_size_hr % scale != 0:
         raise ValueError("patch_size_hr must be positive and divisible by scale")
     if overlap < 0 or overlap >= patch_size_hr:
@@ -88,7 +99,16 @@ def infer_full_frame(
                 dtype=torch.float16,
                 enabled=requested_device.type == "cuda",
             ):
-                pred = model(tensor).detach().cpu().numpy()[0, 0].astype(np.float32, copy=False)
+                pred_tensor = model(tensor)
+                if residual_channel is not None:
+                    residual_patch = tensor[:, int(residual_channel):int(residual_channel) + 1, :, :]
+                    if pred_tensor.shape != residual_patch.shape:
+                        raise RuntimeError(
+                            f"residual output shape {pred_tensor.shape} does not match "
+                            f"input channel patch {residual_patch.shape}"
+                        )
+                    pred_tensor = residual_patch + pred_tensor
+                pred = pred_tensor.detach().cpu().numpy()[0, 0].astype(np.float32, copy=False)
             y_hr = y_lr * model_scale
             x_hr = x_lr * model_scale
             rows, cols = pred.shape
@@ -122,6 +142,7 @@ def infer_from_burst(
     residual: bool = False,
     classical_sr: np.ndarray | None = None,
     input_mode: str = "lr",
+    residual_channel: int | None = None,
 ) -> np.ndarray:
     """Fuse an LR burst and run tiled UNet inference.
 
@@ -132,7 +153,7 @@ def infer_from_burst(
     When *input_mode* is ``"hybrid_drizzle2x"``, 5ch fused features are
     upsampled to 2x and concatenated with 3ch scatter drizzle at 2x,
     yielding an 8ch input at 2x grid.  The model operates at scale=1
-    (direct prediction, no residual add).
+    (direct prediction, optionally with residual_channel=5 for V10).
     """
 
     if input_mode == "hybrid_drizzle2x":
@@ -149,6 +170,7 @@ def infer_from_burst(
             overlap=overlap,
             device=device,
             residual=False,
+            residual_channel=residual_channel,
         )
 
     features = fuse_burst_to_features(lr_burst, shifts, sigma_bg=sigma_bg)
@@ -169,4 +191,5 @@ def infer_from_burst(
         overlap=overlap,
         device=device,
         residual=residual,
+        residual_channel=residual_channel,
     )

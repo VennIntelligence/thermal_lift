@@ -16,6 +16,7 @@ from scipy.ndimage import gaussian_filter, laplace
 from tcforge.highpass import highpass_preprocess
 from torch.utils.tensorboard import SummaryWriter
 
+from .dataset import HYBRID_DRIZZLE_MEAN_CHANNEL
 from .inference import infer_from_burst
 
 
@@ -215,6 +216,8 @@ def maybe_log_real_eval(
     scale = int(training_config.scale)
     patch_size_hr = int(training_config.patch_size_hr)
     residual = bool(training_config.residual)
+    residual_mode = str(getattr(training_config, "residual_mode", "none"))
+    residual_channel = HYBRID_DRIZZLE_MEAN_CHANNEL if residual_mode == "drizzle2x" else None
     input_mode = str(getattr(training_config, "input_mode", "lr"))
     sigma_bg = float(config.highpass_sigma or training_config.highpass_sigma)
 
@@ -230,6 +233,7 @@ def maybe_log_real_eval(
             overlap=int(config.overlap),
             device=str(device),
             residual=residual,
+            residual_channel=residual_channel,
             sigma_bg=sigma_bg,
             input_mode=input_mode,
         ).astype(np.float32, copy=False)

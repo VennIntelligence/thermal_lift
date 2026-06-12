@@ -21,7 +21,7 @@ from torch.utils.tensorboard import SummaryWriter
 from tqdm import tqdm
 
 from .config import TrainingConfig, config_from_args
-from .dataset import ThermalSRDataset, SceneInterleavedSampler
+from .dataset import HYBRID_DRIZZLE_MEAN_CHANNEL, ThermalSRDataset, SceneInterleavedSampler
 from .losses import ContourSRLoss, ThermalSRLoss
 from .model import ThermalSRUNet
 from .real_eval import RealEvalConfig, maybe_log_real_eval
@@ -77,6 +77,11 @@ def _to_device_tensor(tensor: torch.Tensor, *, device: torch.device, channels_la
     if channels_last and out.ndim == 4:
         out = out.contiguous(memory_format=torch.channels_last)
     return out
+
+
+def _delta_l1_penalty(delta: torch.Tensor) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    delta_f = delta.float()
+    return delta_f.abs().mean(), delta_f.detach().mean(), delta_f.detach().std(unbiased=False)
 
 
 def _save_checkpoint(
@@ -294,6 +299,12 @@ def train(config: TrainingConfig) -> Path:
             print(f"Residual mode: {config.in_channels}ch@{config.scale}x input → model(scale=1) → residual + classical_sr")
         if config.input_mode == "hybrid_drizzle2x":
             print(f"Hybrid drizzle 2x mode: {config.in_channels}ch@2x input (5ch fused↑2x + 3ch drizzle@2x) → model(scale=1) → direct predict")
+        if config.residual_mode == "drizzle2x":
+            print(
+                "Residual-over-observation mode: "
+                f"pred = hybrid ch{HYBRID_DRIZZLE_MEAN_CHANNEL} drizzle mean + model delta; "
+                f"L1(delta) weight={config.residual_penalty_weight:g}"
+            )
 
     model.train()
     progress = tqdm(
@@ -327,12 +338,18 @@ def train(config: TrainingConfig) -> Path:
                             batch["gap_weight"], device=device, channels_last=config.channels_last,
                         )
 
+                delta_stats: tuple[torch.Tensor, torch.Tensor] | None = None
                 with autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
                     pred = model(obs)
                     if config.residual:
                         # Residual skip: add classical_sr (last input channel) to model output
                         classical_sr_batch = obs[:, -1:, :, :]
                         pred = classical_sr_batch + pred
+                    elif config.residual_mode == "drizzle2x":
+                        delta = pred
+                        pred = obs[:, HYBRID_DRIZZLE_MEAN_CHANNEL:HYBRID_DRIZZLE_MEAN_CHANNEL + 1, :, :] + delta
+                        residual_penalty, delta_mean, delta_std = _delta_l1_penalty(delta)
+                        delta_stats = (delta_mean, delta_std)
                     if pred.shape != target.shape:
                         raise RuntimeError(f"model output shape {pred.shape} does not match target {target.shape}")
                     if isinstance(criterion, ContourSRLoss):
@@ -356,6 +373,10 @@ def train(config: TrainingConfig) -> Path:
                     else:
                         edge = _to_device_tensor(batch["hr_edge"], device=device, channels_last=config.channels_last)
                         losses = criterion(pred, target, edge_mask=edge)
+                    if config.residual_mode == "drizzle2x":
+                        losses = dict(losses)
+                        losses["residual_penalty"] = residual_penalty
+                        losses["total"] = losses["total"] + config.residual_penalty_weight * residual_penalty
                     total = losses["total"]
                 if not torch.isfinite(total):
                     raise FloatingPointError(f"non-finite loss at step {step}: {losses}")
@@ -401,6 +422,10 @@ def train(config: TrainingConfig) -> Path:
                             writer.add_scalar("loss/total_ema50", ema_loss, step)
                         if use_amp:
                             writer.add_scalar("train/amp_scaler_scale", scaler.get_scale(), step)
+                        if delta_stats is not None:
+                            delta_mean, delta_std = delta_stats
+                            writer.add_scalar("residual/delta_mean", delta_mean.item(), step)
+                            writer.add_scalar("residual/delta_std", delta_std.item(), step)
 
                 # --- TensorBoard images ---
                 if (

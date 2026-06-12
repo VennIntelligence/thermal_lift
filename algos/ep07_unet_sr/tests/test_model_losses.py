@@ -8,6 +8,7 @@ from torch.amp import GradScaler, autocast
 from unet_sr.losses import ContourSRLoss, ThermalSRLoss, forward_model_loss, sobel_edges
 from unet_sr.model import ThermalSRUNet
 from unet_sr.mask_weights import compute_mask_loss_weights
+from unet_sr.train import _delta_l1_penalty
 
 
 def test_unet_outputs_scaled_patch_without_batchnorm() -> None:
@@ -91,6 +92,21 @@ def test_contour_sr_loss_weight_shape_mismatch_raises() -> None:
 
     with pytest.raises(ValueError, match="thin_weight shape mismatch"):
         loss(pred, target, thin_weight=bad)
+
+
+def test_residual_penalty_increases_with_delta_magnitude() -> None:
+    base_total = torch.tensor(1.0)
+    weight = 0.5
+    small_delta = torch.ones(2, 1, 8, 8) * 0.1
+    large_delta = torch.ones(2, 1, 8, 8) * 0.4
+
+    small_penalty, _, _ = _delta_l1_penalty(small_delta)
+    large_penalty, _, _ = _delta_l1_penalty(large_delta)
+    small_total = base_total + weight * small_penalty
+    large_total = base_total + weight * large_penalty
+
+    assert large_penalty > small_penalty
+    assert large_total > small_total
 
 
 def test_mask_loss_weights_boost_thin_structures_and_narrow_gaps() -> None:

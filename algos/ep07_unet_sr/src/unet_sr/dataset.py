@@ -19,6 +19,8 @@ from tcforge.storage import load_scene_compact
 from .mask_weights import compute_mask_loss_weights_np
 
 
+HYBRID_DRIZZLE_MEAN_CHANNEL = 5
+
 
 
 

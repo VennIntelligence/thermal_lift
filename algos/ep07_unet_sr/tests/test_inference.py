@@ -44,6 +44,11 @@ class IdentityRefine(torch.nn.Module):
         return x[:, :1]
 
 
+class ZeroRefine(torch.nn.Module):
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return torch.zeros_like(x[:, :1])
+
+
 def test_infer_from_burst_hybrid_drizzle2x_shape() -> None:
     """V9A: hybrid_drizzle2x inference produces correct HR output shape."""
     model = IdentityRefine()
@@ -58,3 +63,34 @@ def test_infer_from_burst_hybrid_drizzle2x_shape() -> None:
 
     assert out.shape == (16, 20)
     assert np.isfinite(out).all()
+
+
+def test_infer_full_frame_residual_channel_adds_input_channel() -> None:
+    model = ZeroRefine()
+    obs = np.zeros((8, 7, 9), dtype=np.float32)
+    anchor = np.arange(63, dtype=np.float32).reshape(7, 9) / 10.0
+    obs[5] = anchor
+
+    out = infer_full_frame(
+        model,
+        obs,
+        scale=1,
+        patch_size_hr=4,
+        overlap=1,
+        device="cpu",
+        residual_channel=5,
+    )
+
+    assert out.shape == anchor.shape
+    assert np.allclose(out, anchor, atol=1e-6)
+
+
+def test_infer_full_frame_without_residual_channel_preserves_old_direct_path() -> None:
+    model = ZeroRefine()
+    obs = np.zeros((8, 7, 9), dtype=np.float32)
+    obs[5] = 3.0
+
+    out = infer_full_frame(model, obs, scale=1, patch_size_hr=4, overlap=1, device="cpu")
+
+    assert out.shape == (7, 9)
+    assert np.allclose(out, 0.0, atol=1e-6)

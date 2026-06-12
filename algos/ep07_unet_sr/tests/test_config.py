@@ -97,3 +97,63 @@ def test_config_rejects_hybrid_forward_model_without_2x_geometry() -> None:
             "--forward-model-weight", "0.1",
             "--thin-boost", "3.0", "--gap-boost", "2.0",
         ])
+
+
+def test_config_allows_drizzle2x_residual_mode() -> None:
+    cfg = config_from_args([
+        "--training-pool-dir", "dummy_pool",
+        "--input-mode", "hybrid_drizzle2x",
+        "--scale", "2",
+        "--residual-mode", "drizzle2x",
+        "--residual-penalty-weight", "0.25",
+        "--thin-boost", "3.0", "--gap-boost", "2.0",
+    ])
+
+    assert cfg.residual_mode == "drizzle2x"
+    assert cfg.residual_penalty_weight == 0.25
+    assert cfg.input_mode == "hybrid_drizzle2x"
+    assert cfg.in_channels == 8
+
+
+def test_config_rejects_drizzle2x_residual_without_hybrid_input() -> None:
+    with pytest.raises(ValueError, match="requires input_mode='hybrid_drizzle2x'"):
+        config_from_args([
+            "--training-pool-dir", "dummy_pool",
+            "--scale", "2",
+            "--residual-mode", "drizzle2x",
+            "--thin-boost", "3.0", "--gap-boost", "2.0",
+        ])
+
+
+def test_config_rejects_drizzle2x_residual_without_scale_2() -> None:
+    with pytest.raises(ValueError, match="requires --scale 2"):
+        config_from_args([
+            "--training-pool-dir", "dummy_pool",
+            "--input-mode", "hybrid_drizzle2x",
+            "--residual-mode", "drizzle2x",
+            "--thin-boost", "3.0", "--gap-boost", "2.0",
+        ])
+
+
+def test_config_rejects_drizzle2x_residual_with_forward_model() -> None:
+    with pytest.raises(ValueError, match="mutually exclusive with forward_model_weight"):
+        config_from_args([
+            "--training-pool-dir", "dummy_pool",
+            "--input-mode", "hybrid_drizzle2x",
+            "--scale", "2",
+            "--residual-mode", "drizzle2x",
+            "--forward-model-weight", "0.1",
+            "--thin-boost", "3.0", "--gap-boost", "2.0",
+        ])
+
+
+def test_config_rejects_drizzle2x_residual_with_legacy_residual() -> None:
+    with pytest.raises(ValueError, match="cannot be combined with --residual"):
+        config_from_args([
+            "--training-pool-dir", "dummy_pool",
+            "--input-mode", "hybrid_drizzle2x",
+            "--scale", "2",
+            "--residual-mode", "drizzle2x",
+            "--residual",
+            "--thin-boost", "3.0", "--gap-boost", "2.0",
+        ])

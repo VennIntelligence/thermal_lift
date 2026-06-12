@@ -53,6 +53,8 @@ class TrainingConfig:
     tb_log_dir: str = ""
     tb_image_every: int = 0
     residual: bool = False
+    residual_mode: str = "none"
+    residual_penalty_weight: float = 0.0
     resume_from: str = ""
     prefetch_factor: int = 4
     scenes_per_bucket: int = 0  # 0 = auto (16)
@@ -70,6 +72,19 @@ class TrainingConfig:
         if self.device == "cpu" and self.amp:
             print("AMP requested on CPU; disabling AMP.")
             self.amp = False
+        if self.residual_mode not in ("none", "drizzle2x"):
+            raise ValueError("residual_mode must be 'none' or 'drizzle2x'")
+        if self.residual_penalty_weight < 0:
+            raise ValueError("residual_penalty_weight must be >= 0")
+        if self.residual_mode == "drizzle2x":
+            if self.input_mode != "hybrid_drizzle2x":
+                raise ValueError("residual_mode='drizzle2x' requires input_mode='hybrid_drizzle2x'")
+            if self.scale != 2:
+                raise ValueError("residual_mode='drizzle2x' requires --scale 2")
+            if self.residual:
+                raise ValueError("residual_mode='drizzle2x' cannot be combined with --residual")
+            if self.forward_model_weight > 0:
+                raise ValueError("residual_mode='drizzle2x' is mutually exclusive with forward_model_weight > 0")
         if self.residual and self.input_mode == "hybrid_drizzle2x":
             raise ValueError("residual and hybrid_drizzle2x modes are mutually exclusive")
         if self.residual and self.in_channels == 5:
@@ -319,6 +334,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
         help="Residual refinement mode: 6ch@2x input (5 fused upsampled + classical_sr), model learns residual.",
     )
     parser.add_argument(
+        "--residual-mode",
+        default=TrainingConfig.residual_mode,
+        choices=["none", "drizzle2x"],
+        help="Observation residual parameterization. 'drizzle2x' predicts a delta over hybrid ch5 "
+             "(drizzle mean @2x) and requires --input-mode hybrid_drizzle2x --scale 2.",
+    )
+    parser.add_argument(
+        "--residual-penalty-weight",
+        type=float,
+        default=TrainingConfig.residual_penalty_weight,
+        help="L1 penalty weight on the model delta when --residual-mode drizzle2x is enabled.",
+    )
+    parser.add_argument(
         "--resume",
         dest="resume_from",
         default=TrainingConfig.resume_from,
@@ -440,6 +468,8 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         tb_log_dir=args.tb_log_dir,
         tb_image_every=args.tb_image_every,
         residual=args.residual,
+        residual_mode=args.residual_mode,
+        residual_penalty_weight=args.residual_penalty_weight,
         resume_from=args.resume_from,
         prefetch_factor=args.prefetch_factor,
         scenes_per_bucket=args.scenes_per_bucket,

@@ -8,6 +8,63 @@
 
 ## 变更记录
 
+### [ACL-020] 2026-06-12 — V10: residual-over-observation 参数化 + 残差幅度惩罚
+
+**问题诊断**:
+- V9A 证明 hybrid 2x drizzle 输入能让中心细 zigzag 的真实相位信息进入网络，但 30K 左右出现保真悬崖：`hp_corr_input` 从约 0.974 跌到约 0.906，并在后期平台上被合成结构先验主导。
+- V9A 整条训练时间轴的 fidelity-sharpness 前沿被 EP10 TGV 工作点支配：TGV 约为 `hp_corr_input=0.960, sharp_p95=0.96`；UNet 20K 保真高但偏软，30K+ 锐度高但主要来自观测去相关的过冲/幻觉。
+- V9B/V9D 表明 loss 侧 1x forward consistency 难以约束漂移方向；V10 需要把“保持观测”变成输出参数化的零成本默认，而不是训练后期靠隐式 checkpoint 早停。
+
+**修改内容**:
+1. `algos/ep07_unet_sr/src/unet_sr/config.py`: 新增 `residual_mode: str = "none"` 与 `residual_penalty_weight: float = 0.0`，CLI 对应 `--residual-mode {none,drizzle2x}` 和 `--residual-penalty-weight`。
+2. `config.py`: 校验 `residual_mode="drizzle2x"` 仅允许与 `input_mode="hybrid_drizzle2x"`、`scale=2`、旧 `--residual` 关闭、`forward_model_weight=0` 同用，保证 V10 是单因子 residual-over-observation 实验。
+3. `algos/ep07_unet_sr/src/unet_sr/train.py`: V10 路径中模型输出解释为 `delta`，训练预测为 `pred = obs[:, 5:6] + delta`，其中 ch5 是 hybrid drizzle mean @2x；loss 中新增 `residual_penalty_weight * mean(abs(delta))`，TensorBoard 记录 `loss/residual_penalty`、`residual/delta_mean`、`residual/delta_std`。
+4. `algos/ep07_unet_sr/src/unet_sr/inference.py`: `infer_full_frame` 新增 `residual_channel` 参数，tile 推理时先把模型输出 delta 加回同一 input channel 再 overlap blend；`infer_from_burst` 在 hybrid 路径透传该参数。
+5. `algos/ep07_unet_sr/src/unet_sr/real_eval.py`: 从 checkpoint 的 `training_config.residual_mode` 自动选择 residual channel，确保真实数据 eval 与训练使用同一 ch5 加法路径。
+6. `algos/ep07_unet_sr/tests/`: 增加 config 合法/非法组合、zero-model residual-channel 推理、残差 L1 penalty 单调性、旧 direct-predict 推理路径回归测试。
+7. `algos/ep07_unet_sr/scripts/run_v10.md`: 记录 smoke 与全量 lambda sweep 命令，供用户手动启动 GPU 批。
+
+**预期效果**:
+- `delta=0` 时输出严格等于观测域最保真的 drizzle mean ch5，让“保留观测”成为模型默认解。
+- L1 残差惩罚把 fidelity-sharpness 权衡从训练步数显式转移到 `lambda`，让 V10 可以扫描受控 Pareto 前沿。
+- 风险：过大的 `residual_penalty_weight` 会把模型锁死在软的 drizzle 输入；过小则可能退化回 V9A 的后期先验侵蚀。
+
+**推荐参数**:
+
+```bash
+cd algos/ep07_unet_sr
+CUDA_VISIBLE_DEVICES=<GPU_ID> uv run python -m unet_sr.train \
+  --training-pool-dir ../../data/synthetic/training_pool_2x_aa_burst \
+  --output-dir outputs/ep07_v10_residual_lam${LAMBDA_TAG} \
+  --input-mode hybrid_drizzle2x \
+  --residual-mode drizzle2x \
+  --residual-penalty-weight <LAMBDA> \
+  --scale 2 \
+  --batch-size 128 \
+  --num-workers 8 \
+  --total-steps 25000 \
+  --save-every 2500 \
+  --log-every 100 \
+  --compile \
+  --mse-loss-weight 0.3 \
+  --highpass-loss-weight 0.8 \
+  --structure-boost 2.0 \
+  --grad-vector-weight 0.15 \
+  --thin-boost 3.0 \
+  --gap-boost 2.0
+```
+
+**训练结果**: _(训练后填写)_
+- 输出目录: `outputs/ep07_v10_residual_lam*/`
+- 代码验证: `cd algos/ep07_unet_sr && CUDA_VISIBLE_DEVICES= uv run pytest -q tests/test_config.py tests/test_inference.py tests/test_model_losses.py tests/test_real_eval.py` → 36 passed, 3 skipped（CUDA AMP 测试因 GPU 不可见被跳过）。
+- 视觉效果: _TODO_
+- 关键指标: _TODO_
+- 结论: _TODO_
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/inference.py`, `algos/ep07_unet_sr/src/unet_sr/real_eval.py`, `algos/ep07_unet_sr/tests/test_config.py`, `algos/ep07_unet_sr/tests/test_inference.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`, `algos/ep07_unet_sr/scripts/run_v10.md`
+
+---
+
 ### [ACL-019] 2026-06-11 — V9C: hybrid 输入下用合法 1x lr_obs 启用 forward consistency
 
 **问题诊断**:
