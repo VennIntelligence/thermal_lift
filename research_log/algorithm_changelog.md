@@ -54,14 +54,38 @@ CUDA_VISIBLE_DEVICES=<GPU_ID> uv run python -m unet_sr.train \
   --gap-boost 2.0
 ```
 
-**训练结果**: _(训练后填写)_
-- 输出目录: `outputs/ep07_v10_residual_lam*/`
-- 代码验证: `cd algos/ep07_unet_sr && CUDA_VISIBLE_DEVICES= uv run pytest -q tests/test_config.py tests/test_inference.py tests/test_model_losses.py tests/test_real_eval.py` → 36 passed, 3 skipped（CUDA AMP 测试因 GPU 不可见被跳过）。
-- 视觉效果: _TODO_
-- 关键指标: _TODO_
-- 结论: _TODO_
+**训练结果**: _(2026-06-13 回填；含一处评估 bug 的发现与修正)_
 
-**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/inference.py`, `algos/ep07_unet_sr/src/unet_sr/real_eval.py`, `algos/ep07_unet_sr/tests/test_config.py`, `algos/ep07_unet_sr/tests/test_inference.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`, `algos/ep07_unet_sr/scripts/run_v10.md`
+- 输出目录: `outputs/ep07_v10_resid_lam002/`、`outputs/ep07_v10_resid_lam005/`、`outputs/ep07_v10_resid_lam015/`（各 25K，5K/.../25K checkpoint）。
+- 代码验证: `cd algos/ep07_unet_sr && CUDA_VISIBLE_DEVICES= uv run pytest -q tests/test_config.py tests/test_inference.py tests/test_model_losses.py tests/test_real_eval.py` → 36 passed, 3 skipped（CUDA AMP 测试因 GPU 不可见被跳过）。
+
+- **⚠️ 实际运行偏离推荐配置（两处混杂）**：
+  1. **batch_size=64**（推荐/权威 `run_v10.md` 为 **128**）——重新引入了本实验本应顺带排除的 bs 混杂（见 `docs/next_move_plan.md` §8 caveat）。
+  2. **λ 取 0.02/0.05/0.15**（而非 `run_v10.md` 标定的 0.0203/0.0406/0.0609）。但 `run_v10.md` 的标定公式本身有误：它把「未乘 λ 的 `mean(|delta|)` / total ≈ 24.6%」当成 λ=0.05 时的损失占比，实际占比是 `λ·penalty/total`，λ=0.05 时仅 ~1.2%、λ=0.15 时仅 ~3.7%。**残差惩罚在 0.02–0.15 区间对总损失贡献可忽略**，等于没有真正约束 delta 幅值——这解释了为何三档 λ 结果几乎重合。
+
+- **🔴 评估 bug（已修复）**：fine-window Pareto 评估脚本 `scripts/v9_review/common.py::infer_checkpoint_cached` 调 `infer_from_burst` 时**未传 `residual_channel`**（只传了旧 `residual` 旗标，V10 下为 False），导致 V10 缓存里存的是**裸 delta**（mean ≈ -0.008°C 残差场），而非 `drizzle_mean(ch5) + delta` 的真实输出。`real_eval.py` 的漂移曲线路径无此问题（line 219-220 已读 `residual_mode` 并传 `residual_channel`）。
+  - 错误判定（基于裸 delta）：hp_corr_input≈0.46、lattice≈0.08 → 曾被记为「Claim 4 灾难性失败、超标 16×」。**此判定作废。**
+  - 修复：`common.py` 现从 `cfg["residual_mode"]` 派生 `residual_channel=5` 并透传；单 checkpoint `--force` 重推理验证通过（`v10_lam005_25k` 修复后 0.8804，与后处理 `delta+base` 的 0.880 逐行一致）。
+  - 修正版产物：`output/ep07_v9_review/v10_pareto/{v9a_pareto_metrics.csv, v9a_pareto_scatter.png, v9a_checkpoint_strip.png}`（15 checkpoint 全部重算）。
+
+- **关键指标（修正后；中心细线窗口，hp_corr_input=保真↑，sharp_p95=锐度↑，lattice↓）**：
+
+  | 对象 | hp_corr_input | sharp_p95 | lattice | hp_corr_tgv |
+  |---|---|---|---|---|
+  | drizzle 输入（观测域上限） | 1.000 | 0.503 | 0.0015 | 0.960 |
+  | **EP10 TGV（经典参照）** | **0.960** | **0.959** | 0.0169 | 1.000 |
+  | V10 λ=0.02 @5K（最保真点） | 0.908 | 1.190 | 0.0170 | 0.915 |
+  | V10 λ=0.05 @25K | 0.880 | 1.367 | 0.0236 | 0.892 |
+  | V10 三档 @25K 区间 | 0.880–0.884 | 1.30–1.37 | 0.0218–0.0243 | 0.892–0.895 |
+
+- **视觉/读数**：修正后 V10 落在 **V9A 后期同一区域**（V9A 40–60K：hp_in≈0.906、sharp≈1.2、lattice≈0.015）——比 TGV 锐（sharp 1.2–1.37 > 0.96），但保真不及 TGV（hp_in 0.88–0.91 < 0.96），lattice 与 TGV 同量级。**V10 不支配 TGV**，是「用保真换锐度」的 V9A 式折中点，不是干净的伪影/幻觉灾难。
+
+- **结论**：
+  1. 残差参数化 + 当前 λ 区间（0.02–0.15）**未能把输出绑在 drizzle base 附近**（惩罚损失占比仅 ~1–4%），模型仍漂到 V9A 的 fidelity≈0.88 折中区 → **Claim 4 不是正结果**（未支配 TGV）。
+  2. 但本轮**也不能作为 Claim 4 的干净反证**：λ 区间太弱、未探到高保真端，且 bs=64 混杂未消除。要把 Claim 4 做成「即使显式残差控制也无法越过经典前沿」的铁案，需补**高-λ（bs=128、25K）扫描**把 fidelity↑/sharp↓ 的折中曲线探完整（见 `algos/ep07_unet_sr/scripts/run_v10_highlam.md`）。
+  3. 当前「学习能微微越过 TGV」的最干净证据仍是**零训练 fusion baseline**（`TGV + 0.1·V9A60 delta` 支配 TGV），而非 V10。
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/inference.py`, `algos/ep07_unet_sr/src/unet_sr/real_eval.py`, `algos/ep07_unet_sr/scripts/v9_review/common.py`（评估 bug 修复）, `algos/ep07_unet_sr/tests/test_config.py`, `algos/ep07_unet_sr/tests/test_inference.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`, `algos/ep07_unet_sr/scripts/run_v10.md`
 
 ---
 

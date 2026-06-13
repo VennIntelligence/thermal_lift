@@ -14,6 +14,7 @@ import pandas as pd
 from tcforge.classical_sr import drizzle_features
 from tcforge.highpass import highpass_preprocess
 
+from unet_sr.dataset import HYBRID_DRIZZLE_MEAN_CHANNEL
 from unet_sr.inference import infer_from_burst
 from unet_sr.model import ThermalSRUNet
 from unet_sr.real_eval import (
@@ -230,6 +231,11 @@ def infer_checkpoint_cached(
     ckpt = torch.load(ckpt_path, map_location="cpu", weights_only=False)
     cfg = ckpt["config"]
     model_scale = 1 if spec.input_mode == "hybrid_drizzle2x" else int(cfg["scale"])
+    # V10 residual-over-observation: model emits delta and the drizzle mean base
+    # (hybrid channel 5) must be re-added at inference, exactly as real_eval does.
+    # Without this the harness scores the bare residual field, not drizzle + delta.
+    residual_mode = str(cfg.get("residual_mode", "none"))
+    residual_channel = HYBRID_DRIZZLE_MEAN_CHANNEL if residual_mode == "drizzle2x" else None
     model = ThermalSRUNet(
         in_channels=int(cfg["in_channels"]),
         out_channels=int(cfg["out_channels"]),
@@ -250,6 +256,7 @@ def infer_checkpoint_cached(
         residual=bool(cfg.get("residual", False)),
         sigma_bg=sigma_bg,
         input_mode=spec.input_mode,
+        residual_channel=residual_channel,
     ).astype(np.float32, copy=False)
     cache_path.parent.mkdir(parents=True, exist_ok=True)
     np.save(cache_path, pred)
