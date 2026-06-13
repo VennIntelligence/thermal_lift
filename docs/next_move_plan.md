@@ -7,6 +7,10 @@
 
 ---
 
+> **⚠️ 2026-06-13 更新（务必先读）**: 本文档 §5 Claim 3「前沿被 TGV 支配」与 §6「TGV 做中心细结构主证据」的措辞**已被取代**。
+> 复核发现：①V10 fine-window 评估曾漏加 drizzle base（已修复），修正后 V10 落 V9A 区、不支配 TGV；②中心细线量化显示 TGV 有 TV-staircase 珠串、学习臂 grain（lattice）最高且无 GT 不可验证——**无单一可认证赢家**。
+> C4/Claim 3 的权威改写见 `docs/paper/reframe_c4_claim3.md`；高-λ 新判据见 `algos/ep07_unet_sr/scripts/run_v10_highlam.md`。
+
 ## 1. TL;DR — 三个核心发现
 
 1. **相位信息瓶颈已证实并被打通**：v8.1 时代 5 个 1x 统计输入通道在进网络前坍缩了 248 帧的亚像素相位信息（ACL-015 推断）。V9A 的 hybrid 2x drizzle 输入让中心最细 zigzag「梯子」结构的信息真正进入网络——早期 checkpoint（10K–20K）能以 highpass corr ≈ 0.97 透传它。

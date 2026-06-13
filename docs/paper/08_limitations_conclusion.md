@@ -33,8 +33,12 @@ effective remedy [V9A/V9C wording pending]; (iii) synthetic-prior-trained networ
 the observation operator's null space — a failure mode invisible to forward-consistency losses of
 any band, measurable with two curves, and manageable by evidence injection plus Pareto-gated
 checkpoint selection rather than stronger penalties. Classical anchored reconstruction
-(anisotropic coverage-weighted TGV; fine-grid MAP-TV) sets the acceptance gate and remains the
-trustworthy deliverable wherever learned arms fail it.
+(anisotropic coverage-weighted TGV; fine-grid MAP-TV) sets the acceptance gate and is the most
+observation-faithful arm, though it imprints a mild total-variation staircase on the finest
+contours; learned arms are sharper by inspection but carry the most unverifiable high-frequency
+content. In this no-GT regime we therefore certify no single winner: we report verifiable fidelity
+proxies, a structural grain proxy with dual-domain visual gates, and an explicitly task-level
+contour-legibility preference, and deliver only what survives the controls.
 
 The bounded claim — contour-level 2x enhancement under explicit gates — is, we argue, the honest
 and transferable formulation for no-GT industrial SR: measure the operator, bound the

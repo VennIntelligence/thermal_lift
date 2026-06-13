@@ -7,9 +7,20 @@
 
 ---
 
+> ## ✅ READY TO LAUNCH（2026-06-13 标定后定稿，务必先读 — 覆盖 §1/§5/§6 旧 λ）
+>
+> **最终 spec**：4 臂 **λ ∈ {0.2, 0.5, 1.2, 3.0}**、**bs=128**（已确认未降）、**patch=192**（3090 OOM 被迫从 256 降；全臂统一，记可比性 caveat）、25K 步、`--save-every 2500`。判据见 §2（平衡版，**不追求"打败 TGV"**）。
+>
+> 1. **成功判据（§0/§2/§8/§10）**：学习输出（含 V10）在中心细线窗口携带的高频内容**最多**（v10 lattice 0.024 > TGV 0.017 > drizzle 0.0015），无 GT 不可验证——**TGV 并非 grain 最多者**。目标 = **保真 hp_corr_input 高 + grain(lattice) ≤ TGV(0.0169) + 梳齿清晰连续**（底稿 `docs/paper/reframe_c4_claim3.md`）。
+> 2. **λ 区间定为 {0.2, 0.5, 1.2, 3.0}（几何跨越，由推理定，非标定）**：旧 V10（patch256/bs64）λ≤0.15 收敛仍是自由漂移（hp_corr≈0.88、lattice≈0.024）⇒ 下限取 0.2（刚过"过弱"）；几何跨到 3.0（强绑定/近 drizzle 软态锚）。中间 0.5/1.2 覆盖过渡。**收敛曲线由 25K 的 2.5K 间隔 checkpoint + 事后 fine-window 评估来读**，Phase 2 在 grain 跨过 0.0169 的两臂之间二分细化。
+> 3. **300 步标定不可靠（仅供参考）**：LR 才到峰值 0.6%，`mean|delta|` 非单调（λ=0.1→0.021, 0.2→0.040, 0.4→0.032, 0.8→0.007）、全部 sub-noise。**不要用它选 λ**；"占比%"亦自限制不可外推。最终 λ 已按 2 定，凭收敛 checkpoint 判读。
+> 4. **bs/patch 已定**：bs=128 **已确认未降** ✓（bs 混杂已消除）；patch=192 全臂统一（现有对照臂旧 V10/V9A 为 patch=256，记 caveat；若有 ≥32GB 卡可改 patch=256 提升可比性，但需重测一致）。
+
+---
+
 ## 0. 你的任务（一句话）
 
-在 **batch_size=128、25K 步、完整 cosine 退火** 下，对 V10 残差参数化 `pred = drizzle_mean(ch5) + delta`（惩罚 `λ·mean|delta|`）做**高-λ 扫描**，把「保真↑/锐度↓」折中曲线从 V9A 区域一直探到 drizzle base，判定是否存在某个 λ 的 checkpoint **严格支配经典 TGV** 工作点。
+在 **batch_size=128、25K 步、完整 cosine 退火** 下，对 V10 残差参数化 `pred = drizzle_mean(ch5) + delta`（惩罚 `λ·mean|delta|`）做**残差强度扫描**，把「保真↑/锐度↓」折中曲线从 V9A 区域探到 drizzle base，判定残差约束能否产出「**锐而不 grain、保真不掉**」的工作点（**不是**"打败 TGV"——判据见 §2、HOLD 横幅、`docs/paper/reframe_c4_claim3.md`）。
 
 ## 1. 背景：为什么是高-λ（务必理解，否则会重蹈覆辙）
 
@@ -25,22 +36,26 @@
   | 1.6 | ~43% |
   | 3.2 | ~85% |
 
-## 2. 科学问题与成功判据
+  > ⚠️ **上表已作废**（见 READY 横幅 2/3）：①「占比%」自限制、不能线性外推；②300 步标定 LR 仅 0.6% peak、`mean|delta|` 非单调，不可用于选 λ。**最终 λ 已定为 {0.2, 0.5, 1.2, 3.0}**（由旧 V10 收敛行为推理），凭 25K checkpoint 判读收敛曲线。
 
-随 λ 增大，工作点应从 V9A 区 `(hp_in≈0.88, sharp≈1.3)` 沿曲线移向 drizzle base `(1.000, 0.503)`。问题：**这条曲线是否穿过 TGV 的右上方（同时更保真且更锐）？**
+## 2. 科学问题与成功判据（2026-06-13 重写 — 替换旧"支配 TGV"判据）
 
-中心细线窗口指标（`hp_corr_input`=保真↑，`sharp_p95`=锐度↑，`lattice_score`=格纹↓）参照点：
+> **判据改写的依据**：主线复核（`docs/paper/reframe_c4_claim3.md`）发现，原"在 (hp_corr_input, sharp_p95) 上支配 TGV"方向不成立——这两个轴**不度量轮廓连续性**，`sharp_p95` 还会被珠串/颗粒推高；而且 **TGV 并非 grain 最多者**，学习输出（含 V10）的高频 `lattice` 反而最高且无 GT 不可验证。所以本轮**不追求"打败 TGV"**。
 
-| 对象 | hp_corr_input | sharp_p95 | lattice | 备注 |
+**真正要回答的问题**：残差约束能否产出一个「**锐而不 grain、且保真不掉**」的工作点——即把旧 V10 过多的 grain（`lattice≈0.024`）压下去，同时保留中心梳齿的清晰/连续，且 `hp_corr_input` 不比 V9A 折中区更低。
+
+中心细线窗口参照点（`hp_corr_input`=保真↑，`sharp_p95`=锐度↑但**不可单用**，`lattice`=grain/HF↓）：
+
+| 对象 | hp_corr_input | sharp_p95 | lattice | 目视 |
 |---|---|---|---|---|
-| drizzle 输入（观测域上限） | 1.000 | 0.503 | 0.0015 | 软但不幻觉 |
-| **EP10 TGV（要被支配的目标）** | **0.960** | **0.959** | **0.0169** | 经典参照，非 GT |
-| 零训练 fusion（TGV+0.1·V9A60δ） | 0.963 | 0.970 | 0.0134 | 已知能微微支配 TGV 的后处理前沿 |
-| 旧 V10 三档 @25K（修正后） | 0.88–0.91 | 1.2–1.37 | 0.017–0.024 | 本轮要超越的起点 |
+| drizzle（观测，软上限） | 1.000 | 0.503 | 0.0015 | 连续但糊 |
+| **EP10 TGV（经典锚，非 GT）** | **0.960** | **0.959** | **0.0169** | 解析梳齿，有 TV-staircase 珠串 |
+| 旧 V10 三档 @25K（修正后） | 0.88–0.91 | 1.2–1.37 | 0.017–0.024 | 梳齿锐，但 grain 最多（要改善的起点） |
 
-**成功（Claim 4 正结果）**：某 checkpoint 同时满足
-`hp_corr_input ≥ 0.960` **且** `sharp_p95 ≥ 0.960` **且** `lattice_score ≤ 0.0169`，**且** 视觉门控通过（中心细线窗口无新增格纹/振铃）。
-**失败（Claim 4 干净反证）**：曲线全程位于 TGV 左上或右下，无点同时达标 → 升级为「即使显式残差控制也无法越过经典前沿」，并报告最接近的点与曲线形状。
+**有价值的工作点（不等于"打败 TGV"）**：某 checkpoint 满足
+`hp_corr_input ≥ 0.92`（保真高于旧 V10 折中区、趋向 drizzle）**且** `lattice ≤ 0.0169`（grain 不高于 TGV）**且** 视觉门控：中心梳齿清晰**连续**、无新增格纹/振铃。→ 说明显式残差约束能在"锐+保真+低 grain"间找到比自由漂移更好的点。
+**若全程做不到**（grain 始终 > TGV，或压低 grain 必然把保真/锐度也压回 drizzle 软态）：记为干净结论"显式残差控制无法在该网络/先验下同时拿到锐度与低 grain"，报告 (hp_corr_input, lattice, sharp_p95) 三维曲线随 λ 的走向。
+**红线**：任何结论都**不得**写成"学习支配/打败 TGV"，也不得把高 `sharp_p95` 单独当作成功；锐度必并报 `lattice` + 视觉，且"目视轮廓更可辨"只作 task-level 偏好、非保真证据。
 
 ## 3. 硬约束（违反即作废，必须逐条遵守）
 
@@ -71,9 +86,10 @@ ls ../../data/synthetic/training_pool_2x_aa_burst/scene_0000/drizzle_variants_2x
 
 预算：单臂 25K ≈ **3.5–4.25 h**（历史值）。4 臂串行单 GPU ≈ 16 h；多 GPU 可并行。
 
-## 5. （可选但推荐）λ 标定 smoke
+## 5. λ 标定 smoke（✅ 已完成 2026-06-13；结论：300 步不可靠，最终 λ 见 READY 横幅 / §6）
 
-在**真实训练池**上跑 300 步，读 TB 确认占比，必要时按损失量级重缩放 λ：
+> 已在 patch=192/bs=128 真实池跑过 4 档 300 步：`mean|delta|`(°C)：λ0.1→0.021, 0.2→0.040, 0.4→0.032, 0.8→0.007。
+> **非单调、全部 sub-noise、LR 仅 0.6% peak ⇒ 不可用于选 λ**。最终 λ={0.2,0.5,1.2,3.0} 由旧 V10 收敛行为推理（横幅 2）。下方命令仅留作复现参考。
 
 ```bash
 cd <REPO>/algos/ep07_unet_sr
@@ -87,13 +103,11 @@ CUDA_VISIBLE_DEVICES=0 uv run python -m unet_sr.train \
   --real-eval-frame-limit 48
 ```
 
-看 TB（`outputs/ep07_v10_hl_calib/tb_logs`）：取 `loss/residual_penalty`(未乘 λ) 与 `loss/total` 末几步均值，
-令早期占比 `λ·penalty/total`。**目标四档分别落在 ~10% / 20% / 40% / 80%**。
-若该池 `penalty/total` 明显偏离 0.04/0.15，则按 `λ = 目标占比 · (total/penalty)` 重算四档（保持四档覆盖 ~10%→~85%）。
+> ⚠️ 上述「按占比% 标定」方法**已证伪**（占比自限制 + 300 步太早）。**不要再用它选 λ**；最终 λ 已定（§6/横幅），靠 25K 收敛 checkpoint 判读 fidelity-grain 曲线。
 
 ## 6. Phase 1 — 四臂训练（核心，4 × 25K）
 
-默认四档 **λ ∈ {0.4, 0.8, 1.6, 3.2}**（标定后如需则替换）。逐臂模板（`<LAM>`/`<TAG>` 成对替换：0.4→040 / 0.8→080 / 1.6→160 / 3.2→320；`<GPU>` 选可用卡）：
+**最终四档 λ ∈ {0.2, 0.5, 1.2, 3.0}**（见 READY 横幅，几何跨越自由→强绑定）。逐臂模板（`<LAM>`/`<TAG>` 成对替换：0.2→020 / 0.5→050 / 1.2→120 / 3.0→300；`<GPU>` 选可用卡；双 GPU 可两两并行）：
 
 ```bash
 cd <REPO>/algos/ep07_unet_sr
@@ -104,6 +118,7 @@ CUDA_VISIBLE_DEVICES=<GPU> uv run python -m unet_sr.train \
   --residual-mode drizzle2x \
   --residual-penalty-weight <LAM> \
   --scale 2 \
+  --patch-size-hr 192 \
   --batch-size 128 \
   --num-workers 8 \
   --total-steps 25000 \
@@ -146,10 +161,10 @@ CUDA_VISIBLE_DEVICES= uv run python scripts/v9_review/run_pareto_sweep.py \
 
 ## 8. 判定逻辑
 
-1. 汇总四臂 `v9a_pareto_metrics.csv`，连同 TGV/drizzle/fusion 参照点画到一张 (hp_corr_input, sharp_p95) 平面。
-2. 是否有 checkpoint 落在 TGV 右上且 `lattice ≤ 0.0169`？
-   - **是** → 取该点做视觉门控（中心细线窗口，无新增格纹/振铃）→ 通过则 **Claim 4 正结果**。
-   - **否** → 报告最接近 TGV 的点、曲线随 λ 的走向（是否朝 drizzle 单调回软）→ **Claim 4 干净反证**。
+1. 汇总四臂 `v9a_pareto_metrics.csv`，连同 TGV/drizzle/旧 V10 参照点，画 (hp_corr_input, lattice) 与 (hp_corr_input, sharp_p95) 两张图；**lattice 必须作为独立第三轴呈现**，不要只看 (hp_corr_input, sharp_p95)。
+2. 是否有 checkpoint 满足 `hp_corr_input ≥ 0.92` **且** `lattice ≤ 0.0169` **且** 视觉门控（梳齿清晰连续、无新增格纹/振铃）？
+   - **是** → 说明残差约束拿到了「锐+保真+低 grain」的有价值工作点（**仍不写成"打败 TGV"**）。
+   - **否** → 报告 (hp_corr_input, lattice, sharp_p95) 随 λ 的三维走向、最佳折中点坐标 → 干净结论「显式残差控制无法同时拿到锐度与低 grain」。
 
 ## 9. Phase 2 — 可选精化（用剩余预算，总预算 4–8 × 25K）
 
@@ -165,9 +180,9 @@ CUDA_VISIBLE_DEVICES= uv run python scripts/v9_review/run_pareto_sweep.py \
 - 标定 smoke 占比（如跑）：
 - 每臂 fine-window Pareto（5K..25K）hp_corr_input / sharp_p95 / lattice / hp_corr_tgv 表：
 - 每臂漂移端点 artifact_score / raw_control_corr：
-- 是否有 checkpoint 支配 TGV(0.960, 0.959, ≤0.0169)？最佳点坐标：
+- 是否有 checkpoint 满足 hp_corr_input≥0.92 且 lattice≤0.0169 且视觉连续？最佳折中点坐标 (hp_corr_input, sharp_p95, lattice)：
 - 残差自检：缓存 npy 均值≈23？(是/否)
-- 判定：Claim 4 正结果 / 干净反证 + 决定性数字
+- 判定：有价值工作点 / 干净结论（不写"打败TGV"）+ 决定性三维数字
 - 异常（NaN/发散/降权重重启等）：
 - 产物路径：output/ep07_v9_review/v10_highlam/、ep07_eval_real_metrics.csv
 ```

@@ -57,9 +57,9 @@ Interpretation: Claim 1 不声明 2x drizzle 输入本身就是最终 SR 解；�
 
 Interpretation: 当前证据足以关闭“只靠 1x forward consistency 修 V9”的路线；但 Claim 2 的 2x2 矩阵完整闭合仍需要 V9C 终点。若 V9C 60K 也不能同时改善 artifact/corr 与中心窗口保真，则 Claim 2 可从“1x 输入臂已证实”升级为“hybrid 输入臂也证实”。
 
-## Claim 3: Prior Erosion and TGV-Dominated Pareto Frontier
+## Claim 3: Prior Erosion and a Proxy-Specific (not Absolute) Pareto
 
-**Claim.** 合成结构先验会随训练步数侵蚀真实观测细节。V9A 时间轴不是单调变好，而是在保真和锐度之间移动：20K 附近最保真但偏软，30K 以后 sharp_p95 上升同时 hp_corr_input 塌陷。当前 UNet checkpoint 的整条 fidelity-sharpness 前沿被 EP10 TGV 的工作点支配。
+**Claim.** 合成结构先验会随训练步数侵蚀真实观测细节。V9A 时间轴不是单调变好，而是在保真和锐度之间移动：20K 附近最保真但偏软，30K 以后 sharp_p95 上升同时 hp_corr_input 塌陷。在**观测保真 proxy** 上，当前 UNet 时间轴前沿不被严格优于 EP10 TGV 工作点——但这一「支配」是 **proxy 特定、非绝对**的：proxy（`hp_corr_input`、`sharp_p95`）不度量轮廓**连续性**，且 `sharp_p95` 无法区分连续锐线与珠串/颗粒。在结构 grain 读数（`lattice`）与目视上，TGV 在最细 trace 上呈 TV-staircase 珠串、学习臂呈 grain，**两者无单轴全胜**（详见 `docs/paper/reframe_c4_claim3.md`）。
 
 | Object / Step | `hp_corr_input` | `hp_corr_tgv` | `sharp_p95` | `lattice_score` | Reading |
 |---|---:|---:|---:|---:|---|
@@ -67,7 +67,7 @@ Interpretation: 当前证据足以关闭“只靠 1x forward consistency 修 V9�
 | EP10 TGV | 0.960 | 1.000 | 0.959 | 0.0169 | 当前经典参照，锐但含台阶/格纹风险 |
 | V9A 10K | 0.970 | 0.953 | 0.683 | 0.0010 | 可透传细结构，仍偏软 |
 | V9A 20K | 0.974 | 0.944 | 0.615 | 0.0009 | 最保真，格纹被压下，但锐度不足 |
-| V9A 25K | 0.935 | 0.931 | 0.831 | 0.0062 | 开始变锐，但保真已明显下降，被 TGV 支配 |
+| V9A 25K | 0.935 | 0.931 | 0.831 | 0.0062 | 开始变锐，但保真已明显下降，proxy 上被 TGV 压过（仅保真/锐度轴） |
 | V9A 30K | 0.908 | 0.908 | 1.147 | 0.0121 | 保真悬崖，锐度主要来自过冲/融合 |
 | V9A 40K-60K | 0.906 +/- 0.001 | 0.908 | 1.21-1.25 | 0.015 | 后期平台，锐但去相关 |
 
@@ -79,17 +79,19 @@ Interpretation: 当前证据足以关闭“只靠 1x forward consistency 修 V9�
 
 Interpretation: `sharp_p95` 和 Tenengrad 只能作为锐度 proxy。它们变大可能来自真实边缘增强，也可能来自振铃、饱和对比或假边缘；因此 Claim 3 必须绑定 `hp_corr_input`、视觉对照、lattice/artifact 指标和后续 split-half FRC，不能用锐度单轴宣称 SR 成功。
 
+补充（2026-06-13 中心细线窗口复核）：`lattice` 排序为 drizzle 0.0015 < v9a_20k 0.0009 < TGV 0.0169 < v9a_60k 0.0153 < **V10 0.024**——学习臂携带的高频内容最多、且无 GT 不可验证；TGV 的珠串是 TV 正则 staircase 伪影（观测 drizzle 本身连续）。据此 **C4 从「经典支配」改写为「互补失效、无 GT 可认证赢家」**，并新增「显式 task-level 轮廓可辨偏好（非保真证据）」轴。`sharp_p95`/`hp_corr_input` 平面不含连续性轴，引用时必须声明。
+
 ## Claim 4: Explicit Fidelity-Sharpness Control
 
 **Claim.** 将 fidelity-sharpness 权衡从“训练时长”这个隐式且失控的旋钮，改成显式设计参数，例如 V10 残差幅度惩罚 `lambda`，再检验学习方法能否越过经典 TGV 前沿。
 
 | Planned Evidence | Success Criterion | Figure / Data | Status |
 |---|---|---|---|
-| V10 lambda sweep | 至少一个工作点在 (`hp_corr_input`, `sharp_p95`) 上支配 TGV，且没有新增格纹/振铃 | `../../output/ep07_v9_review/v10_lambda_pareto.png` (TODO) | 待 V10 |
+| V10 lambda sweep（λ=0.02/0.05/0.15, bs64, patch256） | **新判据**（旧「支配 TGV」已弃）：保真 `hp_corr_input` 高 + grain `lattice` ≤ TGV(0.0169) + 梳齿连续 | `../../output/ep07_v9_review/v10_pareto/` | **已跑 + 评估已修正**：曾因评估未把 drizzle base 加回而误判「灾难失败」；修正后落 V9A 折中区（hp_corr 0.88, sharp 1.3, lattice 0.024），**不支配 TGV**；λ 区间过弱 + bs64 混杂 → 高-λ(bs128) 待跑（`run_v10_highlam.md`） |
 | zero-training fusion baseline | TGV anchor + V9A 60K 在 lambda=0.1-0.3 上支配 TGV 工作点；drizzle anchor 曲线保真高但不够锐 | `../../output/ep07_v9_review/fusion_pareto_overlay.png`; `../../output/ep07_v9_review/fusion_baseline_metrics.csv` | 已完成 |
 | split-half stability | 显式控制后的候选点在 EP15 口径下稳定，而不是只在单次可视化中锐化 | `../../output/ep15_*/` (TODO) | 待 V10 / EP15 |
 
-Interpretation: Claim 4 当前只是实验假设，不应写成已验证结论。若 V10 失败，Claim 3 可升级为“在当前合成先验与网络形式下，即使输出网格锚定也未能越过经典方法前沿”。
+Interpretation（2026-06-13 更新）: V10（λ=0.02–0.15, bs64）已跑；其 fine-window 评估曾因未把 drizzle base 加回（`common.py` 漏传 `residual_channel`，已修复）而误判「灾难失败 hp_corr≈0.46/lattice≈0.08」。修正后落在 V9A 折中区、不支配 TGV，但 λ 区间过弱（惩罚损失占比仅 ~1–4%）、bs64 混杂未除，故**既非正结果也非干净反证**。同时 C4 已从「经典支配」改写为**「互补失效、无 GT 可认证赢家」**（`docs/paper/reframe_c4_claim3.md`）：TGV 有 TV-staircase、学习臂 grain 最多且不可验证。高-λ(bs128) 扫描的新判据见 `algos/ep07_unet_sr/scripts/run_v10_highlam.md`。zero-training fusion baseline 仍是「学习能微微越过 TGV proxy」的最干净后处理证据。
 
 ### Zero-Training Fusion Baseline
 
@@ -109,10 +111,10 @@ Fusion baseline 的直接含义：V10 不只要打败单个 UNet checkpoint，�
 |---|---|---|
 | 已证实 | 1x 统计输入存在相位信息瓶颈；hybrid 2x drizzle 输入能让真实细结构进入网络并在早期 checkpoint 透传 | Claim 1 已有中心窗口定量与图证据 |
 | 已证实 | 1x forward consistency 的 highpass/full-band 锚定不能阻止 v8.1/V9B/V9D 真实数据漂移 | Claim 2 在 1x 输入臂已闭合 |
-| 已证实 | V9A 后期锐度提升伴随观测去相关；当前 UNet 时间轴 Pareto 前沿被 TGV 支配 | Claim 3 已有 Pareto、条带和 final panel 证据 |
+| 已证实 | V9A 后期锐度提升伴随观测去相关；UNet 时间轴在**观测保真 proxy** 上不被严格优于 TGV（proxy 特定、**非绝对**：TGV 有 TV-staircase、学习臂 grain 最多，无单轴全胜） | Claim 3 已有 Pareto、条带、final panel 证据 + lattice 复核 |
 | 待 V9C | hybrid drizzle 输入下的合法 1x forward anchor 是否也失败 | V9C 60K 后补指标与中心窗口诊断 |
 | 已完成对照 | zero-training fusion baseline 给出 V10 必须打败的后处理前沿 | TGV + 0.1-0.3 * V9A60 delta 支配 TGV 工作点 |
-| 待 V10 | 显式残差幅度惩罚是否能产生支配 fusion baseline 的可控学习工作点 | V10 lambda sweep 后判定 |
+| 已修正 / 待高-λ | V10（λ0.02–0.15,bs64）评估 bug 已修复：不支配 TGV、落 V9A 区；λ 过弱+bs 混杂 ⇒ 高-λ(bs128) 待跑 | `output/ep07_v9_review/v10_pareto/` + `run_v10_highlam.md` |
 | 待 V10 / EP15 | 学习方法候选是否具备 split-half/FRC 稳定性，而不是单次图像锐化 | EP15 口径 FRC 小节待补 |
 
 ## Split-Half FRC TODO (EP15 Protocol)

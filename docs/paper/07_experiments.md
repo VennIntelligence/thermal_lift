@@ -9,7 +9,8 @@
 
 Arms: bicubic / drizzle / MAP-TV anchor / anisotropic coverage-weighted TGV / UNet best
 (selected checkpoint per protocol) / [⬜ V9A hybrid selected]. Columns: split-half NRMSE,
-artifact score, raw-control corr, FRC@{16,14,12} µm, zigzag median FWHM & dip, runtime.
+artifact score, raw-control corr, FRC@{16,14,12} µm, lattice (grain/HF proxy),
+zigzag median FWHM & dip, runtime.
 
 Verified so far (mixed scales; unify before T1):
 - TGV (TB-scale): artifact 0.695, corr 0.916; stripes resolved (was 3.870 / 0.902); 30.8 min CPU.
@@ -20,8 +21,16 @@ Verified so far (mixed scales; unify before T1):
   0.0687/1.987/0.7572; v8.1b@5K 0.0479/1.759/0.7414 (failed arm, kept as control).
 - ⬜ V9A/V9C selected checkpoints through the same harness.
 
-Current verdict line (to be finalized): classical TGV/MAP-TV remain the trustworthy deliverable;
-1x-input UNet arms trade observation fidelity for stylization; evidence-injected arms ⬜.
+Current verdict line (reframed 2026-06-13; see `reframe_c4_claim3.md`): in this no-GT regime there
+is no certifiable single winner. Classical TGV/MAP-TV is the most observation-faithful on the
+verifiable proxies and resolves the raster stripes, but imprints a mild TV staircase ("beading") on
+the finest diagonal contours — an artifact absent from the continuous observation, and reflected in
+TGV being the highest-`lattice` (0.0169) faithful reference. 1x-input UNet arms trade observation
+fidelity for stylization; evidence-injected arms (V9A/V10) are sharpest by inspection and resolve
+the central fine comb most crisply, but carry the most high-frequency content (grain; V10 `lattice`
+≈0.024), unverifiable without GT. We report the verifiable fidelity proxies, a structural grain
+proxy (`lattice`) with dual-domain panels, and an explicitly task-level contour-legibility
+preference — the last of which is not fidelity evidence. [V9A/V10 selected rows ⬜ unified harness.]
 
 ## 6.2 Null-space drift (F3) — the paper's core negative-mechanism figure
 
