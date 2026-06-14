@@ -8,6 +8,54 @@
 
 ## 变更记录
 
+### [ACL-022] 2026-06-14 — Task E 论文证据硬化：TGV actual split/FRC + F5b ROI2 + D.7 第二窗
+
+**问题诊断**:
+- 统一 harness ACL-021 的 TGV `split_half_nrmse` / `frc_*` 列仍使用 EP16 同子集 drizzle proxy，虽然已在表注声明，但审稿人可质疑 TGV 自身 split/FRC 是否一致。
+- F5 主视觉只使用中心梳齿 ROI，容易被质疑为 cherry-pick。
+- D.7 零训练融合 baseline 的 λ 在单一 fine-window 上选择，存在 selection-on-test 风险。
+
+**修改内容**:
+1. 新增 `algos/ep11_dl_benchmark/scripts/run_tgv_split_frc.py`：CPU-only 编排脚本，复用 EP16 `run_tgv_child.py` 子进程和 EP10 TGV 实现，对 full / split-A / split-B 分别运行各向异性 coverage-weighted TGV；full run 与 `output/ep10_tgv_sr/best_hr_highpass.npy` 做相对 L2 self-check，随后在 actual TGV half-set highpass 图上计算 split NRMSE 和 FRC。
+2. 修改 `algos/ep11_dl_benchmark/scripts/run_unified_harness_t1_t2.py`：新增可选 `--tgv-split-json`，若 JSON 成功则优先读取 actual TGV split/FRC；否则默认退回 EP16 drizzle proxy。`--only` 刷新时合并已有 arm rows，避免只刷新 TGV 时截断 T1/T2 全表。
+3. 新增 `scripts/paper_figures/fig05b_roi2_holdout.py`：固定分数 ROI2（rows `[0.270,0.415)`, cols `[0.530,0.685)`）生成 F5b 双域视觉图，并在第二 ROI 上重算 `lattice_score`、`sharp_p95`、profile zigzag proxies。
+4. 新增 `algos/ep07_unet_sr/scripts/v9_review/run_fusion_window2.py`：固定第二验证窗 rows `542:676`, cols `478:674`，复用缓存全幅预测，对 D.7 融合 baseline 重新选择 λ，并比较 V10 工作点跨窗位置。
+5. 更新 `docs/paper/07_experiments.md`、`docs/paper/09_figures_tables_assets.md`、`docs/paper/supp/D_full_results.md`：回填 actual TGV split/FRC、F5b ROI2 结论、D.7 第二窗结果，并保留 proxy / ROI / no-GT caveat。
+
+**预期效果**:
+- T1 的 TGV split/FRC 列不再依赖 drizzle proxy，可自洽回应 “TGV 自己的 split/FRC 呢”。
+- F5 主视觉从单一中心 ROI 扩展到预声明 held-out ROI，降低 cherry-pick 风险。
+- D.7 从单窗 λ 选择升级为双窗稳定性检查，结论限定为局部 proxy-frontier 压力测试，不升级为方法胜负。
+
+**推荐参数**:
+
+```bash
+# E1 actual TGV split/FRC, CPU-only
+CUDA_VISIBLE_DEVICES= uv run python algos/ep11_dl_benchmark/scripts/run_tgv_split_frc.py \
+  --workers 4 --tgv-workers 4
+
+# Refresh only the TGV row while preserving cached rows for other arms
+cd algos/ep11_dl_benchmark
+CUDA_VISIBLE_DEVICES= uv run python scripts/run_unified_harness_t1_t2.py \
+  --only tgv \
+  --tgv-split-json ../../output/ep11_unified_harness/tgv_split_frc.json \
+  --device cpu --workers 4 --skip-f5
+
+# E2 / E3 CPU-only checks
+CUDA_VISIBLE_DEVICES= uv run python scripts/paper_figures/fig05b_roi2_holdout.py
+cd algos/ep07_unet_sr
+CUDA_VISIBLE_DEVICES= uv run python scripts/v9_review/run_fusion_window2.py
+```
+
+**训练结果**: _(本条为评估/论文证据硬化，无新增训练；2026-06-14 回填)_
+- E1 TGV actual split/FRC: full-run self-check relative L2 = **0.0** vs EP10 submitted highpass anchor；split A/B 各 124 帧；total runtime 1248 s；TGV child backend status `aniso_forced_fallback`（预期 CPU anisotropic path）。Actual TGV split NRMSE = **0.03164**；FRC@20/16/14/12 µm = **0.978 / 0.975 / 0.969 / 0.955**；`frc_10um` 为 NaN（频带边界缺失），cutoff field = 10.0 µm 且 `crossed=False`，只作 split-consistency proxy。
+- Harness TGV 行已刷新：`output/ep11_unified_harness/t1_metrics.csv` 与 `all_arm_metrics.csv` 全 arm success；TGV `split_half_source` / `frc_source` 指向 `output/ep11_unified_harness/tgv_split_frc.json`。
+- E2 ROI2: F5b 资产生成到 `output/paper_figures/fig05b_main_visual_roi2.{png,pdf}`；ROI2 `lattice` 排序与中心 ROI 一致（drizzle < TGV < V10 < V9A60），但 `sharp_p95` 与 profile zigzag 排序部分不一致，因此只报告为 held-out visual/proxy audit。
+- E3 第二窗: TGV×V9A60 λ 原窗 0.2、第二窗 0.1，λ 本身不完全稳定；第二窗 λ=0.1 为 `hp_corr_input=0.9643`, `hp_corr_tgv=0.9985`, `sharp_p95=0.5082`, `lattice=0.0126`，通过本窗 proxy-frontier gate。V10 λ=1.2@15K 第二窗为 `hp_corr_input=0.9199`, `sharp_p95=0.5008`, `lattice=0.0130`，仍低于本窗 TGV fidelity reference，保持“低 grain / 较锐但保真不足”的 proxy 位置判断。
+- 结论: 三项加固均不改变 C1–C4 settle，不支持“学习臂打败 TGV”“更干净/更保真”或物理分辨率声明；所有新增证据限定为 2x contour-level、split-consistency、ROI-level visual/proxy。
+
+**涉及文件**: `algos/ep11_dl_benchmark/scripts/run_tgv_split_frc.py`, `algos/ep11_dl_benchmark/scripts/run_unified_harness_t1_t2.py`, `scripts/paper_figures/fig05b_roi2_holdout.py`, `algos/ep07_unet_sr/scripts/v9_review/run_fusion_window2.py`, `docs/paper/07_experiments.md`, `docs/paper/09_figures_tables_assets.md`, `docs/paper/supp/D_full_results.md`
+
 ### [ACL-021] 2026-06-14 — 论文 T1/T2/F5 统一真实数据 harness
 
 **问题诊断**:
