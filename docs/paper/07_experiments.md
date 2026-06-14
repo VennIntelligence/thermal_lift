@@ -17,7 +17,7 @@ only used for within-arm trajectory figures (§6.2) and are not mixed here.
 | bicubic | — | 0.047 | 1.388 | 1.000 | 0.951 | 0.945 | 0.941 | 0.001 | 0.344 | 60 | 1.000 |
 | drizzle | — | 0.024 | 1.138 | 0.771 | 0.439 | 0.564 | 0.765 | 0.001 | 0.481 | 45 | 0.970 |
 | MAP-TV (5x) | — | 0.024 | 2.333 | 0.438 | 0.965 | 0.955 | 0.948 | 0.002 | 0.352 | 42 | 1.000 |
-| TGV | — | 0.031 | 0.695 | 0.741 | 0.479 | 0.556 | 0.610 | 0.011 | 0.999 | 40 | 0.973 |
+| TGV | — | 0.032 | 0.695 | 0.741 | 0.975 | 0.969 | 0.955 | 0.011 | 0.999 | 40 | 0.973 |
 | v6 hot loss | 8K | 0.051 | 1.789 | 0.774 | 0.752 | 0.761 | 0.217 | 0.001 | 0.656 | 40 | 1.000 |
 | v8.1a conservative | 15K | 0.073 | 1.943 | 0.758 | 0.712 | 0.660 | 0.429 | 0.001 | 0.864 | 40 | 1.000 |
 | v9b band anchor | 11K | 0.054 | 1.766 | 0.777 | 0.744 | 0.741 | 0.197 | 0.001 | 0.698 | 40 | 1.000 |
@@ -27,10 +27,12 @@ only used for within-arm trajectory figures (§6.2) and are not mixed here.
 | V10 residual λ=1.2 | 15K | 0.041 | 2.726 | 0.711 | 0.986 | 0.984 | 0.979 | 0.013 | 0.968 | 40 | 1.000 |
 
 Notes: MAP-TV is the precomputed EP15 5x deconvolution anchor, so `output_grid_scale` is explicit
-in the CSV. TGV split/FRC columns reuse the EP16 drizzle split proxy on identical subsets/shifts;
-TGV artifact/corr/zigzag columns are measured on the actual TGV image. Hybrid/V10 cache means pass
-the 23°C sanity check (V10 λ=1.2@15K mean 23.288°C), confirming that residual-over-drizzle inference
-added back channel 5 rather than reporting a near-zero delta field.
+in the CSV. TGV split/FRC columns now use an actual phase-stratified TGV split
+(`output/ep11_unified_harness/tgv_split_frc.json`, seed 42); the full-run self-check against the
+submitted EP10 TGV highpass anchor has relative L2 = 0.0. These FRC values remain split-consistency
+proxies, not physical-resolution evidence. Hybrid/V10 cache means pass the 23°C sanity check (V10
+λ=1.2@15K mean 23.288°C), confirming that residual-over-drizzle inference added back channel 5
+rather than reporting a near-zero delta field.
 
 Current verdict line (reframed 2026-06-13; see `reframe_c4_claim3.md`): in this no-GT regime there
 is no certifiable single winner. The unified harness splits the evidence rather than producing a

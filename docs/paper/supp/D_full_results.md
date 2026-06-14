@@ -17,7 +17,7 @@ artifact 混表；`tb_vs_harness_scale_check.csv` 给出三条对照（如 v9b@1
 | bicubic | — | 0.047 | 1.388 | 1.000 | 0.951 | 0.945 | 0.941 | 0.001 | 0.344 | 60 |
 | drizzle | — | 0.023 | 1.138 | 0.771 | 0.439 | 0.564 | 0.765 | 0.001 | 0.481 | 45 |
 | MAP-TV (5x) | — | 0.024 | 2.333 | 0.438 | 0.965 | 0.955 | 0.947 | 0.002 | 0.352 | 42 |
-| TGV | — | 0.031 | 0.695 | 0.741 | 0.479 | 0.556 | 0.610 | 0.011 | 0.999 | 40 |
+| TGV | — | 0.032 | 0.695 | 0.741 | 0.975 | 0.969 | 0.955 | 0.011 | 0.999 | 40 |
 | v6 hot loss | 8K | 0.051 | 1.789 | 0.774 | 0.752 | 0.761 | 0.217 | 0.001 | 0.656 | 40 |
 | v8.1a | 15K | 0.073 | 1.943 | 0.758 | 0.711 | 0.660 | 0.429 | 0.001 | 0.864 | 40 |
 | v9b band | 11K | 0.054 | 1.766 | 0.777 | 0.744 | 0.741 | 0.197 | 0.001 | 0.698 | 40 |
@@ -26,9 +26,10 @@ artifact 混表；`tb_vs_harness_scale_check.csv` 给出三条对照（如 v9b@1
 | V9C legal hybrid | 5K | 0.064 | 1.669 | 0.718 | 0.891 | 0.769 | 0.195 | 0.001 | 0.766 | 40 |
 | V10 λ=1.2 | 15K | 0.041 | 2.726 | 0.711 | 0.986 | 0.984 | 0.979 | 0.013 | 0.968 | 40 |
 
-边界说明：MAP-TV 是预计算 5x anchor；TGV 的 split/FRC 列复用 EP16 同子集/同 shifts 的
-drizzle proxy，TGV 自身列为 artifact/corr/zigzag。V10/V9A/V9C 的缓存均值约 23°C，说明
-hybrid/V10 推理没有漏加 drizzle base。
+边界说明：MAP-TV 是预计算 5x anchor；TGV 的 split/FRC 列已用独立 TGV half-set 重建回填
+（`output/ep11_unified_harness/tgv_split_frc.json`，seed 42；full-run self-check 相对 L2 = 0.0），
+不再是 EP16 drizzle proxy。该 FRC 仍是 split-consistency proxy，不是物理分辨率证据。
+V10/V9A/V9C 的缓存均值约 23°C，说明 hybrid/V10 推理没有漏加 drizzle base。
 
 ### D.1.2 T2 input × anchor 精选列
 

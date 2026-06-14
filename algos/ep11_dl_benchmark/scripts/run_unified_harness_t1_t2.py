@@ -127,6 +127,15 @@ def to_jsonable(value: Any) -> Any:
     return value
 
 
+def optional_float(value: Any, default: float = float("nan")) -> float:
+    if value is None:
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 def read_json(path: Path) -> dict[str, Any]:
     return json.loads(path.read_text(encoding="utf-8"))
 
@@ -487,13 +496,13 @@ def compute_split_frc(spec: ArmSpec, inputs: Inputs, args: argparse.Namespace) -
             metrics = actual.get("metrics", {})
             source = f"{rel(args.tgv_split_json)} (actual TGV phase-stratified split seed={int(actual.get('seed', FRC_SEED))})"
             out = {
-                "split_half_nrmse": float(metrics.get("split_half_nrmse", np.nan)),
+                "split_half_nrmse": optional_float(metrics.get("split_half_nrmse")),
                 "split_half_source": source,
-                "frc_cutoff_period_um_1_7": float(metrics.get("frc_cutoff_period_um_1_7", np.nan)),
+                "frc_cutoff_period_um_1_7": optional_float(metrics.get("frc_cutoff_period_um_1_7")),
                 "frc_source": source,
             }
             for period in FRC_PERIODS:
-                out[f"frc_{int(period)}um"] = float(metrics.get(f"frc_{int(period)}um", np.nan))
+                out[f"frc_{int(period)}um"] = optional_float(metrics.get(f"frc_{int(period)}um"))
             return out
 
     if spec.arm_id == "tgv" and args.tgv_proxy_csv.exists():
