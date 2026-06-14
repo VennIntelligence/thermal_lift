@@ -178,6 +178,8 @@
 | 写作 | §2 文献补全（`[REF:]` → refs.bib） | 任何写作智能体 | ⬜ 即可领取 |
 | 实验 | V9A/V9C/V10 视觉 gate + 选点 | 主线/Codex | ✅ 已入统一 harness |
 | 实验 | 统一 harness 全臂重跑 → T1/T2/F5 | Codex（Task D） | ✅ 2026-06-14 完成；`output/ep11_unified_harness/` |
+| 写作 | 正文全 7 章中文打磨稿 → `docs/paper/zh/` | 主线（06-14） | ✅ §1–§7 + 标题/摘要中文稿落盘；进修后译英回填 `02–08` |
+| 实验 | 证据硬化：TGV 真值 split/FRC + F5 第二 ROI + D.7 第二窗 | Codex（Task E，后台） | 🔄 提示词已落 `todos/paper_prompts.md` Task E（纯 CPU，不挡写作） |
 
 ## 5. 接手者快速自检清单
 
