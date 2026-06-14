@@ -70,6 +70,17 @@
   `algos/ep11_dl_benchmark/scripts/run_unified_harness_t1_t2.py`
 - **终稿资产**: `output/paper_figures/fig05_main_visual.png`、
   `output/paper_figures/fig05_main_visual.pdf`
+- **F5b hold-out ROI（Task E2）**: 固定分数窗口 rows `[0.270, 0.415)` / cols
+  `[0.530, 0.685)`，避开中心梳齿，覆盖右上外围 plate 边缘 / zigzag-branch 结构；
+  不是按指标或视觉结果调参选窗。生成脚本：
+  `scripts/paper_figures/fig05b_roi2_holdout.py`。
+- **F5b 资产**: `output/paper_figures/fig05b_main_visual_roi2.png`、
+  `output/paper_figures/fig05b_main_visual_roi2.pdf`；ROI2 proxy 表：
+  `output/ep11_unified_harness/roi2_structure_proxies.csv`；manifest：
+  `output/ep11_unified_harness/roi2_manifest.json`。
+- **F5b 结论边界**: ROI2 的 `lattice` 排序与中心 ROI 一致；`sharp_p95` 与 profile-based
+  zigzag proxy 排序不一致。因此 F5b 只作为 held-out visual/proxy audit，不作为 fidelity、
+  resolution 或方法胜负证据。
 - **源数据**: `output/ep11_unified_harness/run_manifest.json` +
   `output/ep11_unified_harness/all_arm_metrics.csv`
 - **partial 参考**: `output/ep10_method_comparison/temperature_comparison.png`（五经典列、无 UNet）、

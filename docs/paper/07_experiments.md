@@ -42,6 +42,10 @@ fidelity–sharpness–grain trade-off tunable: λ=1.2@15K reaches sharpness ≈
 grain (`lattice` 0.014 < TGV 0.0169) but lower observation fidelity (`hp_corr_input` 0.922 < TGV
 0.960). F5 (`output/paper_figures/fig05_main_visual.{png,pdf}`) is therefore reported as a
 dual-domain task-level visual gate, not as fidelity or resolution evidence.
+A predeclared upper-right hold-out structure ROI (F5b,
+`output/paper_figures/fig05b_main_visual_roi2.{png,pdf}`) preserves the same `lattice` ordering as
+the center crop, while `sharp_p95` and profile-based zigzag proxies change order; this supports only
+ROI-level visual/proxy auditing, not method dominance.
 
 ## 6.2 Null-space drift (F3) — the paper's core negative-mechanism figure
 

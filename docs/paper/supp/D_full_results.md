@@ -177,14 +177,27 @@ Drizzle corr 的增益大半在 $N = 62$ 前到位（0.747→0.772），之后�
 
 融合公式为 $\text{fused}(\lambda) = (1-\lambda) \cdot \text{anchor} + \lambda \cdot \hat{x}_{\text{unet}}$，$\lambda \in \{0, 0.1, \ldots, 1.0\}$。锚选择 drizzle 2x mean（248 帧 contour\_refined）或 TGV。UNet 预测使用 V9A 20K（最保真）和 V9A 60K（最锐）。评估指标为 D.3.2 的 fine-window 四指标。
 
+E3 追加了第二个固定验证窗，入口为
+`algos/ep07_unet_sr/scripts/v9_review/run_fusion_window2.py`，运行时显式设置
+`CUDA_VISIBLE_DEVICES=""` 且只读取缓存全幅预测。原 D.7 fine-window 为 2x 网格
+rows 384:518, cols 478:674；第二窗保持同尺寸与同列，向下平移一个窗口高度并留 24 px
+间隔，即 rows 542:676, cols 478:674。该规则在重选 $\lambda$ 前固定，用于检查原窗局部选择是否可迁移到另一个非重叠 ROI。
+
 ### D.7.2 结果
 
-TGV 锚 × V9A-60K 的融合中，存在严格支配 TGV 工作点的区间。$\lambda = 0.2$ 时四指标为 hp\_corr\_input = 0.963（+0.003）、hp\_corr\_tgv = 0.995、sharp\_p95 = 0.968（+0.009）、lattice = 0.0108（−36%），同时改善了保真、锐度和格纹三个维度。$\lambda = 0.1$ 和 $\lambda = 0.3$ 同样支配 TGV。
+原 fine-window 上，TGV 锚 × V9A-60K 的低 $\lambda$ 组合形成一段局部 proxy-frontier。$\lambda = 0.2$ 时四指标为 hp\_corr\_input = 0.963（TGV 参照 0.960）、hp\_corr\_tgv = 0.995、sharp\_p95 = 0.968（TGV 参照 0.959）、lattice = 0.0108（TGV 参照 0.0169）。这说明在该局部窗口内，少量 V9A-60K 高频内容可以改善 fine-window proxy 读数；但该读数依赖 TGV/highpass 参照与同窗 $\lambda$ 选择，不是 GT 保真或物理分辨率证据。
 
-相比之下，drizzle 锚 × V9A 的任意 $\lambda$ 均不支配 drizzle 工作点（保真极高但锐度始终不足）。
+第二窗结果位于 `output/ep07_v9_review/fusion_window2_metrics.csv` 与
+`fusion_window2_summary.md`。第二窗局部参照为 drizzle = (hp\_corr\_input 1.000, sharp\_p95 0.427, lattice 0.0036)，TGV = (0.962, 0.491, 0.0160)。按同一选择规则（TGV 锚 × V9A-60K、$\lambda > 0$，要求 hp\_corr\_input 与 sharp\_p95 不低于本窗 TGV、lattice 不高于本窗 TGV，并以 hp\_corr\_input 优先排序），重选得到 $\lambda = 0.1$：hp\_corr\_input = 0.964、hp\_corr\_tgv = 0.998、sharp\_p95 = 0.508、lattice = 0.0126。$\lambda = 0.2$ 也通过同一 gate（0.964 / 0.994 / 0.525 / 0.0100），但因 hp\_corr\_input 略低而排第二。
+
+相比之下，drizzle 锚 × V9A 的任意 $\lambda$ 都没有形成同类前沿点：drizzle 参照本身保真极高，但锐度始终不足。
+
+V10 高-$\lambda$ 工作点的相对位置跨窗保持一致：原窗 $\lambda = 1.2$ @15K 为 hp\_corr\_input = 0.922、sharp\_p95 = 0.987、lattice = 0.0141；第二窗为 hp\_corr\_input = 0.920、sharp\_p95 = 0.501、lattice = 0.0130。两窗中 V10 均低于对应 TGV 的 hp\_corr\_input（0.960/0.962），同时 lattice 低于 TGV、sharp\_p95 接近或略高于 TGV。这支持“V10 是低 grain / 较锐但保真不足的折中点”这一 proxy 位置判断，而不是可认证胜出。
 
 ### D.7.3 结论与边界
 
-第一，存在事后线性组合可严格支配 TGV 工作点——零训练、零 GPU、推理期一次加权即可。第二，V10 的成功判据因此从「越过 TGV」抬高为「越过融合前沿」。若 V10 所有 $\lambda$ 臂均不及融合 baseline，则 Claim 4 将收敛为「学习贡献可被事后融合替代」的诚实结论。
+第一，零训练线性融合是一个必须报告的强 sanity baseline：在两个非重叠局部窗口中，TGV 锚 × V9A-60K 的低 $\lambda$ 点都能进入相对 TGV 的 proxy-frontier 区域。第二，最优 $\lambda$ 不完全跨窗稳定（0.2 → 0.1），因此不能把单窗最优点写成稳定算法结论；更稳妥的表述是“低 $\lambda$ TGV-anchored 融合在局部 proxy 上构成对学习臂的挑战”。
 
-V10 高-λ sweep 的最佳工作点为 $\lambda = 1.2$ @15K：hp\_corr\_input = 0.922、sharp\_p95 = 0.987、lattice = 0.0141。它满足“锐而不 grain”的工作点判据（lattice 低于 TGV 0.0169，sharp 约等于 TGV），但保真仍低于 TGV（0.922 < 0.960），因此不构成可认证支配。需注意 fine-window 为局部口径且依赖 TGV 参照（非 GT），最优 $\lambda$ 在同一窗口上选出而无独立验证窗——终稿若引用最优 $\lambda$ 须附 selection-on-test 的 caveat；第二验证窗仍是可选加固项。
+V10 高-λ sweep 的最佳工作点仍按 $\lambda = 1.2$ @15K 报告：原窗 hp\_corr\_input = 0.922、sharp\_p95 = 0.987、lattice = 0.0141；第二窗 hp\_corr\_input = 0.920、sharp\_p95 = 0.501、lattice = 0.0130。它满足“低 grain、锐度不低于 TGV 局部读数”的 proxy 判据，但保真仍低于 TGV，因此不构成可认证胜出。
+
+边界必须保留：fine-window 与第二窗都是局部 ROI，指标依赖 TGV/highpass 参照而非 GT；$\lambda$ 是在同一真实数据窗口上重选，仍有 selection-on-test caveat；`sharp_p95` 不度量轮廓连续性且可受 beading/grain 影响。D.7 的结论只用于 proxy 稳定性与 baseline 压力测试，不能外推为温度计量、物理分辨率或单一方法胜出声明。

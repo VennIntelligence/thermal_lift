@@ -481,6 +481,21 @@ def compute_split_frc(spec: ArmSpec, inputs: Inputs, args: argparse.Namespace) -
             out[f"frc_{int(period)}um"] = float(summary["frc"][f"map_tv_frc_at_{int(period)}um"])
         return out
 
+    if spec.arm_id == "tgv" and args.tgv_split_json is not None and args.tgv_split_json.exists():
+        actual = read_json(args.tgv_split_json)
+        if actual.get("status") == "success":
+            metrics = actual.get("metrics", {})
+            source = f"{rel(args.tgv_split_json)} (actual TGV phase-stratified split seed={int(actual.get('seed', FRC_SEED))})"
+            out = {
+                "split_half_nrmse": float(metrics.get("split_half_nrmse", np.nan)),
+                "split_half_source": source,
+                "frc_cutoff_period_um_1_7": float(metrics.get("frc_cutoff_period_um_1_7", np.nan)),
+                "frc_source": source,
+            }
+            for period in FRC_PERIODS:
+                out[f"frc_{int(period)}um"] = float(metrics.get(f"frc_{int(period)}um", np.nan))
+            return out
+
     if spec.arm_id == "tgv" and args.tgv_proxy_csv.exists():
         table = pd.read_csv(args.tgv_proxy_csv)
         rows = table[(table["arm"].eq("tgv")) & (table["n_frames"].eq(EXPECTED_CLEAN_SR_FRAMES)) & (table["status"].eq("success"))]
@@ -634,6 +649,22 @@ def write_metric_tables(rows: list[dict[str, Any]], output_dir: Path) -> tuple[P
     return all_path, t1_path, t2_path
 
 
+def merge_existing_rows_if_requested(rows: list[dict[str, Any]], args: argparse.Namespace) -> list[dict[str, Any]]:
+    """Preserve cached arm rows when --only refreshes a subset."""
+
+    if not args.only:
+        return rows
+    existing_path = args.output_dir / "all_arm_metrics.csv"
+    if not existing_path.exists():
+        return rows
+    existing = pd.read_csv(existing_path).to_dict(orient="records")
+    by_arm = {str(row.get("arm_id")): dict(row) for row in existing}
+    for row in rows:
+        by_arm[str(row.get("arm_id"))] = dict(row)
+    order = [spec.arm_id for spec in build_arm_specs()]
+    return [by_arm[arm_id] for arm_id in order if arm_id in by_arm]
+
+
 def save_f5(output_dir: Path, paper_dir: Path) -> tuple[Path, Path]:
     arrays: dict[str, tuple[np.ndarray, np.ndarray]] = {}
     for arm_id, label in [
@@ -740,6 +771,7 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "output" / "ep11_unified_harness")
     parser.add_argument("--paper-figure-dir", type=Path, default=PROJECT_ROOT / "output" / "paper_figures")
     parser.add_argument("--tgv-highpass", type=Path, default=PROJECT_ROOT / "output" / "ep10_tgv_sr" / "best_hr_highpass.npy")
+    parser.add_argument("--tgv-split-json", type=Path, default=None, help="Optional actual TGV split/FRC JSON; falls back to EP16 drizzle proxy if absent.")
     parser.add_argument("--tgv-proxy-csv", type=Path, default=PROJECT_ROOT / "output" / "ep16_budget_robustness" / "frame_budget.csv")
     parser.add_argument("--map-tv-highpass", type=Path, default=PROJECT_ROOT / "output" / "ep15_info_limit" / "m4_deconv_anchor" / "map-tv_highpass.npy")
     parser.add_argument("--map-tv-temperature", type=Path, default=PROJECT_ROOT / "output" / "ep15_info_limit" / "m4_deconv_anchor" / "map-tv_temperature.npy")
@@ -769,6 +801,7 @@ def main() -> int:
         wanted = set(args.only)
         specs = [spec for spec in specs if spec.arm_id in wanted]
     rows = [evaluate_arm(spec, inputs, args) for spec in specs]
+    rows = merge_existing_rows_if_requested(rows, args)
     all_path, t1_path, t2_path = write_metric_tables(rows, args.output_dir)
     scale_check_path = tb_vs_harness(rows, args.output_dir)
     f5_paths: tuple[Path, Path] | None = None
@@ -797,9 +830,11 @@ def main() -> int:
         },
         "known_metric_boundaries": {
             "map_tv_grid": "MAP-TV is a precomputed 5x EP15 anchor; output_grid_scale is explicit.",
-            "tgv_split_frc": "TGV split/FRC columns reuse EP16 drizzle proxy on identical subset/shifts unless TGV split recomputation is added later; source columns identify this.",
+            "tgv_split_frc": "TGV split/FRC columns use actual TGV phase-stratified split when --tgv-split-json is supplied and successful; otherwise they fall back to the EP16 drizzle proxy, with source columns identifying the path.",
             "visual_preference": "F5 is a dual-domain task-level visual gate, not fidelity or resolution evidence.",
         },
+        "evaluated_arms_this_run": [spec.arm_id for spec in specs],
+        "tgv_split_json": args.tgv_split_json if args.tgv_split_json is not None else "",
         "arms": rows,
     }
     write_json(args.output_dir / "run_manifest.json", manifest)
