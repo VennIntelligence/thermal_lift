@@ -40,17 +40,20 @@ A controlled two-arm attribution experiment shows that with conventional 1x-grid
 input channels (aligned mean/median/variance/coverage), the finest-structure failure mode is
 *invariant* to loss design and decoder architecture: the burst's sub-pixel phase information
 collapses in the input featurization, before the network can use it. Injecting the same
-information as 2x-grid drizzle channels restores it [pending V9A; wording to be finalized on
-results].
+information as 2x-grid drizzle channels exposes a different fine-window trade-off, recovering
+visible phase structure earlier in training, but final selection still requires the fidelity gates
+below.
 
 **(Q3) Is the model's added "detail" anchored to the observations?**
 Here we report a finding we believe is broadly relevant: networks trained on synthetic targets
 drift, on real data, along directions in the **null space of the observation operator**
 (shift ∘ PSF ∘ detector integration ∘ decimation). The forward-consistency loss sits at its
 floor while real-data artifact proxies degrade monotonically with training — the drift is
-*invisible* to observation anchoring, whether band-limited or full-band [V9D pending]. Loss-side
-anchoring therefore cannot fix it; what works is evidence injection at the input and a
-checkpoint-selection protocol on the proxy Pareto front, gated by visual panels.
+*invisible* to observation anchoring, whether band-limited or full-band (both anchor arms landed
+and both fail). Loss-side
+anchoring therefore cannot fix it; what works is bounding the output through evidence injection,
+residual-over-observation parameterization where appropriate, and a checkpoint-selection protocol
+on the proxy Pareto front, gated by visual panels.
 
 Contributions. (C1) A fully *measured* no-GT burst-SR problem — stage-to-pixel rotation
 47.6°±0.1°, PSF σ arbitrated to 0.2–0.5 LR px, noise floor 0.0724 °C, raster acquisition
@@ -58,13 +61,20 @@ structure with session gating — plus a physics-matched synthetic training plat
 (C2) A GT-free evaluation protocol combining controlled FRC, a coupled observation-anchored
 proxy pair (with an analysis of why the two proxies anti-correlate by construction), and a
 mechanical checkpoint-selection rule. (C3) The null-space drift finding with its remedy.
-(C4) An honest classical-vs-learned benchmark in which anisotropic coverage-weighted TGV and a
-fine-grid MAP-TV anchor define the acceptance gate; learned arms are adopted only where they
-beat it under the protocol.
+(C4) An honest classical-vs-learned verdict with *complementary failure modes and no
+GT-certifiable winner*: anisotropic coverage-weighted TGV (raster-stripe artifact 3.87→0.695) is
+the most observation-faithful method on the verifiable proxies, but imprints a mild
+total-variation staircase ("beading") on the finest diagonal contours (it is the highest-`lattice`
+faithful reference); evidence-injected learned reconstructions are the sharpest by inspection and
+resolve the central fine comb most crisply, yet carry the most unverifiable high-frequency grain
+(learned `lattice` exceeds TGV) and drift measurably on observation fidelity. We report verifiable
+fidelity proxies, a structural grain proxy with dual-domain panels, and an explicitly task-level
+contour-legibility preference, and certify no single winner — the visual preference is not fidelity
+evidence and nothing here licenses metrology-grade claims.
 
 We deliberately bound the claim: the deliverable is contour-level visibility at a 2x output
 grid — not 5 µm resolution, not temperature metrology, not 4x recovery. We argue this bounded,
 evidence-gated formulation is the transferable template for SR in no-GT industrial regimes.
 
-> TODO(intro): finalize Q2/Q3 wording after V9A/V9C/V9D land; insert teaser figure reference
-> (F5 crop: bicubic vs TGV vs evidence-injected UNet, center zigzag ROI).
+> TODO(intro): insert teaser figure F0 after cropping from `fig05_main_visual`; compress Q2/Q3
+> language to fit the final page budget while keeping the no-GT winner boundary explicit.

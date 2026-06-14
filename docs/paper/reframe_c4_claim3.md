@@ -26,7 +26,7 @@
 | v9a_20k（最保真 ckpt） | 0.974 | 0.62 | 0.0009 | 偏软 |
 | **TGV（经典锚）** | 0.960 | 0.959 | 0.0169 | 解析梳齿，但轻微 TV-staircase 珠串 |
 | v9a_60k | ~0.906 | ~1.2 | 0.0153 | 梳齿被焊粗/合并（过冲） |
-| **V10 λ=0.05@25K（修正后）** | 0.880 | 1.367 | 0.0236 | 梳齿最锐最清，但背景 grain 最多 |
+| **V10 λ=1.2@15K（高-λ最终工作点）** | 0.922 | 0.987 | 0.0141 | 锐度约等于 TGV、grain 更低，但保真仍低于 TGV |
 
 > 注：MAP-TV 同属 TV 家族，预期亦有 staircase，但本轮未单独量化；写作时标注「likely shares the TV staircase」。
 
@@ -48,12 +48,14 @@
 
 ## 6. 图表含义
 
-- **F5 主视觉对比**：必须含「中心梳齿高倍裁剪」一行，并排 drizzle(软) / TGV(锐但 staircase 珠串) / V9A-late(过粗) / V10(锐但 grain)，配温度图+highpass 双域，让 staircase vs grain 双失效**肉眼可见**。素材已在 `output/ep07_v9_review/`（`fine_zigzag_*`、`v10_pareto/v9a_checkpoint_strip.png`）。
+- **F5 主视觉对比**：必须含「中心梳齿高倍裁剪」一行，并排 drizzle(软) / TGV(锐但 staircase 珠串) / V9A-late(过粗) / V10(锐但仍有 grain trade-off)，配温度图+highpass 双域，让 staircase vs grain 双失效**肉眼可见**。终稿已生成：`output/paper_figures/fig05_main_visual.{png,pdf}`。
 - **F4 Pareto**：散点轴仍可用 (hp_corr_input, sharp_p95)，但**图注必须声明该平面不含连续性轴**，并叠加 `lattice` 作为第三维（点大小/颜色）。
 
 ## 7. 高-λ V10 实验的新成功判据（落 `run_v10_highlam.md` §2）
 
 不再是「在 (hp_corr_input, sharp_p95) 上支配 TGV」。改为：**在保真 `hp_corr_input` 尽量高（趋向 drizzle）的同时，把 grain `lattice` 压到 ≤ TGV(0.0169)，并保持中心梳齿清晰/连续**。即用残差约束换取「锐而不 grain」的工作点。**不声称"打败 TGV"**；结论仍是诚实 trade-off + 无 GT 不可认证。
+
+> **✅ 判据已满足（2026-06-14 高-λ sweep 完成）**：λ∈{0.2,0.5,1.2,3.0}×25K，残差自检通过（缓存温度均值≈23.3°C）。7 个 checkpoint 满足 `hp_corr_input≥0.92 ∧ lattice≤0.0169`；最佳折中 **λ=1.2@15K = (0.922, 0.987, 0.0141)**：锐度 ≈ TGV（+3%）、grain 比 TGV 低 17%、保真刚过门控。残差约束因此把 *fidelity–sharpness–grain* 折中变成**可调 λ 旋钮**（大 λ→高保真低 grain 但软；小 λ→锐但 grain 多）。**但所有点保真仍 < TGV(0.960)**，因此 C4 维持「no GT-certifiable winner / 诚实 trade-off」，**不写成"打败 TGV"**；写作时 C4 可加一句「显式残差约束能换到锐而不 grain 的工作点，但以观测保真为代价，仍不构成可认证支配」。Phase 2 精化已决定跳过。详见 `research_log/algorithm_changelog.md` ACL-020「高-λ sweep 结果」。
 
 ## 8. 受影响文件清单
 

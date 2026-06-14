@@ -10,8 +10,9 @@
 ### F0 — Teaser（§1 页首，单栏）
 
 - **内容**: F5 的中心 zigzag ROI 三列裁剪：bicubic / TGV / 最优学习臂（温度域）
-- **状态**: ⬜ 依赖 F5 终稿（统一 harness + V9A/V9C checkpoint）
-- **现成参考**: `output/ep11_dl_benchmark/checkpoint_selection/v9b_step11000/` 下对比图可作排版样稿
+- **状态**: 🔧 F5 终稿已生成，仍需从 `fig05_main_visual` 裁出 teaser 版三列 crop
+- **现成参考**: `output/paper_figures/fig05_main_visual.png`；旧样稿在
+  `output/ep11_dl_benchmark/checkpoint_selection/v9b_step11000/`
 
 ### F1 — 系统 + 标定链 + 采样/分辨率区分（§3，双栏全宽）
 
@@ -44,7 +45,7 @@
 - **内容**: 1x 输入五臂（v6/v8.1a/v8.1b/v9b/v9d）的 artifact & corr vs step 双 panel；
   inset：`loss/forward_model` 贴底曲线（v6/v9b/v9d，log y）；canonical ○ / 60K 端点 ×
 - **状态**: ✅ 当前稿已生成（Task B）→ `algos/ep07_unet_sr/scripts/plot_drift_trajectories_paper.py`；
-  v9d/v9a 仍在训练，训练完成后 `--refresh` 终稿
+  v9d/v9a/v9c 训练已完成，当前稿可按需 `--refresh`
 - **终稿资产**: `output/paper_figures/fig03_nullspace_drift.png`、
   `output/paper_figures/fig03_nullspace_drift.pdf`；
   companion: `output/paper_figures/fig03s_v9a_trajectory.png/.pdf`
@@ -57,19 +58,24 @@
 
 - **内容**: 四臂 Pareto 散点 + TGV 参考点 (0.695, 0.916)（TB-scale）+ canonical 标注
 - **状态**: ✅ `output/ep11_dl_benchmark/checkpoint_selection/fig_pareto.png` +
-  `checkpoint_candidates.csv`；V9A/V9C/V9D 落地后同脚本重出
+  `checkpoint_candidates.csv`；V9A/V9C/V9D/V10 终稿数字以统一 harness 表为准，F4 可按最终文案可选 refresh
 - **视觉 gate 配套**: `panel_v6/v8.1a/v8.1b/v9b.png`（panel 类材料放 supp）
 
 ### F5 — 主视觉对比（§6.1，双栏全宽，含 F6 消融行）
 
-- **内容**: 行 1 温度域 / 行 2 highpass 域 × 列 {bicubic, drizzle, MAP-TV, TGV, UNet-best,
-  V9A-best}；行 3（消融行，原 F6）：thin-line + edge-staircase 裁剪 {v8.1a, v9a, v9c}
-- **状态**: ⬜ 依赖：① V9A/V9C/V9D canonical checkpoint；② 统一口径 harness 重跑；
-  ③ ROI 坐标冻结（中心 zigzag + 一处块边界）
-- **partial 资产**: `output/ep10_method_comparison/temperature_comparison.png`（五经典列、无 UNet）、
+- **内容**: 行 1 温度域 / 行 2 highpass 域 × 列 {drizzle, TGV, V9A late 60K,
+  V10 λ=1.2@15K}；中心 zigzag ROI 用来显示 drizzle softness、TGV staircase、V9A late
+  over-thickening、V10 sharp/grain trade-off。
+- **状态**: ✅ 统一 harness 已生成 F5（Task D）→
+  `algos/ep11_dl_benchmark/scripts/run_unified_harness_t1_t2.py`
+- **终稿资产**: `output/paper_figures/fig05_main_visual.png`、
+  `output/paper_figures/fig05_main_visual.pdf`
+- **源数据**: `output/ep11_unified_harness/run_manifest.json` +
+  `output/ep11_unified_harness/all_arm_metrics.csv`
+- **partial 参考**: `output/ep10_method_comparison/temperature_comparison.png`（五经典列、无 UNet）、
   `output/ep15_info_limit/m4_deconv_anchor/four_arm_comparison.png` + `four_arm_highpass.png`
   （四臂、无 TGV）、`output/ep11_dl_benchmark/unet_vs_tgv_2x_center_zoom3x_highpass.png`
-- **阻塞**: 客户许可（芯片热像脱敏展示）——形态可能需限于中心 ROI
+- **展示红线**: F5 是 task-level visual gate，不是 fidelity/resolution evidence；图注必须写明。
 
 ### ~~F6~~ — 并入 F5 第三行（独立成图方案备份在 supp D）
 
@@ -89,18 +95,21 @@
 
 - **列**: split-half NRMSE / artifact / raw-control corr / FRC@{16,14,12} µm /
   zigzag median FWHM & dip / runtime；**行**: bicubic / drizzle / MAP-TV / TGV / UNet-best / V9A-best
-- **状态**: ⬜ 硬前提：单一口径 harness（`run_unet_vs_drizzle_2x.py` 谱系）重跑全部臂；
-  依赖 V9A/V9C/V9D checkpoint 选定
-- **partial 数据**: `output/ep10_tgv_sr/sweep_results.csv`、
+- **状态**: ✅ 统一 harness 完成（Task D）
+- **终稿数据**: `output/ep11_unified_harness/t1_metrics.csv`；
+  全臂扩展：`output/ep11_unified_harness/all_arm_metrics.csv`；
+  scale audit：`output/ep11_unified_harness/tb_vs_harness_scale_check.csv`
+- **partial 参考**: `output/ep10_tgv_sr/sweep_results.csv`、
   `output/ep11_dl_benchmark/checkpoint_selection/v9b_step11000/comparison_summary.csv`、
   `output/ep15_info_limit/m4_deconv_anchor/zigzag_profile_metrics.csv`
 
 ### T2 — 消融矩阵 input × anchor（§6.3）
 
 - **格**: {1x stats, hybrid drizzle} × {none, band-limited, full-band, legal}；
-  已填 1x×none(v8.1a)、1x×band(v9b)；🔄 1x×full(V9D)、hybrid×none(V9A) 训练中；
-  ⬜ hybrid×legal(V9C) 待跑
-- **数据源**: 各 arm selected-checkpoint 过统一 harness 后的指标 + `config.json` 字段
+  已填 1x×none(v8.1a)、1x×band(v9b)、1x×full(V9D)、hybrid×none(V9A)、
+  hybrid×legal(V9C)，另列 V10 residual-over-observation 作为参数化输出对照
+- **状态**: ✅ 统一 harness 完成（Task D）
+- **数据源**: `output/ep11_unified_harness/t2_metrics.csv` + 各 arm `config.json` 字段
 
 ## Supplementary 图表（节选，详见 `10_writing_handover.md` §C/D）
 
@@ -112,7 +121,7 @@
 | S-F4 | 四臂 checkpoint 视觉 gate panel | `checkpoint_selection/panel_*.png` | ✅ |
 | S-F5 | 各 arm step 序列视觉演化（漂移可视化） | `algos/ep07_unet_sr/outputs/*/eval_real/` | ✅ 选图即可 |
 | S-F6 | 负结果档案图（PixelShuffle 条纹 / 4x 失败 / AVI 排除审计） | EP11/EP12/EP01 输出 | 🔧 选图整理 |
-| S-F7 | 对齐管线与 gate：五步链 Chamfer + 2x 相位 bin 占用 + gate 空间分布 | `output/paper_figures/figS07{a,b,c}_*.png`（收编自 `ep05_alignment_sr_capacity/` 与 `ep04_global_validation/`，`collect_promoted_supp.py`） | ✅ 选编收编（06-12）；⚠️ (c) 全幅热像受客户许可约束 |
+| S-F7 | 对齐管线与 gate：五步链 Chamfer + 2x 相位 bin 占用 + gate 空间分布 | `output/paper_figures/figS07{a,b,c}_*.png`（收编自 `ep05_alignment_sr_capacity/` 与 `ep04_global_validation/`，`collect_promoted_supp.py`） | ✅ 选编收编（06-12） |
 | S-F8 | E3 对齐源消融 + F7 全曲线 | `output/ep16_budget_robustness/` | ✅ 经典臂完成 |
 | S-F9 | 零训练融合 baseline Pareto 叠加（V9A 轨迹 + 4 条融合曲线 + 支配象限 + TGV/drizzle 参考点） | `output/paper_figures/figS09_fusion_pareto.{png,pdf}`（`scripts/paper_figures/figS09_fusion_pareto.py`；源 `output/ep07_v9_review/*.csv`） | ✅ CVPR 风格（06-12）；V10 落地后叠 V10 工作点 |
 | S-F10 | V9A fine-window 演化条带（TGV/v8.1a 参照 + 5K–60K 序列，per-panel 归一化 + 保真/锐度标注） | `output/paper_figures/figS10_v9a_strip.{png,pdf}`（`scripts/paper_figures/figS10_v9a_strip.py`；源 cache npy + `output/ep10_tgv_sr/best_hr_temperature.npy`） | ✅ CVPR 风格（06-12）；诊断原稿仍在 `output/ep07_v9_review/` |
@@ -121,7 +130,7 @@
 | S-F13 | 主 session 累计位移轨迹（raster 几何 + 慢漂移可视化） | `output/paper_figures/figS13_cumulative_trajectory.png`（收编自 `ep05_sr_reassessment/`） | ✅ 选编收编（06-12） |
 | S-F14 | MAP-TV 锚结构证据：zigzag 三剖面对照 + 四臂 highpass 全景 | `output/paper_figures/figS14{a,b}_*.png`（收编自 `ep15_info_limit/m4_deconv_anchor/`） | ✅ 选编收编（06-12） |
 | S-F15 | MTF 频响 + 有效 SNR 可恢复性热图（2x 可行/4x 出界边界） | `output/paper_figures/figS15{a,b}_*.png`（收编自 `ep03_theoretical_limits/`） | ✅ 选编收编（06-12） |
-| S-T1 | T1 扩展版（全 checkpoint × 全列） | 统一 harness 输出 | ⬜ |
+| S-T1 | T1 扩展版（全 selected arms × 全列） | `output/ep11_unified_harness/all_arm_metrics.csv` | ✅ |
 | S-T2 | TGV/MAP-TV 参数网格全表 | `output/ep10_tgv_sr/sweep_results.csv` 等 | ✅ |
 | S-T3 | TCForge 合成参数全表 / 训练 config 对照表 | 各 run `config.json`（supp C.1/C.3 已成表） | ✅ 已汇总进 supp 草稿 |
 | S-T4 | 融合 baseline λ 扫描全表 + fine-window 四指标口径表 | `output/ep07_v9_review/{fusion_baseline_metrics,v9a_pareto_metrics}.csv`（supp D.0/D.7 已成表） | ✅ |
@@ -139,10 +148,10 @@
 ## 生产排程依赖
 
 ```
-已完成（CPU）: F1(Task A) · F2+S-F1(06-12 重绘) · F3 当前稿(Task B) · F7 经典臂(Task C)
-              S-F2/S-F9/S-F10(06-12 重绘) · 两个策展 notebook
-待做（CPU）: S-F6 负结果组图 · S-F7 对齐 gate 图（素材齐，选图组版）
-V9C 落地（今晚）: C4 收尾 → F3/F3s --refresh → T2 填格 → F4 重出并迁 paper_figures
-GPU 空闲窗口: 统一 harness 重跑全臂 → T1 → F5/F0 → F7 GPU 臂补线
-客户许可确认: F5/F0 终稿形态（全幅 or 中心 ROI 脱敏）
+已完成（CPU/GPU）: F1(Task A) · F2+S-F1(06-12 重绘) · F3 当前稿(Task B) ·
+              F5/T1/T2(Task D) · F7 经典臂(Task C) · S-F2/S-F9/S-F10(06-12 重绘) ·
+              两个策展 notebook
+待做（CPU）: F0 teaser crop · S-F6 负结果组图 · S-F7 对齐 gate 图（素材齐，选图组版） ·
+              F3/F3s 按最终 V9C/V10 文案可选 refresh
+可选 GPU 后续: F7 learned/GPU 臂补线（非主文硬门槛）
 ```

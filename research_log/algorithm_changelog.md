@@ -8,6 +8,47 @@
 
 ## 变更记录
 
+### [ACL-021] 2026-06-14 — 论文 T1/T2/F5 统一真实数据 harness
+
+**问题诊断**:
+- 论文最终 T1/T2 需要单一 EP11/common.metrics 口径，不能把 TensorBoard `eval_real/*` 的 artifact scale 与 EP11 harness scale 混进同一表。
+- 旧 EP11 横评脚本只覆盖早期 1x 输入臂，无法安全评估 V9A/V9C hybrid-drizzle 输入和 V10 residual-over-observation；若未透传 `residual_channel=5`，V10 会退化成裸 delta 输出（缓存均值接近 0°C）。
+- EP10 TGV 的 `best_hr_temperature.npy` 为 highpass/centered 产物，直接读作温度会得到约 0.24°C，必须经 TGV helper 重建普通 Celsius 温度图后再进入视觉对比。
+
+**修改内容**:
+1. 新增 `algos/ep11_dl_benchmark/scripts/run_unified_harness_t1_t2.py`：一次性评估 bicubic / drizzle / MAP-TV / TGV / v6 / v8.1a / v8.1b / v9b / v9d / V9A / V9C / V10-lam120@15K，并额外缓存 V9A-60K 作为 F5 late-drift visual control。
+2. 复用 EP06 数据读取和 `common.metrics`、EP10 drizzle、EP15 FRC/zigzag probes、EP07 `infer_from_burst`，避免重新实现核心指标。
+3. 对 `input_mode="hybrid_drizzle2x"` 的 arm 使用 `model_scale=1`；对 V10 `residual_mode="drizzle2x"` 自动设置 `residual_channel=HYBRID_DRIZZLE_MEAN_CHANNEL`（ch5），并在输出行记录 full/split cache 的温度均值 sanity check。
+4. 统一输出 `all_arm_metrics.csv`、`t1_metrics.csv`、`t2_metrics.csv`、`tb_vs_harness_scale_check.csv`、`run_manifest.json`，并生成 F5 双域视觉图 `fig05_main_visual.{png,pdf}`。
+5. 在 manifest 与 source columns 中显式标注边界：MAP-TV 是预计算 5x anchor；TGV split/FRC 列目前复用 EP16 同子集/同 shifts 的 drizzle proxy；F5 是 task-level visual gate，不是保真或分辨率证据。
+
+**预期效果**:
+- 论文 T1/T2/F5 使用同一真实数据 harness 与同一 artifact scale，避免历史 TB-scale 数字污染最终横评表。
+- hybrid/V10 推理路径有 23°C 温度均值自检，防止 residual base 漏加 bug 复发。
+- 风险：TGV split/FRC 尚非独立 TGV split 重算，必须在表注和 manifest 中保留 proxy caveat；MAP-TV 5x 与 2x arms 不可隐式混同。
+
+**推荐参数**:
+
+```bash
+cd algos/ep11_dl_benchmark
+CUDA_VISIBLE_DEVICES=0 uv run python scripts/run_unified_harness_t1_t2.py \
+  --device cuda:0 \
+  --workers 4 \
+  --output-dir ../../output/ep11_unified_harness
+```
+
+**训练结果**: _(本条为评估/数据管线变更，无新增训练；2026-06-14 回填)_
+- 完整运行: 13/13 arms success，elapsed 166.6 s；GPU0 峰值观测约 385 MB，未占用第二张 GPU。
+- 输出目录: `output/ep11_unified_harness/`；F5 资产: `output/paper_figures/fig05_main_visual.png`、`output/paper_figures/fig05_main_visual.pdf`。
+- 23°C sanity check: V9A 10K mean 22.366°C，V9C 5K mean 22.985°C，V10 lam120@15K mean 23.288°C，V9A 60K mean 23.307°C；均非 0°C delta 场。
+- T1 selected rows（harness scale，artifact↓ / corr↑）: drizzle 1.138 / 0.771；TGV 0.695 / 0.741；v9b@11K 1.766 / 0.777；V9A@10K 1.762 / 0.719；V9C@5K 1.669 / 0.718；V10 lam120@15K 2.726 / 0.711。
+- TB-vs-harness scale check: v9b@11K TB artifact 0.3385 vs harness 1.7662；v8.1a@15K 0.3919 vs 1.9429；v6@8K 0.3302 vs 1.7891。该表确认两套 artifact scale 不能混用。
+- 结论: 统一 harness 只提供 gate/select 与 task-level visual evidence；不支持“学习臂打败 TGV”“更干净”或“更保真”表述。
+
+**涉及文件**: `algos/ep11_dl_benchmark/scripts/run_unified_harness_t1_t2.py`, `docs/paper/00_status_and_plan.md`, `docs/paper/01_outline.md`, `docs/paper/02_introduction.md`, `docs/paper/05_method.md`, `docs/paper/06b_experimental_setup.md`, `docs/paper/07_experiments.md`, `docs/paper/08_limitations_conclusion.md`, `docs/paper/09_figures_tables_assets.md`, `docs/paper/10_writing_handover.md`, `docs/paper/reframe_c4_claim3.md`, `docs/paper/supp/C_method_details.md`, `docs/paper/supp/D_full_results.md`, `docs/paper/supp/E_reproducibility.md`
+
+---
+
 ### [ACL-020] 2026-06-12 — V10: residual-over-observation 参数化 + 残差幅度惩罚
 
 **问题诊断**:
@@ -82,8 +123,40 @@ CUDA_VISIBLE_DEVICES=<GPU_ID> uv run python -m unet_sr.train \
 
 - **结论**：
   1. 残差参数化 + 当前 λ 区间（0.02–0.15）**未能把输出绑在 drizzle base 附近**（惩罚损失占比仅 ~1–4%），模型仍漂到 V9A 的 fidelity≈0.88 折中区 → **Claim 4 不是正结果**（未支配 TGV）。
-  2. 但本轮**也不能作为 Claim 4 的干净反证**：λ 区间太弱、未探到高保真端，且 bs=64 混杂未消除。要把 Claim 4 做成「即使显式残差控制也无法越过经典前沿」的铁案，需补**高-λ（bs=128、25K）扫描**把 fidelity↑/sharp↓ 的折中曲线探完整（见 `algos/ep07_unet_sr/scripts/run_v10_highlam.md`）。
+  2. 但本轮**也不能作为 Claim 4 的干净反证**：λ 区间太弱、未探到高保真端，且 bs=64 混杂未消除。要把 Claim 4 做成「即使显式残差控制也无法越过经典前沿」的铁案，需补**高-λ（bs=128、25K）扫描**把 fidelity↑/sharp↓ 的折中曲线探完整（见 `algos/ep07_unet_sr/scripts/run_v10_highlam.md`）。**✅ 已于 2026-06-14 完成，结论见下「高-λ sweep 结果」。**
   3. 当前「学习能微微越过 TGV」的最干净证据仍是**零训练 fusion baseline**（`TGV + 0.1·V9A60 delta` 支配 TGV），而非 V10。
+
+---
+
+#### 🆕 高-λ sweep 结果（bs=128 / patch=192 / 25K × 4 臂；2026-06-14 回填）
+
+> 闭环上文 conclusion 第 2 点：高-λ（λ∈{0.2,0.5,1.2,3.0}）扫描已完成，bs=64 混杂已消除（统一 bs=128），评估口径自检通过。**结论从「凌乱负结果」升级为「干净的可控权衡 + 有价值工作点」**，但仍**不写成「打败 TGV」**（保真全程 < TGV）。
+
+- **运行**: 4 臂 λ∈{0.2,0.5,1.2,3.0}，bs=128 / patch=192（3090 OOM 从 256 降，全臂统一记 caveat）/ 25K / `--save-every 2500`；每臂 ~4.3–5.3 h，双 GPU 两两并行，wall ≈ 12 h。输出 `outputs/ep07_v10_resid_hl_lam{020,050,120,300}/`（各 10 个 checkpoint + `model_final.pt`）。
+- **残差自检通过**: `output/ep07_v9_review/cache/v10hl_*_temperature.npy` 20 个文件均值全部 ≈ **23.29°C**（不是 ≈0）→ 本条主记录里的「漏加 base」评估 bug **未复现**，本轮 fine-window 数字可信。
+- **fine-window Pareto（修复后 harness；hp_corr_input=保真↑，sharp_p95=锐度↑但不可单用，lattice=grain/HF↓）**:
+
+  | 对象 | hp_corr_input | sharp_p95 | lattice |
+  |---|---|---|---|
+  | drizzle（观测软上限） | 1.000 | 0.503 | 0.0015 |
+  | **EP10 TGV（经典锚）** | **0.960** | **0.959** | **0.0169** |
+  | λ=0.2 @5K→25K | 0.915→0.882 | 1.047→1.264 | 0.0170→0.0242 |
+  | λ=0.5 @5K→25K | 0.918→0.886 | 1.039→1.224 | 0.0155→0.0228 |
+  | λ=1.2 @5K | 0.941 | 0.891 | 0.0098 |
+  | **⭐ λ=1.2 @15K（最佳折中）** | **0.922** | **0.987** | **0.0141** |
+  | λ=1.2 @25K | 0.904 | 1.090 | 0.0180 |
+  | λ=3.0 @5K（塌回 drizzle） | 1.000 | 0.510 | 0.0015 |
+  | λ=3.0 @10K | 0.956 | 0.801 | 0.0080 |
+  | λ=3.0 @25K | 0.934 | 0.931 | 0.0115 |
+
+- **达标 checkpoint**: 7 个满足 `hp_corr_input≥0.92 ∧ lattice≤0.0169`（λ=1.2 的 5K/10K/15K + λ=3.0 的 10K/15K/20K/25K；已排除 λ=3.0@5K 这个 `sharp_p95=0.51` 塌回 drizzle 的退化点）。
+- **最佳折中点 = λ=1.2 @15K**: (hp_corr_input, sharp_p95, lattice) = **(0.922, 0.987, 0.0141)** —— 锐度 ≈ TGV(+3%)、grain 比 TGV 低 17%、保真 0.922 刚过门控（仍 < TGV 0.960）。
+- **TB-scale 漂移端点（eval_real，artifact↓/corr↑；与 fine-window 是不同口径，绝不混表）**: λ 越大漂移越小、corr 越稳——λ=0.2: 0.70/0.67→0.73/0.658；λ=1.2: 0.34/0.726→0.64/0.695；λ=3.0: **0.29/0.721→0.59/0.722（corr 基本不掉）**。
+- **结论（更新）**:
+  1. 残差约束把 *fidelity–sharpness–grain* 三维折中变成**可调的 λ 旋钮**：大 λ（3.0）能同时拿高保真+低 grain（牺牲锐度趋向 drizzle）；λ=1.2@15K 拿到「锐而不 grain、保真刚过门控」的折中 → **存在「有价值工作点」**（`docs/paper/reframe_c4_claim3.md` §7 判据满足）。
+  2. **但所有 checkpoint 保真仍 < TGV(0.960)**（最佳点 0.922）；维持 reframe 诚实裁决「no GT-certifiable winner」，**不写成「打败 TGV」**；报锐度必并报 lattice + 视觉。
+  3. Phase 2 精化（λ=1.2 二分 / 第二 seed）**已决定跳过**（非支配关系，预算转给统一口径 harness T1/T2 重跑）。
+- **产物**: `output/ep07_v9_review/v10_highlam/{v9a_pareto_metrics.csv, v9a_pareto_scatter.png, v9a_checkpoint_strip.png}`、`output/ep07_v9_review/ep07_eval_real_metrics.csv`（含 V10 四臂 + V9C/V9D 漂移）。
 
 **涉及文件**: `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/inference.py`, `algos/ep07_unet_sr/src/unet_sr/real_eval.py`, `algos/ep07_unet_sr/scripts/v9_review/common.py`（评估 bug 修复）, `algos/ep07_unet_sr/tests/test_config.py`, `algos/ep07_unet_sr/tests/test_inference.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`, `algos/ep07_unet_sr/scripts/run_v10.md`
 
@@ -135,12 +208,11 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
   --forward-model-band highpass
 ```
 
-**训练结果**: _(V9C 训练完成后回填)_
-- 输出目录: `outputs/ep07_v9c_hybrid_legal_fwd`
+**训练结果**: _(2026-06-14 回填；60K 完成)_
+- 输出目录: `outputs/ep07_v9c_hybrid_legal_fwd`（60K + `model_final.pt`）
 - 代码验证: `cd algos/ep07_unet_sr && uv run pytest -q` → 47 passed。
-- 视觉效果: _TODO_
-- 关键指标: _TODO_
-- 结论: _TODO_
+- 关键指标（TB-scale `eval_real`，artifact↓ / raw_control_corr↑）: 0.516/0.714 @10K → **0.695/0.669 @60K**，与 1x 锚定臂端点（v9b 0.655/0.688、v9d 0.677/0.677、v8.1a 0.643/0.689）落到同一 ≈0.65–0.70 / ≈0.67–0.69 平台。
+- 结论: **合法 1x 观测锚在 hybrid 输入下同样无法压平后期漂移**。这驳倒了「之前锚定失败只是因为 hybrid 第 0 通道不是合法 1x 观测」的反对意见——即使给 loss 单独喂合法 1x `aligned_mean` patch，漂移曲线仍与无锚/带限/全频锚臂几乎重合。**与 V9B/V9D 合并：loss 侧 forward 锚定路线（band / full / legal × hybrid 全变体）正式、彻底关闭**；漂移是先验驱动、零空间驻留，只能从输入端（V9A hybrid 输入）或输出参数化（V10 residual）侧解决。落 `docs/paper/07_experiments.md` §6.2/§6.3 input×anchor 矩阵。
 
 **涉及文件**: `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `algos/ep07_unet_sr/src/unet_sr/losses.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/tests/test_dataset.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`, `algos/ep07_unet_sr/tests/test_config.py`, `algos/ep07_unet_sr/scripts/run_v9.md`
 

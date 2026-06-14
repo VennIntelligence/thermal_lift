@@ -257,6 +257,7 @@ dependencies = [
     { name = "scipy" },
     { name = "tcforge" },
     { name = "tensorboard" },
+    { name = "thermal-core" },
     { name = "torch" },
     { name = "tqdm" },
 ]
@@ -271,6 +272,7 @@ requires-dist = [
     { name = "scipy", specifier = ">=1.12" },
     { name = "tcforge", editable = "../../tcforge" },
     { name = "tensorboard", specifier = ">=2.15" },
+    { name = "thermal-core", editable = "../../core" },
     { name = "torch", specifier = ">=2.2" },
     { name = "tqdm", specifier = ">=4.66" },
 ]

@@ -61,11 +61,14 @@ paragraph as motivation for conservative weights.
 
 **Observation anchors (loss-side).**
 - none / band-limited forward consistency (high-pass band of the reprojected residual, weight
-  0.1) / full-band forward consistency (weight 0.1) [V9D pending] — all reproject the prediction
+  0.1) / full-band forward consistency (weight 0.1) — all reproject the prediction
   through the measured operator and compare to the held 1x observation.
-- *Legal anchor under hybrid input* [V9C pending]: the hybrid input's channel 0 is an upsampled
+- *Legal anchor under hybrid input*: the hybrid input's channel 0 is an upsampled
   mean (not a valid 1x observation), so the anchor consumes the original 1x aligned-mean patch
   carried separately through the data pipeline (even-origin crops; augmentation-synchronized).
+- *Residual-over-observation output (V10)*: the network predicts δ on the 2x hybrid grid and the
+  final output is `drizzle_mean_ch5 + δ`; an L1 residual penalty λ controls how far the output can
+  move from the observation-domain drizzle base.
 
 **Checkpoint selection (part of the method, not an afterthought).** Per arm, normalize the proxy
 pair (artifact score ↓, raw-control corr ↑) to [0,1], take the 3 steps closest to the ideal point
@@ -73,5 +76,5 @@ pair (artifact score ↓, raw-control corr ↑) to [0,1], take the 3 steps close
 choice with visual panels (temperature view, not high-pass only). The 60K endpoint is *never*
 the default deliverable.
 
-> TODO(§4): finalize V9A/V9C details and the hybrid-anchor plumbing description after Codex
-> lands the code; add loss-equation block; pseudo-code for selection rule (5 lines).
+> TODO(§4): add loss-equation block and 5-line pseudo-code for selection rule; compress the
+> V9A/V9C/V10 implementation details into one readable paragraph before LaTeX migration.

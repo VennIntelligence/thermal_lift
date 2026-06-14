@@ -26,11 +26,12 @@
 3. **数字核验铁律**：正文每个数字必须能指到仓库内权威文件
    （`09_figures_tables_assets.md` 与本文档逐节给出路径）。两套指标尺度
    （TB-scale vs EP11-harness-scale）绝不混在同一表/图；终稿 T1/T2 全部数字
-   来自统一口径 harness 单次重跑。
+   来自统一口径 harness 单次重跑（已完成：`output/ep11_unified_harness/`）。
 4. **禁写边界具有否决权**：`01_outline.md` 末节「Claims to avoid」是红队清单，
    任何修改后的段落与图注都要过一遍；冲突时删主张，不删边界。
-5. **占位规范**：未落地的实验结论一律 `[pending V9A/V9C/V9D]` 或 ⬜ 标注，
-   不写预期值；引用用 `[REF: 主题]` 占位，迁 LaTeX 前统一补 `paper/aaai/refs.bib`。
+5. **占位规范**：未落地的实验结论一律 `[pending ...]` 或 ⬜ 标注，
+   不写预期值；V9A/V9C/V9D/V10/T1/T2/F5 已落地，不应再保留 pending 标签。
+   引用用 `[REF: 主题]` 占位，迁 LaTeX 前统一补 `paper/aaai/refs.bib`。
 
 ## 2. 主文逐节交接（8 页预算）
 
@@ -42,7 +43,7 @@
   C1–C4 贡献；bounded-claim 立场（contour-level 2x，非计量、非 4x）。
 - **核心数字**: 20 µm 分辨率 vs 10 µm pitch；17.0 µm FRC cutoff；FWHM 114→100 µm；
   drift artifact 0.37→0.65 同时 forward loss 贴底。
-- **待办**: ① V9A/V9C/V9D 落地后改写 Q2/Q3 的 [pending] 措辞（阳性/阴性两版预案见 §6 注）；
+- **待办**: ① 按最终 harness 裁决精炼 Q2/Q3（input evidence 可见，但不构成 learned fidelity win）；
   ② 插入 teaser 图 F0 引用；③ 压缩到 1 页（当前略超）。
 
 ### §2 Related Work — `03_related_work.md`（~0.5 页）
@@ -71,8 +72,8 @@
   条纹修复 3.870→0.695）；TCForge 物理匹配合成（一段）；学习臂：固定 UNet 骨干 +
   input 模式 {1x stats, hybrid drizzle} × anchor {none, band, full, legal}——本节结构
   必须让 §6 的 T2 矩阵「直接读出来」；checkpoint 选择规则（方法的一部分，非事后）。
-- **待办**: ① V9A/V9C 管线细节按 Codex 落地代码核写（hybrid 输入通道、legal anchor 的
-  1x patch 旁路）；② 加 loss 公式块与选择规则 5 行伪代码（公式细节在 supp C，正文只放
+- **待办**: ① 将 V9A/V9C/V10 已落地的 hybrid 输入、legal anchor 1x patch 旁路、
+  residual-over-ch5 参数化压缩成正文可读版本；② 加 loss 公式块与选择规则 5 行伪代码（公式细节在 supp C，正文只放
   总式）；③ 损失权重演化史压成一段动机叙述。
 
 ### §5 GT-free Evaluation Protocol — `06_evaluation_protocol.md`（~1.0 页 + F2）
@@ -92,8 +93,9 @@
 - **小节顺序**: 6.1 主对比（T1+F5）→ 6.2 null-space drift（F3，**全文核心**）→
   6.3 input×anchor 消融（T2）→ 6.4/6.5 frame-budget 与鲁棒性（结论句 + 引 supp）→
   6.6 选择协议实战（F4；金句：endpoint 上报会让每个臂交出最差 checkpoint）→ 6.7 负结果。
-- **待回填依赖**（全部 ⬜/🔄 项见草稿内标注）: V9A/V9C/V9D 选点过统一 harness；
-  EP16 经典臂数字（Task C 产出后填 6.4/6.5）；T1/T2 单口径重跑。
+- **当前状态**: V9A/V9C/V9D/V10 选点已过统一 harness；EP16 经典臂数字已回填；
+  T1/T2/F5 单口径产物已在 `output/ep11_unified_harness/` 与 `output/paper_figures/`。
+  后续是写作压缩、图注与红队边界检查，不再需要重复跑 Task D。
 - **叙事预案**: V9A 阳性 → 「证据注入恢复细线」为 Q2 答案；V9A 阴性 → 降级为
   「输入与锚定双阴性 + 协议仍然成立」，C2/C3 不受影响（预案已写入 `00_status_and_plan.md`）。
 
@@ -141,7 +143,7 @@
 |---|---|---|---|
 | ★C.1 TCForge 合成平台全参数 | 场景几何分布、4×SSAA coverage AA、温度渲染、PSF/box/noise/shift 重放、burst pool K=4 变体表 | `tcforge/src/`、`05` §4.2、训练 pool 构建脚本 | ✍️ 已起草（06-12 中文稿） |
 | ★C.2 网络与损失 | UNet 结构表；损失全公式（MSE/highpass/SSIM/grad-vector/edge + thin/gap 权重）与 hot vs conservative 两组权重对照；PixelShuffle 负结果细节 | `algos/ep07_unet_sr/src/.../losses.py`、各 run `config.json` | ✍️ 已起草（06-12 中文稿） |
-| C.3 训练 config 对照表 | v6/v8.1a/v8.1b/v9b/v9a/v9c/v9d 全字段差异表（input_mode/in_channels/anchor/band/pool/save_every…） | 各 `outputs/*/config.json`（v9c config 已落盘） | ✍️ 已起草（差异表已填；V9C/V10 训练结果待回填） |
+| C.3 训练 config 对照表 | v6/v8.1a/v8.1b/v9b/v9a/v9c/v9d/V10 全字段差异表（input_mode/in_channels/anchor/band/pool/save_every/residual_mode…） | 各 `outputs/*/config.json` + `output/ep11_unified_harness/run_manifest.json` | ✍️ 已起草，V9C/V10 结果已可回填 |
 | ★C.4 经典方法实现细节 | drizzle pixfrac/kernel；MAP-TV FISTA + σ,λ 选择；TGV 各向异性椭圆对偶球投影 + coverage 归一化推导与伪代码 | `algos/ep10_drizzle/`、`algos/ep10_tgv_sr/src/`、`algos/ep15_info_limit/scripts/run_m4_*.py` | ✍️ 已起草（06-12 中文稿） |
 | ★C.5 checkpoint 选择伪代码 | 归一化 proxy 对 → 理想点距离 top-3（≥5K 间隔）→ 末端对照 → 视觉 gate；完整伪代码 + 超参 | `algos/ep07_unet_sr/scripts/plot_checkpoint_selection.py` | ✍️ 已起草（06-12 中文稿） |
 
@@ -150,33 +152,32 @@
 | 条目 | 内容 | 素材 | 状态 |
 |---|---|---|---|
 | D.0 fine-window 诊断口径（新增） | 中心细线窗口定义 + 四指标（hp_corr_input/tgv、sharp_p95、lattice）+ 限制声明 | `algos/ep07_unet_sr/scripts/v9_review/common.py` | ✍️ 已起草（06-12 中文稿） |
-| D.1 T1/T2 扩展版 | 全臂 × 全 checkpoint × 全列；TGV/MAP-TV 全参数网格表 | 统一 harness 重跑产物 + `output/ep10_tgv_sr/sweep_results.csv` | ⬜ 等 harness（占位节已建，partial 数据已索引） |
+| D.1 T1/T2 扩展版 | 全 selected arms × 全列；TGV/MAP-TV 全参数网格表 | `output/ep11_unified_harness/{all_arm_metrics.csv,t1_metrics.csv,t2_metrics.csv}` + `output/ep10_tgv_sr/sweep_results.csv` | ✅ harness 已完成，文字已回填 |
 | D.2 FRC 全档案 | band×seed 全表、控制组完整曲线、MAP-TV 前后 split-half 对照 | `output/ep15_info_limit/m2_frc/`、`m4_deconv_anchor/` | ✍️ 已起草（06-12 中文稿） |
-| D.3 漂移视觉演化 | V9 全系数值轨迹表 + 各臂 step 序列 eval_real 选帧 + v9a companion 轨迹 | `output/ep07_v9_review/`、`algos/ep07_unet_sr/outputs/*/eval_real/`、Task B `fig03s` | ✍️ 已起草（V9C 行与 S-F5 终选待回填） |
-| D.4 负结果档案 | PixelShuffle 条纹证据、4x 网络失败 + MTF 界互证、loss-side anchoring 无效（v9b+v9d 已闭合）、AVI 排除 | EP11/EP12 输出、`research_log/algorithm_changelog.md` | ✍️ 已起草（V9D 已落地；仅 V9C 判定句待补） |
+| D.3 漂移视觉演化 | V9 全系数值轨迹表 + 各臂 step 序列 eval_real 选帧 + v9a companion 轨迹 | `output/ep07_v9_review/`、`algos/ep07_unet_sr/outputs/*/eval_real/`、Task B `fig03s` | ✍️ 已起草，V9C 60K 行已可用 |
+| D.4 负结果档案 | PixelShuffle 条纹证据、4x 网络失败 + MTF 界互证、loss-side anchoring 无效（v9b+v9d+v9c 已闭合）、AVI 排除 | EP11/EP12 输出、`research_log/algorithm_changelog.md` | ✍️ 已起草，V9C 判定句已可用 |
 | D.5 budget/robustness 全曲线 | E1/E2/E3 全部曲线与表（经典臂 + 后补 GPU 臂） | Task C `output/ep16_budget_robustness/` | ✍️ 已起草（经典臂全表已抄录聚合；GPU 臂待跑） |
 | D.6 视觉 gate panel 全集 | 四臂（+V9 系列）panel 图 | `checkpoint_selection/panel_*.png` | ✍️ 已起草（选编原则已定；V9 panel 待选点） |
-| D.7 零训练融合 baseline（新增） | fused(λ) 扫描全表 + 支配 TGV 结论 + V10 对照前沿定位 + selection-on-test caveat | `output/ep07_v9_review/fusion_*.{csv,md,png}` | ✍️ 已起草（V10 叠加行与第二验证窗待回填） |
+| D.7 零训练融合 baseline（新增） | fused(λ) 扫描全表 + 支配 TGV 结论 + V10 对照前沿定位 + selection-on-test caveat | `output/ep07_v9_review/fusion_*.{csv,md,png}` + V10 high-λ summary | ✍️ 已起草，V10 λ=1.2@15K 判定句已可回填；第二验证窗仍可选 |
 
 ### E. 复现包（E_reproducibility.md）
 
 | 条目 | 内容 | 状态 |
 |---|---|---|
 | ★E.1 代码与环境 | 仓库结构、各 algo venv（UV/conda）矩阵、core 共享层、`build_all_notebooks.py` 一键重建 | ✍️ 已起草（06-12 中文稿，蓝本 `AGENTS.md`） |
-| ★E.2 实验命令清单 | 每个图/表 → 生成脚本 + CLI + venv + 预计耗时 | ✍️ 已起草（F2/S-F2 排版脚本与 T1 harness 命令待补） |
-| E.3 数据声明 | 数据不公开的说明 + 脱敏策略 + 合成平台可公开（TCForge 让协议可复现） | ⬜ 框架已起草，等客户许可结论 |
+| ★E.2 实验命令清单 | 每个图/表 → 生成脚本 + CLI + venv + 预计耗时 | ✍️ 已起草；T1/T2/F5 harness 命令已回填 |
+| E.3 数据声明 | 实验室样品展示说明 + 原始数据不公开 + TCForge/协议可复现 | ✍️ 已起草（实验室样品，全幅 FOV 可用） |
 
 ## 4. 任务分派状态（2026-06-11 夜）
 
 | 线 | 任务 | 执行者 | 状态 |
 |---|---|---|---|
 | 写作基建 | 本文档 + `09_figures_tables_assets.md` 落盘 | 主线 | ✅ 本次 |
-| 图表 | F1 / F3 / F7 经典臂 → `todos/paper_prompts.md` Task A/B/C | Codex 并行 | 🔄 待启动 |
+| 图表 | F1 / F3 / F7 经典臂 → `todos/paper_prompts.md` Task A/B/C | Codex 并行 | ✅ 已完成 |
 | 写作 | Supp ★ 条目起草（A.1–A.5 优先，其次 B/C/E） | 主线（06-12） | ✅ A–E 五份中文草稿落盘 `docs/paper/supp/`，缺口 ⬜ 占位 |
 | 写作 | §2 文献补全（`[REF:]` → refs.bib） | 任何写作智能体 | ⬜ 即可领取 |
-| 实验 | V9A 视觉 gate + 选点（落地后） | 待派 | ⬜ 06-12 晨 |
-| 实验 | 统一 harness 全臂重跑 → T1/T2/F5 | 待派（需 GPU 窗口） | ⬜ |
-| 行政 | 客户许可（脱敏芯片热像） | 用户本人 | ⬜ 本周 |
+| 实验 | V9A/V9C/V10 视觉 gate + 选点 | 主线/Codex | ✅ 已入统一 harness |
+| 实验 | 统一 harness 全臂重跑 → T1/T2/F5 | Codex（Task D） | ✅ 2026-06-14 完成；`output/ep11_unified_harness/` |
 
 ## 5. 接手者快速自检清单
 

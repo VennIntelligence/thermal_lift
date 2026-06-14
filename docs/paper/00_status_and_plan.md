@@ -11,6 +11,16 @@
 一个无 GT 评估协议、以及「先验漂移活在 forward 算子零空间」的实证发现来回答，
 并据此构造 2x contour-level 可信增强系统。
 
+> ## 🟢 写作就绪状态（2026-06-14）
+>
+> **所有过夜消融臂已落地，科学结论已定，可以开始写作。** C1–C4 四条贡献全部 settle：
+> V10 高-λ sweep 完成（把 Claim 4 从「凌乱负结果」升级为「可控权衡 + 有价值工作点 λ=1.2@15K」，
+> 仍诚实裁决「no GT-certifiable winner」）；V9C/V9D 60K 完成并闭合 input×anchor 矩阵 + null-space drift；
+> EP16 经典臂完成；论文图 F1/F2/F3/F5/F7 + method arch 全部生成。
+> **统一口径 harness 已完成（Task D，2026-06-14）**：T1/T2/F5 已有单一口径产物
+> `output/ep11_unified_harness/{t1_metrics.csv,t2_metrics.csv,run_manifest.json}` 与
+> `output/paper_figures/fig05_main_visual.{png,pdf}`。剩余工作转为写作压缩、图注和参考文献。
+
 ## 文件结构
 
 | 文件 | 内容 | 语言 | 状态 |
@@ -22,7 +32,7 @@
 | `04_problem_forward_model.md` | 系统、数据、标定链（§3） | EN | 初稿，数字已核 |
 | `05_method.md` | 合成平台、网络、锚定、输入设计（§4） | EN | 初稿 |
 | `06_evaluation_protocol.md` | 无 GT 评估协议（§5） | EN | 初稿 |
-| `07_experiments.md` | 实验与消融（§6），含待补占位 | EN | 初稿，待回填 |
+| `07_experiments.md` | 实验与消融（§6），含统一 T1/T2/F5 口径 | EN | 初稿，主数字已回填 |
 | `08_limitations_conclusion.md` | 限制与结论（§7） | EN | 初稿 |
 | `09_figures_tables_assets.md` | figure/table → 仓库资产路径映射 + 生产状态 | 中文 | ✅ 已落盘（06-11） |
 | `10_writing_handover.md` | **写作交接总控**：逐节要点 + supp 材料清单 + 分派状态 | 中文 | ✅ 已落盘（06-11） |
@@ -42,14 +52,16 @@
 | 经典锚：drizzle / MAP-TV / TGV（EP10）、M4 去卷积锚（EP15） | §6 主表 + 经典基准 | ✅ 完成 |
 | 信息上限：M1 相位 / M2 FRC / M3 σ 仲裁（EP15） | §5 协议 + §3 边界 | ✅ 完成（带风险标注） |
 | UNet 四臂 + checkpoint 选优（v6/v8.1a/v8.1b/v9b） | §6 漂移轨迹 + Pareto | ✅ 完成（reports/ep11_dl_benchmark） |
-| V9A hybrid drizzle 输入 | §6 输入消融主结果 | 🔄 GPU 0 训练中，预计 06-12 早 ~6 点 |
-| V9D 全频锚 / V9C hybrid+合法锚 | §6 锚定消融 | 🔄 已派 Codex（GPU 1 串行 ~20h） |
-| 帧数预算 N ∈ {31,62,124,248} | §6 消融（纯推理） | 🔄 经典臂已派 Codex（EP16，`todos/paper_prompts.md` Task C）；GPU 臂待空闲 |
-| shift 扰动鲁棒性 σ 扫描 | §6 消融（纯推理） | 🔄 同上（Task C E2） |
-| 对齐源消融（command prior vs contour_refined） | §6 消融（纯推理） | 🔄 同上（Task C E3） |
-| 论文图 F1（系统+标定链）/ F3（drift+inset） | §3 / §6 主图 | 🔄 已派 Codex（Task A / Task B） |
+| V9A hybrid drizzle 输入 | §6 输入消融主结果 | ✅ 60K 完成；canonical V9A@10K 已入 harness（artifact/corr 1.762/0.719），V9A@60K 用作 F5 late-drift visual control |
+| V9D 全频锚 | §6 锚定消融 | ✅ 60K 完成；canonical V9D@7K 已入 harness（1.726/0.771），TB 端点 0.677/0.677 |
+| V9C hybrid+合法锚 | §6 锚定消融 | ✅ **60K 完成（2026-06-14）**；canonical V9C@5K 已入 harness（1.669/0.718），TB 端点 0.695/0.669，同样漂移未压平 → 闭合 input×anchor 矩阵 |
+| V10 residual-over-observation（高-λ sweep） | §6 Claim 4 | ✅ **高-λ {0.2,0.5,1.2,3.0}×25K 完成（2026-06-14）**；best fine-window λ=1.2@15K (0.922/0.987/0.014)，harness row artifact/corr 2.726/0.711，23°C sanity pass；Phase 2 跳过 |
+| 帧数预算 N ∈ {31,62,124,248} | §6 消融（纯推理） | ✅ **经典臂完成（EP16）**；§6.4 数字已回填；learned/GPU matrix 不再是主文硬门槛 |
+| shift 扰动鲁棒性 σ 扫描 | §6 消融（纯推理） | ✅ **经典臂完成（EP16 E2）**；§6.5 已回填 |
+| 对齐源消融（command prior vs contour_refined） | §6 消融（纯推理） | ✅ **经典臂完成（EP16 E3）**；§6.5 已回填 |
+| 论文图 F1（系统+标定链）/ F3（drift+inset） | §3 / §6 主图 | ✅ **完成**（`output/paper_figures/fig01_*`、`fig03_nullspace_drift*` + `fig03s_v9a_trajectory*`） |
 | PSF σ 敏感性 | §6 消融 | ✅ M4 网格已有，整理即可 |
-| 指标口径统一重跑（同一 harness 出全部终表数字） | §6 主表 | ⬜ 必做：TB eval 与 EP11 横评的 artifact 尺度不同，终稿数字必须单一口径 |
+| **指标口径统一重跑（同一 harness 出全部终表数字）** | §6 主表 | ✅ **完成（Task D，2026-06-14）**：`algos/ep11_dl_benchmark/scripts/run_unified_harness_t1_t2.py` → `output/ep11_unified_harness/{all_arm_metrics.csv,t1_metrics.csv,t2_metrics.csv,tb_vs_harness_scale_check.csv,run_manifest.json}`；F5 已生成 |
 
 ## 写作计划（对应 WACV R2 节奏；分工与领取入口见 `10_writing_handover.md` §4）
 
@@ -60,11 +72,10 @@
 
 ## 待办与风险
 
-- [ ] 客户许可：论文展示芯片热像（可脱敏：匿名型号、仅中心 ROI）——**本周去问**
 - [ ] 主文数字微修（supp 起草时核出，见 `supp/B_system_data.md` B.1.2 / `supp/D_full_results.md` D.5.1）：
   ① §3.2 跨 session 跳变「median 3.55 °C (49×)」→ audit 权威「median 2.91 / max 4.16 °C (40×/57×)」，`AGENTS.md` 同步；
   ② §6.4「corr 0.772 at N=248」→ CSV 原值 0.771
 - [ ] D.7 融合 baseline 的 λ 选择需第二验证窗复核（CPU 几分钟，防 selection-on-test）
-- [ ] 指标口径统一（见状态板最后一行）
-- [ ] V9A 若证伪输入论点，§6 叙事降级为「锚定与输入双阴性 + 协议仍然成立」——协议与零空间发现不依赖 V9A 阳性
+- [x] 指标口径统一（Task D，`output/ep11_unified_harness/`）
+- [ ] §6 叙事保持最终边界：hybrid 输入暴露 sub-pixel evidence，但不认证 learned fidelity；协议与零空间发现不依赖 V9A 阳性
 - [ ] 参考文献：`03_related_work.md` 目前是 `[REF: ...]` 占位，迁 LaTeX 前补 `paper/aaai/refs.bib`

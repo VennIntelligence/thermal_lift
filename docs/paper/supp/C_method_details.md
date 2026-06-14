@@ -1,217 +1,116 @@
-# Supplementary C — 方法实现细节（中文草稿）
+# 补充材料 C —— 方法实现细节
 
-> **角色**: technical appendix 的方法块，支撑主文 §4；目标是让审稿人/复现者不读代码也能还原管线。
-> **语言**: 中文草稿（2026-06-12 决策），迁 LaTeX 时翻译为英文。
-> **对应清单**: `10_writing_handover.md` §3.C（C.1/C.2/C.4/C.5 ★；C.3 原标「等 V9C」，其 config.json 已落盘故差异表可填，仅训练结果待跑完）。
+## C.1 TCForge 物理匹配合成平台
 
----
+本节详述主文 §4.2 中合成数据平台 TCForge 的实现，其目标是生成与真实 LWIR 微扫描在物理特性上匹配的训练数据。
 
-## C.1 TCForge 物理匹配合成平台（对应主文 §4.2）
+### C.1.1 场景几何生成
 
-### C.1.1 模块结构
+TCForge 通过 8 层随机原语叠加构造 IC 布局的几何 mask：依次放置大块、中宽柱、L 形走线（25% 粗 / 75% 细）、框结构、细部与引脚阵列、圆形 via、对边 pin，最后做减通道处理。所有层均由 seed 确定性控制。特征尺度由难度参数决定：easy 的 major/minor/line 为 80/60/45 µm，medium 为 55/42/30 µm，hard 为 35/28/22 µm，stress 为 22/16/12 µm。场景整体旋转角为 $\theta = 47.6° + U(-1.5°, +1.5°)$，围绕实测 stage 角度抖动以匹配真实几何取向。
 
-| 模块（`tcforge/src/tcforge/`） | 职责 |
-|---|---|
-| `geometry.py` | IC 布局 coverage mask 生成 + 4×SSAA |
-| `physics.py` | 温度渲染、PSF、噪声、漂移 |
-| `forward.py` | LR burst 退化（观测重放） |
-| `fusion.py` | 1x 观测特征融合（5 通道） |
-| `classical_sr.py` | drizzle / shift-and-add 特征（2x 证据通道） |
-| `storage.py` | scene 紧凑存取 |
+为消除阶梯锯齿对训练的污染，默认启用 4×SSAA 抗锯齿：在 4 倍画布上绘制后旋转，再做 $4 \times 4$ 块均值降采，得到 $\text{coverage} \in [0, 1]$ 的连续值。这样 HR 目标不含阶梯锯齿，亚像素细线携带 coverage 缩放后的幅度。
 
-### C.1.2 场景几何分布
+### C.1.2 温度渲染与物理随机化
 
-`build_scene_mask_with_metadata(difficulty, seed)`（`geometry.py` L639–1009）：8 层随机原语（大块 → 中宽柱 → L 形走线（25% 粗/75% 细）→ 框 → 细部/引脚阵列 → 圆/via → 对边 pin → 减通道），全部 seed 确定性。难度由特征尺度 (major, minor, line)/µm 控制：
+温度场渲染公式为
 
-| difficulty | major | minor | line |
-|---|---:|---:|---:|
-| easy | 80 | 60 | 45 |
-| medium | 55 | 42 | 30 |
-| hard | 35 | 28 | 22 |
-| stress | 22 | 16 | 12 |
+$$T = T_{\mathrm{bg}} + \Delta T \cdot \text{coverage} + A \cdot \text{smooth\_noise}$$
 
-场景整体旋转 θ = 47.6° + U(−1.5°, +1.5°)——围绕实测 stage 角度抖动，匹配真实几何取向。
+关键物理参数的随机化分布经过仔细设计以覆盖实测范围：$\Delta T \sim U(0.5, 5.0)\;°\mathrm{C}$（覆盖实测内/外轮廓对比度 1.94/2.49 °C）；PSF $\sigma \sim U(0.15, 0.55)$ LR px（覆盖采纳区间 [0.2, 0.5]，见 A.5.2），其中 30% 使用椭圆 PSF、10% 使用 Airy 函数替代 Gaussian；噪声遵循 lognormal 分布，均值等于实测噪声底 0.0724 °C；漂移幅度 $\sim U(0, 0.3)\;°\mathrm{C}$；亚像素位移使用实测 contour\_refined 的 248 帧 profile 重放并叠加 $\sigma = 0.02$ px 的 jitter。
 
-### C.1.3 4×SSAA coverage 抗锯齿
+Forward 退化模式默认采用 physical\_block\_average：对 HR 图先做 PSF blur，再对各 shift 执行分块双线性均值降采（scale 2 或 4）。
 
-默认 `antialias=True, ssaa_factor=4`：在 4× 画布绘制 → order=1 旋转 → 4× 块均值降采得 coverage ∈ [0,1]（`geometry.py` L1006–1008）。**设计意图**：HR 目标不含阶梯锯齿、亚像素细线携带 coverage 缩放后的幅度——网络不被训练去复制锯齿（EP08/EP11 时代锯齿目标的教训）。
+### C.1.3 训练池
 
-### C.1.4 温度渲染与物理随机化
+当前构建了两个训练池。training\_pool\_2x\_aa 包含 1000 个 scene（难度分布 easy 200/medium 400/hard 300/stress 100），每 scene 248 帧，LR $480 \times 640$ → HR $960 \times 1280$，用于 1x 统计输入的各训练臂（v8.1a/b、v9b/d）。training\_pool\_2x\_aa\_burst 在此基础上保存了完整的 LR burst（约 152 GB），用于 hybrid 输入的各臂（V9A/V9C/V10）。
 
-T = T_bg + ΔT·coverage + A·smooth_noise（`physics.py::render_temperature_field`）。默认随机化（`DEFAULT_PHYSICS_RANDOMIZATION`）：
-
-| 参数 | 分布 |
-|---|---|
-| ΔT | U(0.5, 5.0) °C（覆盖实测内/外轮廓对比度 1.94/2.49 °C，supp A.1.4） |
-| PSF σ | U(0.15, 0.55) LR px（覆盖采纳区间 [0.2,0.5]，supp A.5.3）；30% 椭圆 + 10% Airy |
-| 噪声 | lognormal，均值 0.0724 °C（= 实测噪声底）；模式 `detector_realistic` |
-| 漂移幅度 | U(0, 0.3) °C |
-| shift | `real_default_contour_refined` profile 重放（248 帧/scene）+ jitter σ=0.02 px |
-
-**Forward 模式**：`physical_block_average`（HR 一次 PSF blur → 各 shift 分块双线性均值，scale 2/4）为训练池默认；`exact_ep06_point` 为 EP06 点采样对照。
-
-### C.1.5 训练池与 burst 变体
-
-生成：`scripts/generate_training_pool.py --config configs/synthetic/training_pool_2x*.json`。
-
-| 池 | 规模 | 用途 |
-|---|---|---|
-| `training_pool_2x_aa` | 1000 scenes × 248 帧；难度 easy 200/medium 400/hard 300/stress 100；LR 480×640 → HR 960×1280 | 1x 统计输入各臂（v8.1a/b、v9b/d） |
-| `training_pool_2x_aa_burst` | 同上 + `save_lr_burst=true`（~152 GB） | hybrid 输入各臂（V9A/V9C/V10） |
-
-**K=4 drizzle 变体**（`scripts/precompute_drizzle_variants.py`，ACL-016）：k=0 全 248 帧无 shift 噪声（canonical，与推理一致）；k=1..3 保留 60–100% 帧（≥30）+ shift N(0, 0.05 px)。输出 `drizzle_variants_2x.npy`（K,3,H,W float16，bilinear kernel）；训练时按 [seed, epoch, scene, 0xBEEF] 确定性抽样（`dataset.py` L330）——帧子集与 shift 噪声增广「烘焙」进变体，避免训练时现场 drizzle 卡死 dataloader。
-
-**存储 schema**（`storage.py`）：`hr_mask_4x.png`、`hr_edge_4x.png`、`obs_features_1x.npz`、`shifts.npy`、`metadata.json`（+ 可选 `lr_burst.npy`、`drizzle_variants_2x.npy`）。
-
-**C.1 资产依赖**：`tcforge/src/tcforge/`；`configs/synthetic/training_pool_2x*.json`；`scripts/{generate_training_pool.py, precompute_drizzle_variants.py}`；S-T3（合成参数全表 = 本节表格汇总）。
-**C.1 待回填**：无——可成稿。
+为提高训练效率，还预计算了 $K = 4$ 组 drizzle 变体：$k = 0$ 使用全部 248 帧且无 shift 噪声（canonical，与推理一致）；$k = 1 \ldots 3$ 保留 60–100% 帧（$\ge 30$）并叠加 $N(0, 0.05\;\text{px})$ 的 shift 噪声。训练时按 $[\text{seed}, \text{epoch}, \text{scene}, \text{0xBEEF}]$ 确定性抽样变体编号，将帧子集与 shift 噪声增广烘焙入预计算结果中，避免训练期间现场 drizzle 阻塞 dataloader。
 
 ---
 
-## C.2 网络与损失（对应主文 §4.3）
+## C.2 网络与损失
 
-### C.2.1 UNet 骨干（各臂固定）
+### C.2.1 网络架构
 
-`ThermalSRUNet`（`algos/ep07_unet_sr/src/unet_sr/model.py`）：编码 3×（MaxPool + ConvBlock[2×3×3 Conv + GroupNorm + SiLU + SE]），通道 c/2c/4c/8c（c=base_channels=64）；解码双线性上采 + skip concat + ConvBlock。HR 头两种：
+ThermalSRUNet 采用编码-解码结构：编码路径为 3 层 MaxPool + ConvBlock（每块 $2 \times 3 \times 3$ Conv + GroupNorm + SiLU + SE attention），通道数按 $c, 2c, 4c, 8c$ 递增（$c = 64$）；解码路径使用双线性上采样 + skip concat + ConvBlock。HR 输出头默认采用 bilinear 模式（双线性 $\times$ scale → $3 \times 3$ Conv），v8.1b 消融臂另测试了 pixelshuffle 模式（ICNR 初始化 sub-pixel conv + PixelShuffle + HRResBlock），后者产生条纹伪影且 proxy 全程更差（见 D.4.1），仅作为 head 归因对照保留。
 
-- **bilinear**（默认交付）：双线性 ×scale → 3×3 Conv；
-- **pixelshuffle**（v8.1b 消融臂）：ICNR 初始化 sub-pixel conv + PixelShuffle + HRResBlock——**负结果**，条纹伪影 + proxy 全程更差（supp D.4.1），保留为 head 归因对照。
+在 hybrid 输入模式下，网络在 2x 网格上以等效 scale=1 运行，因为输入已经是 2x 分辨率。
 
-hybrid 输入模式下网络在 2x 网格上等效 scale=1 运行（输入已是 2x，无最终上采样）。参数量由 `train.py` 运行时打印（base 64、8ch 输入约个位数 M）。
+### C.2.2 损失函数
 
-### C.2.2 ContourSRLoss 总式
+ContourSRLoss 的总损失为
 
-L = w_m·MSE + w_hp·HP + w_e·Edge + w_s·(1−SSIM) + w_gv·GV + w_lap·Lap + w_fm·FM + w_r·R
+$$\mathcal{L} = w_m \cdot \text{MSE} + w_{hp} \cdot \text{HP} + w_e \cdot \text{Edge} + w_s \cdot (1 - \text{SSIM}) + w_{gv} \cdot \text{GV} + w_{lap} \cdot \text{Lap} + w_{fm} \cdot \text{FM} + w_r \cdot R$$
 
-| 项 | 定义（`losses.py`） | conservative 权重 |
-|---|---|---:|
-| MSE | E[(pred−target)²]，可乘 gap_weight | 0.3 |
-| HP highpass 结构 | ‖HP(pred)−HP(target)‖₁，HP = x − G_{σ=5}(x)，乘 structure/thin/gap 权重图 | 0.8 |
-| Edge | ‖|∇pred|−|∇target|‖₁ + 0.25×半分辨率版 | 0.05 |
-| SSIM | 1−SSIM（11×11 Gaussian 窗） | 0.15 |
-| GV grad-vector | ‖gx_p−gx_t‖₁+‖gy_p−gy_t‖₁（全向量，捕捉边缘膨胀/畸变——幅值型 edge loss 看不见的方向） | 0.15 |
-| Lap | ReLU(|Δtarget|−|Δpred|) 均值（只罚「比目标钝」） | 0（仅 v6 用 0.1） |
-| FM forward consistency | MSE(AvgPool_s(G_{σ_PSF·s}(pred)), obs)，band=full / highpass（σ_band=5 LR px 两侧同减低通） | 0（锚定臂 0.1） |
-| R residual penalty（V10） | w_r·mean(|δ|)，δ = pred − 输入 ch5（drizzle mean@2x） | 0（V10 扫 λ） |
+其中各项含义如下。MSE 为标准均方误差，可乘 gap\_weight。HP 为 highpass 结构损失 $\|HP(\hat{x}) - HP(x)\|_1$，预处理 $HP(x) = x - G_{\sigma=5}(x)$，乘以 structure/thin/gap 三种权重图。Edge 为梯度幅值损失 $\||\nabla\hat{x}| - |\nabla x|\|_1$ 加 0.25 倍半分辨率版本。SSIM 使用 $11 \times 11$ Gaussian 窗。GV（grad-vector）为 $\|g_{x,p} - g_{x,t}\|_1 + \|g_{y,p} - g_{y,t}\|_1$，保留梯度的完整向量信息以捕捉边缘膨胀和畸变——这是幅值型 Edge loss 看不到的方向偏差。Lap 为 $\text{ReLU}(|\Delta x| - |\Delta\hat{x}|)$ 的均值，只罚「比目标钝」。FM 为 forward consistency $\text{MSE}(\text{AvgPool}_s(G_{\sigma s}(\hat{x})),\; y_{\text{obs}})$，可选 full-band 或 highpass 模式。R 为残差惩罚 $w_r \cdot \text{mean}(|\hat{x} - x_{\text{input}}|)$（V10 使用）。
 
-**权重图机制**（`mask_weights.py`）：structure_boost——HP/GV 权重 ×(1 + b·‖∇target‖/max)；thin_boost——结构像素且宽度 ≤3 HR px ×倍率；gap_boost——两侧有结构的 ≤3 px 背景窄缝 ×倍率。
+权重图机制使损失在结构关键区域有针对性地加强：structure\_boost 按梯度强度对 HP/GV 权重图加权；thin\_boost 在宽度 $\le 3$ HR px 的细结构上倍增；gap\_boost 在两侧有结构的窄缝背景上倍增。
 
-### C.2.3 hot vs conservative 权重对照（损失演化史的浓缩）
+conservative 权重壳（v8.1a 起冻结，V9 全系沿用）设定为 $w_m = 0.3$、$w_{hp} = 0.8$、structure\_boost = 2.0、$w_{gv} = 0.15$、thin\_boost = 3.0、gap\_boost = 2.0。v6 使用更激进的 hot 壳（$w_{hp} = 1.0$、structure\_boost = 4.0 等），叠加 Lap 0.1 和 full-band FM 0.1，保留为漂移放大参照臂。
 
-| 参数 | hot（CLI 默认） | conservative（v8.1a 壳，V9 全系沿用） |
-|---|---:|---:|
-| mse_loss_weight | 0.2 | 0.3 |
-| highpass_loss_weight | 1.0 | 0.8 |
-| structure_boost | 4.0 | 2.0 |
-| grad_vector_weight | 0.3 | 0.15 |
-| thin_boost | 6.0 | 3.0 |
-| gap_boost | 4.0 | 2.0 |
+### C.2.3 Hybrid 8 通道输入
 
-历史动机一句话：skeleton boost 30 时代 → 振铃；loss cooldown A/B 证明降温不解决中心细线模糊（输入瓶颈，主文 §6.3）→ conservative 作为公平 loss 壳冻结，v6（hot+Lap+full FM）保留为漂移放大参照臂。
+V9A/V9C/V10 使用 hybrid 8 通道输入，在 2x 网格上融合 1x 统计特征与 2x drizzle 证据。通道 0–4 为 1x fused 统计（aligned mean/median/coverage/variance/highpass fused）经双线性上采到 2x；通道 5 为 drizzle mean @2x，是观测域证据的主通道（也是 V10 残差惩罚的基准）；通道 6 为 drizzle coverage @2x（空洞可识别：未观测 bin 以全局均值填充，coverage = 0）；通道 7 为 drizzle variance @2x。
 
-### C.2.4 hybrid 8 通道输入（V9A/V9C/V10）
-
-`dataset.py::_build_hybrid_obs` / 推理 `inference.py::infer_from_burst`：
-
-```
-ch 0–4: 1x fused 统计（aligned_mean/median/coverage/variance/highpass_fused）双线性 ↑2x
-ch 5:   drizzle mean @2x      ← 观测域证据主通道（V10 残差基准）
-ch 6:   drizzle coverage @2x  ← 空洞可识别（未观测 bin mean 填全局均值、coverage=0）
-ch 7:   drizzle variance @2x
-```
-
-V9C 合法锚配套：hybrid 的 ch0 是上采样均值（不是合法 1x 观测），故 forward 锚另走数据管线携带原生 1x aligned-mean patch（偶数 2x origin 裁剪、增广同步）。
-
-**C.2 资产依赖**：`algos/ep07_unet_sr/src/unet_sr/{model.py, losses.py, mask_weights.py, dataset.py, config.py}`；`algos/ep07_unet_sr/scripts/run_v9.md`（conservative 壳定义）。
-**C.2 待回填**：⬜ 参数量精确数字（跑 `train.py --help`/启动日志摘录，1 分钟）。
+V9C 的合法锚配套值得说明：hybrid 的通道 0 是上采样均值而非合法的 1x 观测，因此 forward 锚需另走数据管线携带原生 1x aligned-mean patch（偶数 2x origin 裁剪、增广同步）。
 
 ---
 
-## C.3 训练 config 对照表（七臂全字段差异）
+## C.3 训练配置对照
 
-**共同字段**：scale=2、base_channels=64、patch_size_hr=256、total_steps=60000、lr=2e-4、AMP、compile、edge/ssim/coarse = 0.05/0.15/0.25、highpass_sigma=5、real_eval：248 帧 + contour_refined + center-1/3 + zoom3。差异字段（各 `outputs/*/config.json`）：
+七臂的训练配置共享以下设定：scale=2、base\_channels=64、patch\_size\_hr=256、total\_steps=60000、lr=$2 \times 10^{-4}$、AMP、compile、edge/ssim/coarse 权重 0.05/0.15/0.25、highpass\_sigma=5、real\_eval 使用 248 帧 contour\_refined + center-1/3 + zoom3。
+
+各臂的差异字段构成一个 $\{\text{input}\} \times \{\text{anchor}\}$ 消融矩阵：
 
 | 字段 | v6 | v8.1a | v8.1b | v9b | v9d | V9A | V9C |
 |---|---|---|---|---|---|---|---|
-| 训练池 | 2x | 2x_aa | 2x_aa | 2x_aa | 2x_aa | 2x_aa_burst | 2x_aa_burst |
-| input_mode / in_ch | lr / 5 | lr / 5 | lr / 5 | lr / 5 | lr / 5 | **hybrid / 8** | **hybrid / 8** |
-| HR 头 | bilinear | bilinear | **pixelshuffle+res1** | bilinear | bilinear | bilinear | bilinear |
-| loss 壳 | **hot+Lap0.1** | cons. | cons. | cons. | cons. | cons. | cons. |
-| forward 锚 | full 0.1 | 无 | 无 | **highpass 0.1** | **full 0.1** | 无 | **legal-1x highpass 0.1** |
-| batch_size | 128 | 128 | 128 | 128 | 128 | **64**（35K 中断后续跑） | **64** |
-| save_every | 2000 | 5000 | 5000 | **1000** | **1000** | 5000 | 5000 |
+| 训练池 | 2x | 2x\_aa | 2x\_aa | 2x\_aa | 2x\_aa | 2x\_aa\_burst | 2x\_aa\_burst |
+| input / in\_ch | lr / 5 | lr / 5 | lr / 5 | lr / 5 | lr / 5 | hybrid / 8 | hybrid / 8 |
+| HR 头 | bilinear | bilinear | pixelshuffle | bilinear | bilinear | bilinear | bilinear |
+| loss 壳 | hot+Lap | cons. | cons. | cons. | cons. | cons. | cons. |
+| forward 锚 | full 0.1 | 无 | 无 | hp 0.1 | full 0.1 | 无 | legal-1x hp 0.1 |
+| batch\_size | 128 | 128 | 128 | 128 | 128 | 64 | 64 |
 
-**T2 消融矩阵直读**（input × anchor）：{1x, hybrid} × {none, band, full, legal} = v8.1a / v9b / v9d / V9A / V9C（v6、v8.1b 为 loss 温度与 head 的额外归因臂）。
+消融矩阵的直读方式：$\{1x, \text{hybrid}\} \times \{\text{none}, \text{band}, \text{full}, \text{legal}\}$ = v8.1a / v9b / v9d / V9A / V9C（v6 和 v8.1b 分别为 loss 温度和 head 的额外归因臂）。
 
-**可比性 caveat（必写）**：V9A 前 35K bs=128、之后与 V9C 全程 bs=64——hybrid 双臂与 1x 各臂训练动力学不完全同条件；V9A 30K 保真悬崖与 bs 切换重合，混杂未排除（V10 恒定 bs 顺带检验，`docs/next_move_plan.md` §8）。
-
-**C.3 资产依赖**：`algos/ep07_unet_sr/outputs/ep07_{v6_physics, v8_1a_loss_cooldown, v8_1b_pixelshuffle, v9a_hybrid_drizzle, v9b_fwd_consistency, v9c_hybrid_legal_fwd, v9d_fwd_fullband}/config.json`。
-**C.3 待回填**：⬜ V9C 训练结果行（60K 完整曲线 + 选点，等今晚训练自然结束后 C4 收尾流程）；⬜ V10 三臂行（等 ACL-020 实验落地，含 residual_mode/residual_penalty_weight 字段）。
+可比性说明：V9A 前 35K 步使用 batch\_size=128，之后与 V9C 全程 batch\_size=64——hybrid 双臂与 1x 各臂的训练动力学不完全同条件。V9A 30K 保真悬崖与 batch size 切换时间重合，混杂未排除。
 
 ---
 
-## C.4 经典方法实现细节（对应主文 §4.1）
+## C.4 经典方法
 
-### C.4.1 Drizzle（EP10）
+### C.4.1 Drizzle
 
-STScI `drizzle.resample.Drizzle`（`algos/ep10_drizzle/src/ep10_drizzle/drizzle_sr.py`）：pixfrac 默认 0.7（sweep {1.0, 0.8, 0.7, 0.6, 0.5}）、kernel `square`、输出网格 (H×2, W×2)、pixmap HR 坐标 = 2×(col+dx, row+dy)（shift 约定 [dx,dy] LR px 观测→参考系）、coverage = out_wht，<1.0 置 NaN。TCForge 训练侧 scatter 用 bilinear kernel（C.1.5）——两种 kernel 的差异在 D.7 fine-window 指标中以「drizzle 输入通道」参照点体现。
+Drizzle 使用 STScI drizzle 库实现，pixfrac 默认 0.7（sweep \{1.0, 0.8, 0.7, 0.6, 0.5\}），kernel 为 square，输出网格 $(H \times 2, W \times 2)$。coverage $< 1.0$ 的像素置 NaN。TCForge 训练侧的 scatter 使用 bilinear kernel，两种 kernel 的差异在 D.7 的 fine-window 指标中以 drizzle 输入通道参照点的形式体现。
 
-### C.4.2 各向异性 coverage 加权 TGV（EP10，实用经典交付）
+### C.4.2 各向异性 TGV
 
-外层 FISTA：x_{k+1} = TGV_prox(z_k − η∇D(z_k))（`algos/ep10_tgv_sr/src/ep10_tgv_sr/tgv.py`）。
+TGV 重建采用外层 FISTA 框架 $x_{k+1} = \text{TGV\_prox}(z_k - \eta \nabla D(z_k))$，针对本数据集的 raster 各向异性（见 B.3.1）做了两项关键设计。
 
-- **各向异性对偶投影**：TGV 内层（Chambolle-Pock 路径）一阶对偶球改椭圆 {(a,b): (a/r_a)²+(b/r_b)² ≤ 1}，r_a = α₁·r_y、r_b = α₁（r_y = aniso_ratio_y = 1.5）；二阶对称张量同构造（r_yy = α₀r_y、r_xx = α₀、r_yx = √(α₀²r_y)）。动机 = raster 各向异性（supp B.3.1）。
-- **coverage 加权数据梯度**：每 HR 像素梯度除以预计算 coverage（bilinear splat + PSF adjoint 得到），替代统一除帧数 N——修掉 bilinear scatter 把权重集中在固定 HR 行导致的水平条纹。
-- **参数**（`run_tgv_sr.py` sweep）：λ_tv ∈ {3e-4, 1e-3, 3e-3} × σ_PSF ∈ {0.18, 0.50}，α_ratio=2.0（α₁=λ, α₀=λ/2），max_iter=100、inner 80。
-- **修复效果**：artifact 3.870 → **0.695**（−82%），raw-control corr 0.902 → **0.916**，30.8 min CPU（ACL-007；TB-scale，TGV 口径注意 A.3.1 红线）。
+第一，各向异性对偶投影。TGV 内层（Chambolle-Pock 路径）的一阶对偶球改为椭圆 $\{(a,b) : (a/r_a)^2 + (b/r_b)^2 \le 1\}$，其中 $r_a = \alpha_1 \cdot r_y$、$r_b = \alpha_1$（$r_y = 1.5$）；二阶对称张量同构造。这使得 Y 方向正则强度弱于 X 方向，补偿 Y 方向数据约束的不足。
 
-### C.4.3 MAP-TV 去卷积锚（EP15 M4，验收 gate）
+第二，coverage 加权数据梯度。每个 HR 像素的数据保真梯度除以预计算的 coverage（由 bilinear splat + PSF adjoint 得到），而非统一除以帧数 $N$。这修正了 bilinear scatter 把权重集中在固定 HR 行上所导致的水平条纹。
 
-`algos/ep15_info_limit/scripts/run_m4_deconv_anchor.py`：forward = shift → Gaussian PSF（σ LR px）→ avg_pool box；GPU FISTA + smoothed-TV 梯度，150 iter（relative update ~0.005 收敛）。
+参数网格为 $\lambda_{\text{tv}} \in \{3 \times 10^{-4}, 10^{-3}, 3 \times 10^{-3}\} \times \sigma_{\text{PSF}} \in \{0.18, 0.50\}$，$\alpha_{\text{ratio}} = 2.0$（$\alpha_1 = \lambda$, $\alpha_0 = \lambda/2$），外层 100 iter、内层 80 iter。最优参数下 artifact 从 3.870 降至 0.695（−82%），raw-control corr 从 0.902 升至 0.916，耗时 30.8 min CPU。
 
-- **网格**：σ ∈ {0.2, 0.3, 0.4, 0.5} × λ ∈ {3e-4, 1e-3, 3e-3}；
-- **选择规则**：每 σ 内 split-half（偶/奇帧）proxy = split_half_nrmse + 0.05×artifact + 0.08×std_excess 取最小，再跨 σ 选全局最优 → **σ=0.2, λ=1e-3**；
-- **成本**：4563 s GPU；
-- **角色**：验收锚——学习臂必须在 FRC-band 一致性与 zigzag 轮廓指标上同时不输它才可采纳（主文 §5.5）。结果数字（FWHM 114→100 µm 等）归档在 supp D.2/D.5。
+### C.4.3 MAP-TV 去卷积锚
 
-**C.4 资产依赖**：`algos/ep10_drizzle/`、`algos/ep10_tgv_sr/src/`、`algos/ep15_info_limit/scripts/run_m4_deconv_anchor.py`；`output/ep10_tgv_sr/{sweep_results.csv, best_hr_temperature.npy, run_summary.json}`；`research_log/algorithm_changelog.md` ACL-007/ACL-012。
-**C.4 待回填**：无——可成稿。⬜ TGV 对偶投影推导若要给完整公式块（含步长/收敛条件），迁 LaTeX 时从 `tgv.py` 注释整理（半页内）。
+MAP-TV 锚用于验收门控（主文 §5.5）：学习臂必须在 FRC-band 一致性与 zigzag 轮廓指标上同时不输 MAP-TV 才可采纳。其 forward 模型为 shift → Gaussian PSF（$\sigma$ LR px）→ avg\_pool box，使用 GPU FISTA + smoothed-TV 梯度优化，150 iter。
+
+参数网格为 $\sigma \in \{0.2, 0.3, 0.4, 0.5\} \times \lambda \in \{3 \times 10^{-4}, 10^{-3}, 3 \times 10^{-3}\}$。选择规则为每个 $\sigma$ 内按 split-half proxy（split\_half\_nrmse + 0.05×artifact + 0.08×std\_excess）取最小，再跨 $\sigma$ 选全局最优，结果为 $\sigma = 0.2$、$\lambda = 10^{-3}$，耗时 4563 s GPU。
 
 ---
 
-## C.5 checkpoint 选择协议（对应主文 §4.3 末段 + §6.6）
+## C.5 Checkpoint 选择协议
 
-### C.5.1 规则（`algos/ep07_unet_sr/scripts/plot_checkpoint_selection.py`）
+训练期间的 checkpoint 选择对学习臂的最终输出质量至关重要。本节详述主文 §4.3 末段和 §6.6 的选择规则。
 
-每臂在其全部 eval checkpoint 上：
+### C.5.1 选择流程
 
-1. 归一化 proxy 对：a_norm = (artifact − min)/(max − min)；c_norm = (max_corr − corr)/(max_corr − min_corr)（corr 反向）；
-2. 理想点距离 d = √(a_norm² + c_norm²)，升序遍历；
-3. **5K 窗口去重**：每 checkpoint 归属 window = step // 5000，同窗只留最先入选者 → 最多 3 个候选；
-4. **末端对照**：60K 若未入选则强制追加为 drift reference（不参与选优）；
-5. rank-1 为 canonical；
-6. **视觉 gate**：每候选拼 `eval_real/unet_step{K}_center_zoom3x_temperature.png` 三联 panel（温度域，不只 highpass）标注 proxy 值，人工过门后定稿。
+对每臂的所有 eval checkpoint，首先归一化两个 proxy：$a_{\text{norm}} = (\text{artifact} - \min) / (\max - \min)$，$c_{\text{norm}} = (\max_{\text{corr}} - \text{corr}) / (\max_{\text{corr}} - \min_{\text{corr}})$（corr 反向）。计算到理想点 $(0, 0)$ 的距离 $d = \sqrt{a_{\text{norm}}^2 + c_{\text{norm}}^2}$，按 $d$ 升序遍历。为避免选中相邻 checkpoint 的冗余候选，采用 5K 窗口去重：每个 checkpoint 归属 window = step // 5000，同窗只保留最先入选者，最多保留 3 个候选。60K 步若未入选则强制追加为漂移参照。Rank-1 为 canonical 候选。最终每个候选需通过温度域三联 panel 的视觉 gate，人工过门后定稿。
 
-### C.5.2 伪代码（主文引用版，5 行）
+### C.5.2 已执行选点
 
-```
-cands = top3_by_ideal_distance(normalize(artifact↓, corr↑), min_gap=5K)
-cands += {60K}                      # always carry drift reference
-canonical = argmin_ideal_distance(cands)
-panels = render_temperature_panels(cands)
-deliver(canonical if visual_gate(panels) else next_candidate)
-```
+EP11 四臂的选点结果如下：v6 canonical 8K（artifact/corr = 0.330/0.774），v8.1a canonical 15K（0.392/0.758），v8.1b canonical 5K（0.370/0.739），v9b canonical 11K（0.339/0.777）。TGV Pareto 参考点为 (0.695, 0.916)。各臂 60K 端点的 artifact 均显著恶化——按端点上报会让每个臂交出最差 checkpoint，这正是选择协议存在的意义。
 
-### C.5.3 已执行选点结果（TB-scale，EP11 四臂）
-
-| 臂 | canonical | artifact / corr | 60K 端点 | 端点惩罚 |
-|---|---|---|---|---|
-| v6 | 8K | 0.330 / 0.774 | 0.883 / 0.648 | artifact ×2.7 |
-| v8.1a | 15K | 0.392 / 0.758 | 0.643 / 0.689 | — |
-| v8.1b | 5K | 0.370 / 0.739 | 0.709 / 0.667 | — |
-| v9b | 11K | 0.339 / 0.777 | 0.655 / 0.688 | — |
-
-（`output/ep11_dl_benchmark/checkpoint_selection/checkpoint_candidates.csv`；TGV Pareto 参考点 (0.695, 0.916)。）主文金句的数据基础：**按端点上报会让每个臂交出最差 checkpoint**。
-
-**C.5 资产依赖**：`algos/ep07_unet_sr/scripts/{extract_checkpoint_metrics.py, plot_checkpoint_selection.py}`；`output/ep11_dl_benchmark/checkpoint_selection/{checkpoint_metrics.csv, checkpoint_candidates.csv, fig_pareto.png, panel_*.png}`；F4/S-F4 同源。
-**C.5 待回填**：⬜ V9A/V9C 选点行（V9A 可立即跑选点脚本补入；V9C 等 60K）；⬜ V10 三臂选点（等训练）；hybrid 臂与 1x 臂的 proxy **不跨列横比**（A.3.4 推论 2）要在表注重申。
+统一 harness 后的补充选点为：V9A canonical 10K（harness artifact/corr = 1.762/0.719），V9C canonical 5K（1.669/0.718），V9D canonical 7K（1.726/0.771），V10 采用高-λ sweep 的工作点 λ=1.2@15K（2.726/0.711；fine-window 为 hp\_corr\_input 0.922、sharp\_p95 0.987、lattice 0.0141）。V9A 60K 不作为交付 checkpoint，仅作为 F5 late-drift visual control。需强调 hybrid 臂与 1x 臂的 proxy 不可跨列横比（见 A.3.2）；最终 T1/T2 横评只使用 `output/ep11_unified_harness/` 的同一 harness scale。

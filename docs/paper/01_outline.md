@@ -18,11 +18,13 @@
   gains (zigzag median FWHM 114→100 µm).
   (ii) **Information delivery**: with 1x-grid statistical inputs, learned models are invariant to
   loss design w.r.t. the finest structures — the sub-pixel phase information collapses before the
-  network sees it; injecting it via 2x drizzle input channels restores it. [pending V9A]
+  network sees it; injecting it via 2x drizzle input channels changes the visible fine-window
+  structure trade-off, but does not by itself certify higher fidelity.
   (iii) **Information fidelity**: trained-on-synthetic networks drift along the *null space* of the
   observation operator — forward-consistency losses sit at their floor while real-data artifact
   proxies degrade monotonically; the drift is invisible to observation anchoring and must be
-  handled by evidence injection and checkpoint-selection protocols.
+  bounded by evidence injection, residual-over-observation parameterization, and checkpoint-selection
+  protocols.
 - Together these yield a GT-free evaluation protocol and an honest verdict: in this no-GT regime
   there is **no certifiable single winner**. Classical anchored TGV / MAP-TV is the most
   observation-faithful method on the verifiable proxies but imprints a mild total-variation
@@ -66,9 +68,10 @@
   front gated by visual panels.
 - **C3 — Null-space drift: finding and remedy.** Synthetic-prior-trained networks drift in the
   null space of the (PSF ∘ downsample) observation operator: forward-consistency loss flat at
-  ~1e-2 floor while real-data artifact score climbs 0.37→0.65; band-limited and full-band anchors
-  do not suppress it [V9D pending]. Remedy: inject sub-pixel evidence at the *input* (2x drizzle
-  channels) [V9A pending] and select checkpoints on the proxy Pareto front.
+  ~1e-2 floor while real-data artifact score climbs 0.37→0.65; band-limited, full-band, and legal
+  hybrid anchors do not suppress it. Remedy: inject sub-pixel evidence at the *input* (2x drizzle
+  channels), parameterize residuals over the observation when needed, and select checkpoints on the
+  proxy Pareto front.
 - **C4 — Honest classical-vs-learned verdict: complementary failure modes, no GT-certifiable
   winner.** Anisotropic coverage-weighted TGV resolves raster-anisotropy stripe artifacts
   (artifact 3.87→0.695, raw-control corr 0.916) and is the most observation-faithful method on the
@@ -88,8 +91,9 @@
 - F2 information existence: FRC curves with controls + band table
 - F3 null-space drift: per-arm trajectories (artifact, corr vs step) + forward-loss floor inset
 - F4 proxy Pareto + checkpoint selection (TGV reference point)
-- F5 main visual comparison: bicubic / drizzle / TGV / MAP-TV / UNet best (temperature + highpass),
-  with a high-zoom central-comb row making the TGV staircase vs learned grain failure modes visible
+- F5 main visual comparison: drizzle / TGV / V9A-late / V10 residual (temperature + highpass),
+  with a high-zoom central-comb crop making softness, TGV staircase, learned over-thickening, and
+  residual-grain failure modes visible
 - F6 input-mode ablation visuals: center thin lines, edge staircase (v8.1a vs v9a vs v9c)
 - F7 frame-budget and robustness curves
 - T1 main quantitative table (single-harness numbers)

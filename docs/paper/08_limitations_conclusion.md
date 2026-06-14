@@ -27,12 +27,13 @@
 We studied burst super-resolution where it is hardest to defend: an industrial LWIR microscan
 system with no high-resolution truth at any stage. On a fully measured forward model we showed
 (i) the data carries real but bounded coherent information beyond the single-frame grid
-(17 µm FRC cutoff); (ii) conventional 1x statistical featurization destroys the burst's sub-pixel
-phase information before learning begins, and injecting it as fine-grid drizzle evidence is the
-effective remedy [V9A/V9C wording pending]; (iii) synthetic-prior-trained networks drift along
+(17 µm FRC cutoff); (ii) conventional 1x statistical featurization hides the burst's sub-pixel
+phase information before learning begins, and injecting it as fine-grid drizzle evidence exposes a
+different fine-structure trade-off without certifying fidelity by itself; (iii) synthetic-prior-trained networks drift along
 the observation operator's null space — a failure mode invisible to forward-consistency losses of
-any band, measurable with two curves, and manageable by evidence injection plus Pareto-gated
-checkpoint selection rather than stronger penalties. Classical anchored reconstruction
+any band or legal 1x-anchor variant, measurable with two curves, and manageable by evidence
+injection, residual-over-observation parameterization, and Pareto-gated checkpoint selection rather
+than stronger penalties. Classical anchored reconstruction
 (anisotropic coverage-weighted TGV; fine-grid MAP-TV) sets the acceptance gate and is the most
 observation-faithful arm, though it imprints a mild total-variation staircase on the finest
 contours; learned arms are sharper by inspection but carry the most unverifiable high-frequency
@@ -44,5 +45,5 @@ The bounded claim — contour-level 2x enhancement under explicit gates — is, 
 and transferable formulation for no-GT industrial SR: measure the operator, bound the
 information, deliver what survives the controls, and report what does not.
 
-> TODO(§7): adjust (ii)/(iii) once V9A/V9C/V9D land; one-sentence future work (multi-scene
-> acquisition protocol exists as a design, external thermal anchor highest-value).
+> TODO(§7): add one-sentence future work (multi-scene acquisition protocol exists as a design,
+> external thermal anchor highest-value) and compress limitations to final page budget.
