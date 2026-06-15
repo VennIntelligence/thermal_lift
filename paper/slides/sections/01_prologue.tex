@@ -1,0 +1,50 @@
+\section{序幕：当“更清晰”遇上“无真值”}
+
+% ---------------------------------------------------------------- 钩子
+\begin{frame}{看起来更清晰，就真的看清了吗？}
+  \begin{columns}[T]
+    \begin{column}{0.42\textwidth}
+      \small
+      \textbf{工业场景}：芯片热成像检测要看清\textbf{内部热轮廓}，
+      据此判读缺陷与工艺偏差。
+      \medskip
+
+      \textbf{两难}：
+      \begin{itemize}
+        \item LWIR 8--14\,µm 受\textbf{衍射}限制，更换高端微距镜头\textbf{增益有限、成本高昂}。
+        \item 那么能否\textbf{不换硬件}：在现有 20\,µm 仪器上，用\textbf{多帧微扫描 + 算法}做 $2\times$，让轮廓更清楚？
+      \end{itemize}
+      \medskip
+
+      右图：学习式重建的输出\textbf{看起来确实更锐}。
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.74\textheight,keepaspectratio]{fig05_main_visual.pdf}
+    \end{column}
+  \end{columns}
+  \takeaway{硬件路线遇到物理与成本天花板，计算增强是更现实的方向——但“更锐”本身还不是证据。}
+\end{frame}
+
+% ---------------------------------------------------------------- 陷阱 + 研究问题
+\begin{frame}{陷阱：没有真值时，“更细”可能是失效信号}
+  \begin{columns}[T]
+    \begin{column}{0.44\textwidth}
+      \small
+      \textbf{致命约束}：采集与部署的\textbf{任何阶段都没有高分辨率热成像真值}。
+      \begin{itemize}
+        \item 配对训练数据、全参考指标、按验证 PSNR 选模型——\textbf{全部失效}。
+        \item 自然图像 SR 常以“细节更丰富”当作改进证据；
+              \redflag{在无真值场景，“看起来更细”恰是幻觉的典型信号}。
+      \end{itemize}
+      \medskip
+      右图（teaser）：随训练进行，输出细节增多，
+      但不依赖真值的伪影诊断\textbf{同时持续劣化}。
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.72\textheight,keepaspectratio]{fig_nullspace_drif.pdf}
+    \end{column}
+  \end{columns}
+  \takeaway{核心研究问题：\textbf{没有真值，如何区分“真看清”与“幻觉”？}本报告即围绕这一问题展开。}
+\end{frame}

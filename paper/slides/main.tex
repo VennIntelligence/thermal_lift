@@ -1,4 +1,10 @@
-\documentclass[aspectratio=169]{beamer}
+\documentclass[aspectratio=169,10pt]{beamer}
+
+\usepackage{fontspec}
+\usepackage[fontset=none]{ctex}
+\setCJKmainfont{Noto Sans CJK SC}
+\setCJKsansfont{Noto Sans CJK SC}
+\setCJKmonofont{Noto Sans Mono CJK SC}
 
 \usetheme{default}
 
@@ -6,6 +12,7 @@
 \definecolor{cvprblue}{RGB}{27, 54, 93}      % 经典的 CVPR/IEEE 学术蓝（作为强调色）
 \definecolor{darkgray}{RGB}{60, 60, 60}       % 主文本深灰色（比纯黑更具现代感与易读性）
 \definecolor{lightgray}{RGB}{210, 210, 210}   % 细分割线浅灰色
+\definecolor{warmred}{RGB}{168, 50, 50}       % 红队警示 / 风险标注用色
 
 % 设置基本元素颜色
 \setbeamercolor{structure}{fg=cvprblue}       % 列表符号、强调文本等使用学术蓝
@@ -16,68 +23,94 @@
 
 \setbeamertemplate{navigation symbols}{}       % 移除导航小图标
 
-% ==================== 极简分割线页脚 (显示作者与当前 Section) ====================
-\setbeamertemplate{footline}{
-  \leavevmode%
-  \centering
-  \begin{minipage}{0.94\paperwidth}
-    \color{lightgray}\hrule height 0.4pt
-    \vspace{0.8ex}
-    \color{darkgray!75}\usebeamerfont{footline}
-    \insertshortauthor \hfill \insertsection \hfill \insertframenumber{} / \inserttotalframenumber
-    \vspace{1.2ex}
-  \end{minipage}
+% ==================== 极简页脚：仅页码（节省空间，无作者/章节标识） ====================
+\setbeamertemplate{footline}{%
+  \hfill{\color{darkgray!55}\usebeamerfont{footline}\scriptsize
+    \insertframenumber\,/\,\inserttotalframenumber}\hspace*{2.2ex}%
+  \vspace*{1.0ex}%
 }
 
-% ==================== 字体建议与配置 ====================
-% 默认使用无衬线字体 (Sans-serif)，更易于屏幕/投影阅读。
-% 如果需要 CVPR/IEEE 论文同款 Times New Roman 风格衬线字体，请取消注释以下两行：
-% \usefonttheme{serif}
-% \usepackage{mathptmx}
+% ==================== 字体配置 ====================
+% 中文使用 Noto Sans CJK SC（见上方 ctex/fontspec 配置）；
+% 西文/数学沿用 beamer 默认无衬线，便于投影阅读，与 CVPR 极简风格一致。
 
 \usepackage{graphicx}
 \usepackage{amsmath}
+\usepackage{booktabs}
+
+% 模板风格：正文不使用加粗，强调统一交给颜色（学术蓝 / 警示红）与结构（标题、列表、要点行）。
+% 各 section 中既有的 \textbf{...} 标记全部保留语义但不再渲染为粗体，便于日后单点调整。
+\renewcommand{\textbf}[1]{#1}
 
 \pdfstringdefDisableCommands{%
   \def\translate#1{#1}%
 }
+
+\graphicspath{{figures/}}
 
 % 默认图片尺寸限制宏（在两栏布局下使用 \linewidth，高度限制放宽到 0.72 textheight）
 \newcommand{\fitfig}[2][\linewidth]{%
   \includegraphics[width=#1,height=0.72\textheight,keepaspectratio]{#2}%
 }
 
-\title[Thermal Lift]{Thermal Lift: Data-Driven Alignment for 2x Contour-Level Thermal SR}
-\author{Thermal Lift Project}
+% 每帧底部的一句话 takeaway（学术蓝强调）
+\newcommand{\takeaway}[1]{%
+  \par\vspace{0.5em}%
+  {\color{lightgray}\hrule height 0.4pt}%
+  \vspace{0.5em}%
+  {\color{cvprblue}\footnotesize\textbf{要点\,$\blacktriangleright$\,}}{\footnotesize\color{darkgray!90}#1}%
+}
+
+% 红队风险标注短语
+\newcommand{\redflag}[1]{{\color{warmred}\textbf{#1}}}
+
+\title[细节更多，却在漂移]{细节更多，却在漂移}
+\subtitle{无真值热成像多帧超分辨中的零空间幻觉}
+\author[Thermal Lift]{Thermal Lift 项目}
 \date{\today}
 
 \begin{document}
 
-\begin{frame}
+\begin{frame}[plain]
   \titlepage
+  \begin{center}
+    {\footnotesize\color{darkgray!80}标定化工业 LWIR 微扫描 · 2$\times$ 轮廓级超分辨 · 无高分辨率真值评估}
+  \end{center}
 \end{frame}
 
-\begin{frame}{Executive Summary}
-  \begin{itemize}
-    \item Main evidence supports a 2x contour-level SR POC on the 255-frame main session.
-    \item Stage commands and filenames are priors or controls, not alignment truth.
-    \item Data-driven contour alignment is necessary for EP06 interpretation.
-    \item MAP-TV is a conservative regularized diagnostic, not the sharpest winner.
-    \item No 4x, 5 um, or absolute-temperature metrology claim is made.
-  \end{itemize}
-\end{frame}
-
-\begin{frame}{Talk Roadmap}
+\begin{frame}{报告大纲}
   \tableofcontents
 \end{frame}
 
-\input{sections/01_problem}
-\input{sections/02_data_audit}
-\input{sections/03_alignment}
-\input{sections/04_theory_and_gate}
-\input{sections/05_sr_results}
-\input{sections/06_forward_model_risks}
-\input{sections/07_final_decision}
-\input{sections/08_appendix_index}
+\input{sections/01_prologue}
+\input{sections/02_problem_framing}
+\input{sections/03_information_exists}
+\input{sections/04_nullspace_drift}
+\input{sections/05_evaluation_verdict}
+\input{sections/06_conclusion}
+\input{sections/07_appendix}
+
+% ==================== 收束：一句话总结 ====================
+\begin{frame}[plain]{总结}
+  \vfill
+  \begin{center}
+    {\large\color{cvprblue}\textbf{量化算子 · 为信息定界 · 只交付能在控制下存活的部分}}
+  \end{center}
+  \vspace{1em}
+  \begin{center}
+    \begin{minipage}{0.86\textwidth}
+      \color{darkgray}
+      在任何阶段都没有高分辨率真值的工业 LWIR 微扫描里，我们\textbf{揭示并刻画了零空间漂移}
+      （更细的细节沿观测算子盲区生长，有界观测侧锚定对其结构性失灵），
+      并在无真值评估协议下给出\textbf{诚实裁决}：经典变分重建对可验证观测最保真，
+      学习重建表观轮廓最丰富却携带最多不可验证高频——\redflag{不存在 GT-可认证的单一赢家}。
+    \end{minipage}
+  \end{center}
+  \vfill
+  \begin{center}
+    {\footnotesize\color{darkgray!70}谢谢聆听 · 欢迎提问}
+  \end{center}
+  \vfill
+\end{frame}
 
 \end{document}

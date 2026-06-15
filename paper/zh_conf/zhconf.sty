@@ -1,0 +1,138 @@
+% zhconf.sty — Chinese dual-column conference typography (Fandol + Times).
+\NeedsTeXFormat{LaTeX2e}
+\ProvidesPackage{zhconf}[2026/06/15 v1.3 Chinese conference layout]
+
+\RequirePackage[
+  a4paper,
+  left=2.0cm,
+  right=2.0cm,
+  top=2.5cm,
+  bottom=2.2cm,
+  columnsep=0.75cm,
+  headheight=14pt,
+]{geometry}
+\RequirePackage{fontspec}
+\RequirePackage{indentfirst}
+\RequirePackage{graphicx}
+\RequirePackage{amsmath,amssymb}
+\RequirePackage{booktabs}
+\RequirePackage{caption}
+\RequirePackage{gbt7714}
+\RequirePackage[hidelinks]{hyperref}
+
+\gbtsetup{
+  citepunct = full,
+  mincompress = 3,
+  inline = true,
+  sort = false,
+}
+
+\defaultfontfeatures{Ligatures=TeX}
+
+\newcommand{\zhconf@fontdir}{fonts/}
+\newcommand{\zhconf@termespath}{/usr/share/texmf/fonts/opentype/public/tex-gyre/}
+
+% 中文正文：FandolSong（宋体）。
+\setmainfont{FandolSong-Regular}[
+  Path=\zhconf@fontdir,
+  Extension=.otf,
+  BoldFont={FandolSong-Bold},
+  ItalicFont={FandolSong-Regular},
+  BoldItalicFont={FandolSong-Bold},
+  Scale=1.0,
+]
+
+% 英文片段：TeX Gyre Termes（Times 系）。标题 / 缩写 / 术语用 \eng{...} 包裹。
+\newfontfamily\latinfont{texgyretermes}[
+  Path=\zhconf@termespath,
+  Extension=.otf,
+  UprightFont=*-regular,
+  BoldFont=*-bold,
+  ItalicFont=*-italic,
+  BoldItalicFont=*-bolditalic,
+  Scale=1.0,
+]
+\newcommand{\eng}[1]{{\latinfont #1}}
+
+% 伪影分数（highpass 图 u 上的 TB-scale artifact score）
+\newcommand{\artscore}{\Upsilon}
+
+% 作者：楷体（与正文宋体区分层级；若需全宋体可改为去掉 \zhKai）。
+\newfontfamily\zhKai{FandolKai-Regular}[
+  Path=\zhconf@fontdir,
+  Extension=.otf,
+  BoldFont={FandolKai-Regular},
+  BoldFeatures={FakeBold=1.4},
+  Scale=0.95,
+]
+
+\XeTeXlinebreaklocale "zh"
+\XeTeXlinebreakskip = 0pt plus 0.12em minus 0.04em
+\emergencystretch=1.5em
+
+% 中文排版：段首缩进 2 个汉字（2em）。「关键词」等标签行另用 \noindent 顶格。
+\setlength{\parindent}{2em}
+
+\renewcommand{\refname}{参考文献}
+\renewcommand{\figurename}{图}
+\renewcommand{\tablename}{表}
+
+\makeatletter
+\renewcommand\section{\@startsection{section}{1}{\z@}%
+  {-1.2ex \@plus -0.4ex \@minus -.2ex}%
+  {0.6ex \@plus.2ex}%
+  {\large\bfseries}}
+\renewcommand\subsection{\@startsection{subsection}{2}{\z@}%
+  {-0.8ex \@plus -0.3ex \@minus -.2ex}%
+  {0.4ex \@plus.2ex}%
+  {\normalsize\bfseries}}
+\makeatother
+
+% 强调：宋体加粗，与正文同族。
+\newcommand{\zhemph}[1]{{\bfseries #1}}
+
+% 主标题：宋体（非黑体）；英文词用 \eng{} 单独指定 Times。
+\newcommand{\zhconftitle}[1]{{\LARGE\bfseries #1\par\vspace{0.6em}}}
+\newcommand{\zhconfauthor}[1]{{\zhKai\normalsize #1\par\vspace{0.3em}}}
+\newcommand{\zhconfaffil}[1]{{\small #1\par\vspace{0.8em}}}
+
+\newenvironment{zhabstract}{%
+  \vspace{0.5em}%
+  {\centering\large\bfseries 摘\quad 要\par\vspace{0.45em}}%
+  \small
+  \begin{list}{}{%
+    \setlength{\leftmargin}{0pt}%
+    \setlength{\rightmargin}{0pt}%
+    \setlength{\itemindent}{0pt}%
+    \setlength{\listparindent}{2em}%
+    \setlength{\parsep}{0pt plus 0pt minus 0pt}%
+    \setlength{\topsep}{0pt}%
+    \setlength{\partopsep}{0pt}%
+  }%
+  \item[]\relax
+}{%
+  \end{list}%
+  \vspace{0.55em}%
+}
+
+\newcommand{\zhkeywords}[1]{%
+  \small
+  \noindent{\bfseries 关键词：}#1\par
+}
+
+\DeclareCaptionFont{zhcap}{\zhKai}
+\captionsetup{
+  font={small,zhcap},
+  labelfont={bf,zhcap},
+  skip=6pt,
+}
+
+% 段落小标题（\paragraph）与正文加粗：继承主字体宋体粗体。
+\makeatletter
+\renewcommand\paragraph{\@startsection{paragraph}{4}{\z@}%
+  {0.6ex \@plus 0.2ex \@minus .1ex}%
+  {-1em}%
+  {\normalsize\bfseries}}
+\makeatother
+
+\endinput

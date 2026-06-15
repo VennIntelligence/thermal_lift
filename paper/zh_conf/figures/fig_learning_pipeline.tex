@@ -1,0 +1,232 @@
+% =====================================================================
+%  fig_learning_pipeline.tex
+%  Thermal Lift -- 学习流水线图（中文会议版）
+%
+%  独立编译：
+%      xelatex fig_learning_pipeline.tex
+%
+%  说明：方法图的下半行。对比两种输入模式（基线 vs 混合 drizzle）
+%  经过 UNet 骨干后的重建路径。关键对比：基线丢失亚像素信息，
+%  混合输入保留亚像素证据并通过残差参数化锚定观测。
+%  约 16cm × 6.5cm，位于 TCForge 流水线行下方。
+% =====================================================================
+\documentclass[border=5pt]{standalone}
+
+\usepackage{fontspec}
+\setmainfont{FandolSong-Regular}[
+  Path=../fonts/,
+  Extension=.otf,
+  BoldFont={FandolSong-Bold},
+  ItalicFont={FandolSong-Regular},
+  BoldItalicFont={FandolSong-Bold},
+]
+
+\usepackage{amsmath,amssymb}
+\usepackage{pifont}            % \ding{51}=checkmark, \ding{55}=cross
+\usepackage{tikz}
+\usetikzlibrary{positioning,arrows.meta,fit,backgrounds,calc}
+
+% Prevent unwanted hyphenation of English terms inside nodes
+\hyphenpenalty=10000
+\exhyphenpenalty=10000
+
+% ---------------------------------------------------------------- colours
+\definecolor{basefill}{HTML}{F0F0F0}    % gray for baseline path
+\definecolor{basedraw}{HTML}{999999}
+\definecolor{propfill}{HTML}{FDF0E2}    % warm amber for proposed path
+\definecolor{propdraw}{HTML}{D9772F}
+\definecolor{unetfill}{HTML}{DAEAF6}    % light blue for UNet
+\definecolor{unetdraw}{HTML}{4C72B0}
+\definecolor{lossfill}{HTML}{FAFAFA}    % loss box
+\definecolor{lossdraw}{HTML}{777777}
+\definecolor{notered}{HTML}{B4474B}     % cautionary red
+\definecolor{okgreen}{HTML}{2E7D32}     % affirmative green
+\definecolor{divgray}{HTML}{AAAAAA}     % divider color
+\definecolor{ch5color}{HTML}{C86820}    % ch5 highlight
+\definecolor{lanebg1}{HTML}{F8F8F8}     % baseline lane bg
+\definecolor{lanebg2}{HTML}{FFF8F0}     % proposed lane bg
+
+% ---------------------------------------------------------------- text helpers
+\newcommand{\hd}[1]{{\small\bfseries #1}}
+\newcommand{\shd}[1]{{\scriptsize\bfseries #1}}   % smaller heading
+\newcommand{\nt}[1]{{\scriptsize #1}}
+\newcommand{\xm}{\textcolor{notered}{\ding{55}}}
+\newcommand{\ok}{\textcolor{okgreen}{\ding{51}}}
+
+% ---------------------------------------------------------------- styles
+\tikzset{
+  block/.style={rounded corners=2pt, draw, line width=0.6pt,
+                inner sep=3pt, align=left, font=\scriptsize},
+  base/.style={block, fill=basefill, draw=basedraw, text=black!70},
+  prop/.style={block, fill=propfill, draw=propdraw, line width=1.0pt},
+  ubox/.style={block, fill=unetfill, draw=unetdraw},
+  lbox/.style={block, fill=lossfill, draw=lossdraw, densely dashed,
+               rounded corners=4pt},
+  resbox/.style={block, fill=propfill, draw=propdraw, line width=1.3pt},
+  outbox/.style={block, fill=propfill!50, draw=propdraw},
+  warnbox/.style={rounded corners=2pt, draw=notered!50, fill=notered!5,
+                  line width=0.5pt, inner sep=3pt, align=left,
+                  font=\scriptsize, text=notered!85},
+  df/.style={-{Stealth[length=3.5pt]}, line width=0.65pt, draw=black!65},
+  dfbase/.style={-{Stealth[length=3.5pt]}, line width=0.55pt,
+                 draw=basedraw},
+  ch5arr/.style={-{Stealth[length=4.5pt]}, line width=1.5pt,
+                 draw=ch5color},
+  sup/.style={-{Stealth[length=3pt]}, line width=0.5pt,
+              draw=lossdraw, densely dashed},
+}
+
+\begin{document}
+\begin{tikzpicture}[font=\scriptsize]
+
+% =====================================================================
+%  ROW Y COORDINATES
+% =====================================================================
+\def\ybase{2.5}
+\def\yprop{-1.1}
+\def\yloss{5.2}
+
+% =====================================================================
+%  LANE BACKGROUNDS (drawn first, behind everything)
+% =====================================================================
+\begin{scope}[on background layer]
+  % baseline lane
+  \fill[lanebg1, draw=basedraw!25, line width=0.4pt, rounded corners=3pt]
+    (-1.9, 0.95) rectangle (14.1, 4.4);
+  % proposed lane
+  \fill[lanebg2, draw=propdraw!20, line width=0.4pt, rounded corners=3pt]
+    (-1.9, -3.15) rectangle (14.1, 0.75);
+\end{scope}
+
+% =====================================================================
+%  LANE LABELS (inside the lane backgrounds, top-left)
+% =====================================================================
+\node[font=\scriptsize\bfseries, text=basedraw, anchor=north west]
+  at (-1.75, 4.3) {基线路径};
+\node[font=\scriptsize\bfseries, text=propdraw, anchor=north west]
+  at (-1.75, 0.6) {本文方法};
+
+% =====================================================================
+%  BASELINE PATH (top row --- grayed, represents the ablated variant)
+% =====================================================================
+
+% -- input
+\node[base, text width=3.3cm] (bin) at (0, \ybase) {%
+  \hd{1\texttimes{} 统计输入}\\[1pt]
+  5通道：mean / median /\\
+  coverage / variance / highpass\\[2pt]
+  在1\texttimes{}网格构造\\
+  UNet 内部 scale=2 上采样%
+};
+
+% -- UNet (baseline)
+\node[base, text width=1.8cm, minimum height=1.1cm] (bunet) at (5.0, \ybase) {%
+  \hd{UNet}\\[1pt]
+  (scale=2)\\
+  base ch=64%
+};
+
+% -- output (baseline)
+\node[base, text width=1.3cm, minimum height=0.8cm] (bout) at (7.8, \ybase) {%
+  \shd{输出 $\hat{y}$}\\[1pt]
+  直接输出%
+};
+
+% -- failure annotation
+\node[warnbox, text width=4.0cm] (bwarn) at (11.5, \ybase) {%
+  \xm{} \textbf{亚像素相位在输入编码时坍塌}\\[2pt]
+  1\texttimes{}网格无法编码帧间亚像素\\
+  位移，网络被迫从零猜测高频细节%
+};
+
+% -- baseline flow arrows
+\draw[dfbase] (bin.east) -- (bunet.west);
+\draw[dfbase] (bunet.east) -- (bout.west);
+\draw[dfbase, densely dotted] (bout.east) -- (bwarn.west);
+
+% =====================================================================
+%  DASHED DIVIDER between lanes
+% =====================================================================
+\draw[divgray, densely dashed, line width=0.7pt]
+  (-1.9, 0.85) -- (14.1, 0.85);
+
+% =====================================================================
+%  PROPOSED PATH (bottom row --- highlighted, this paper's contribution)
+% =====================================================================
+
+% -- input (proposed)
+\node[prop, text width=3.3cm] (pin) at (0, \yprop) {%
+  \hd{Hybrid drizzle 输入}\\[1pt]
+  \textbf{8通道 @ 2\texttimes{}网格}\\[2pt]
+  {[ch0\textendash4]} 上采样统计通道\\
+  \quad\nt{mean / median / coverage}\\
+  \quad\nt{variance / highpass}\\[2pt]
+  {[ch5\textendash7]} drizzle @ 2\texttimes{}:\\
+  \quad\textcolor{ch5color}{\textbf{ch5: mean}} / cov / var\\[2pt]
+  \ok{} \textbf{亚像素证据直接送达}%
+};
+
+% -- UNet (proposed)
+\node[ubox, text width=1.8cm, minimum height=1.3cm] (punet) at (5.0, \yprop) {%
+  \hd{UNet 骨干}\\[1pt]
+  (scale=1)\\
+  base ch=64\\[2pt]
+  架构固定\\
+  仅变换输入通路%
+};
+
+% -- residual head
+\node[resbox, text width=3.3cm] (resid) at (8.8, \yprop) {%
+  \hd{残差观测头}\\[2pt]
+  $\hat{x} = \underbrace{\text{ch5}}_{\text{观测基底}} + \delta$\\[3pt]
+  $\delta\!=\!0\;\Rightarrow$ 保持观测基底\\[1pt]
+  惩罚：$\lambda\!\cdot\!\text{mean}|\delta|$\;(L1)\\[1pt]
+  \nt{幻觉在全频域均付出代价，}\\
+  \nt{无零空间可隐藏}%
+};
+
+% -- final output
+\node[outbox, text width=1.5cm, minimum height=1.0cm,
+      align=center] (pout) at (12.5, \yprop) {%
+  \shd{2\texttimes{} 重建输出}\\[2pt]
+  $\hat{x}$%
+};
+
+% -- proposed flow arrows
+\draw[df] (pin.east) -- (punet.west);
+\draw[df] (punet.east) --
+  node[above, font=\scriptsize, text=black!55]{$\delta$}
+  (resid.west);
+\draw[df] (resid.east) --
+  node[above, font=\scriptsize, text=black!55]{$\hat{x}$}
+  (pout.west);
+
+% -- ch5 evidence-injection arc (curves below the proposed row)
+\draw[ch5arr]
+  ([yshift=-2pt]pin.south east)
+  to[out=-12, in=192]
+  node[below, pos=0.48, font=\scriptsize, text=ch5color, yshift=-1pt]
+  {ch5 drizzle mean（观测基底回加）}
+  ([yshift=-2pt]resid.south west);
+
+% =====================================================================
+%  LOSS BOX (upper right corner, supervision signal)
+% =====================================================================
+\node[lbox, text width=3.9cm] (loss) at (8.8, \yloss) {%
+  \hd{轮廓取向损失}\\
+  \nt{（在合成 HR 目标上计算）}\\[2pt]
+  MSE\,(0.3) + highpass\,(0.8)\\
+  + SSIM\,(0.15) + 梯度向量\,(0.15)\\
+  + 前向一致性边缘\,(0.05)\\[1pt]
+  \nt{thin$\times$3 / gap$\times$2 加权}%
+};
+
+% -- loss supervision arrows (split from two departure points)
+% To baseline output (left fork)
+\draw[sup] ([xshift=-12pt]loss.south) -- ++(0,-0.25)
+  -| (bout.north);
+% To proposed residual head (right fork, straight down)
+\draw[sup] ([xshift=8pt]loss.south) -- (resid.north);
+
+\end{tikzpicture}
+\end{document}

@@ -474,7 +474,7 @@ def _build_source_mapping(constants: dict[str, Any]) -> dict[str, Any]:
             "stage_to_pixel_rotation_theta_deg": {
                 "value": constants["theta_deg"],
                 "unit": "degree",
-                "source_files": [rel(STAGE_CONFIG_PATH), "reports/ep02_displacement_calibration/calibration_report.md"],
+                "source_files": [rel(STAGE_CONFIG_PATH), "paper/reports/ep02_displacement_calibration/calibration_report.md"],
             },
             "detector_pitch_um": {
                 "value": constants["detector_pitch_um"],

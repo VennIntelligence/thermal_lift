@@ -1,0 +1,41 @@
+\section{Related Work}
+
+Multiframe super-resolution (MFSR) evolved from frequency-domain formulations
+\citep{tsai1984multiframe} and spatial iterative back-projection
+\citep{irani1991improving} to robust fast variants \citep{farsiu2004fast},
+forming an observation model centered on shift--PSF--decimation. Drizzle
+\citep{fruchter2002drizzle} offers minimal-assumption fusion via flux-conserving
+sub-pixel scattering; TV/TGV regularized inversion
+\citep{rudin1992nonlinear,bredies2010tgv} and MAP formulations with explicit PSF
+\citep{elad1997restoration,hardie1997joint} provide the strongest reconstruction
+quality in the classical family. Deep burst SR end-to-end-izes this pipeline: DBSR
+\citep{bhat2021deep}, BIPNet \citep{dudhane2022burst}, and Burstormer
+\citep{dudhane2023burstormer} achieve large gains on RGB/RAW; in satellite imaging,
+HighRes-net and RAMS \citep{deudon2020highres,salvetti2020rams} are rare real
+multi-frame benchmarks. Thermal SR is driven mainly by PBVS challenges
+\citep{rivadeneira2020thermal,rivadeneira2023thermal} and dedicated CNN/GAN methods
+\citep{chudasama2020therisurnet,rivadeneira2020novel}, but mostly train on
+synthetically degraded rendered 8-bit imagery and evaluate with full-reference
+metrics using hold-out HR from higher-end cameras. These three lines share one
+premise: \textbf{paired ground truth (or its proxy) exists during training or
+evaluation}. When the deployment setting---such as the industrial thermal raster
+scans studied here---cannot provide HR ground truth, this premise breaks, raising
+two under-discussed questions: how to evaluate reconstruction quality without GT,
+and what systematic failures learning methods exhibit under this condition.
+Real-world SR bridges domain gap via synthetic degradation
+\citep{bellkligler2019blind,wang2021real,zhang2021designing}, but physics-matched
+synthetic pipelines can only narrow---not eliminate---prior-driven distribution
+shift.
+
+For GT-free evaluation, split-half consistency and Fourier Ring Correlation (FRC)
+are standard in cryo-EM and super-resolution microscopy
+\citep{vanheel2005fourier,nieuwenhuizen2013measuring,banterle2013fourier}, yet are
+rarely transplanted to learning-based SR; no-reference IQA
+\citep{mittal2013making} cannot distinguish genuine sharpening from hallucinated
+sharpening. For failure mechanisms, inverse-problem literature has decomposed
+reconstructions into range and null-space components of forward operators
+\citep{schwab2019deep,chen2021equivariant,ulyanov2018deep,heckel2019deep}, and
+data-consistency layers are standard in MRI reconstruction
+\citep{schlemper2018deep}, but no work has empirically quantified null-space drift
+of learning-based SR on a real GT-free industrial imaging system, or converted it
+into deployable diagnostics and adoption protocols. This paper fills that gap.

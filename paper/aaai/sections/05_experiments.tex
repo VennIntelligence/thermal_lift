@@ -1,38 +1,176 @@
-\section{Experiments}
+\section{Experiments and Ablations}
 
-The main EP06 evaluation compares LR, bicubic, SAA, IBP, and MAP-TV on the
-same 2x grid. Quantitative metrics are used as guardrails: split-half NRMSE,
-artifact score, contour Chamfer proxy, gradient magnitude, and correlation to
-bicubic. None is treated as an independent optical ground truth.
+All numbers in Tables~\ref{tab:t1-main} and \ref{tab:t2-ablation} are produced
+from one unified harness rerun under identical ROI definitions and metric
+pipelines. We report them as guardrails in a ground-truth-free regime, not as
+standalone optical truth.
 
-\begin{figure}[t]
+\subsection{Main Comparison}
+
+Table~\ref{tab:t1-main} compares classical and learning-based pipelines under
+the same harness settings. Drizzle and TGV are included as observation-faithful
+anchors \citep{fruchter2002drizzle,bredies2010tgv}, while learned models show
+different trade-offs between apparent sharpness and verifiable fidelity.
+
+\begin{table*}[t]
 \centering
-\includegraphics[width=\linewidth]{../figures/ep06_main_comparison.png}
-\caption{EP06 center highpass comparison. The figure is a structure-map
-visualization, not an absolute temperature image.}
-\label{fig:main-comparison}
-\end{figure}
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\caption{T1: Unified harness comparison on the main ROI.}
+\label{tab:t1-main}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccccccccc}
+\toprule
+Method & step & split NRMSE $\downarrow$ & artifact $\downarrow$ & corr $\uparrow$ & FRC@16 $\uparrow$ & FRC@14 $\uparrow$ & FRC@12 $\uparrow$ & lattice $\downarrow$ & sharp P95 $\uparrow$ & FWHM ($\mu$m) $\downarrow$ & dip $\uparrow$ \\
+\midrule
+bicubic & --- & 0.047 & 1.388 & 1.000 & 0.951 & 0.945 & 0.941 & 0.001 & 0.344 & 60 & 1.000 \\
+drizzle & --- & 0.024 & 1.138 & 0.771 & 0.439 & 0.564 & 0.765 & 0.001 & 0.481 & 45 & 0.970 \\
+MAP-TV ($5\times$) & --- & 0.024 & 2.333 & 0.438 & 0.965 & 0.955 & 0.948 & 0.002 & 0.352 & 42 & 1.000 \\
+TGV & --- & 0.032 & 0.695 & 0.741 & 0.975 & 0.969 & 0.955 & 0.011 & 0.999 & 40 & 0.973 \\
+HotLoss & 8K & 0.051 & 1.789 & 0.774 & 0.752 & 0.761 & 0.217 & 0.001 & 0.656 & 40 & 1.000 \\
+Stats & 15K & 0.073 & 1.943 & 0.758 & 0.712 & 0.660 & 0.429 & 0.001 & 0.864 & 40 & 1.000 \\
+Stats+HP-FC & 11K & 0.054 & 1.766 & 0.777 & 0.744 & 0.741 & 0.197 & 0.001 & 0.698 & 40 & 1.000 \\
+Stats+Full-FC & 7K & 0.054 & 1.726 & 0.771 & 0.744 & 0.708 & 0.150 & 0.001 & 0.697 & 40 & 1.000 \\
+Hybrid & 10K & 0.054 & 1.762 & 0.719 & 0.945 & 0.870 & 0.190 & 0.001 & 0.683 & 40 & 1.000 \\
+Hybrid+Native-FC & 5K & 0.064 & 1.669 & 0.718 & 0.891 & 0.769 & 0.195 & 0.001 & 0.766 & 40 & 1.000 \\
+Hybrid+ResObs $\lambda=1.2$ & 15K & 0.041 & 2.726 & 0.711 & 0.986 & 0.984 & 0.979 & 0.013 & 0.968 & 40 & 1.000 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
 
-\begin{figure}[t]
+MAP-TV is a precomputed $5\times$ deconvolution reference whose output-grid
+scale differs from the default $2\times$ methods. Zigzag FWHM saturates at
+$40\,\mu$m for multiple methods under the current quantization and should not be
+over-interpreted as a winner criterion.
+
+\begin{figure*}[t]
 \centering
-\includegraphics[width=\linewidth]{../figures/ep06_sweep_metrics.png}
-\caption{Full alignment sweep metrics for SAA, IBP, and MAP-TV. NCC init raises
-artifact risk across the full SR pipeline.}
-\label{fig:sweep-metrics}
-\end{figure}
+\includegraphics[width=\textwidth]{../../output/paper_figures/fig05_combined_visual.png}
+\caption{Main visual comparison across two fixed ROIs and two domains. Columns
+show drizzle, TGV, Hybrid late endpoint (60K), and Hybrid+ResObs
+($\lambda=1.2$, 15K). For each ROI, the temperature-domain row checks whether
+apparent gains are edge-only effects, while the highpass row highlights contour
+sharpness and grain behavior. This figure is a task-level visual gate rather
+than direct proof of absolute fidelity or physical resolution.}
+\label{fig:main-visual}
+\end{figure*}
 
-The full data-driven alignment sweep contains three experiments:
-default contour refined, tuned contour refined, and NCC initialization. All
-MAP-TV runs select $\lambda=0.01$ on the highpass track. This consistent
-selection of strong regularization is a warning that weakly regularized
-forward-model solutions can explain alignment residuals as high-frequency
-structure.
+\subsection{Null-Space Drift Trajectory}
 
-\begin{figure}[t]
+Figure~\ref{fig:nullspace-drift} is the central negative-mechanism result. It
+tracks artifact and correlation against checkpoint step for five $1\times$
+input variants, together with forward-consistency loss behavior.
+
+\begin{figure*}[t]
 \centering
-\includegraphics[width=\linewidth]{../figures/ep06_sweep_lambda.png}
-\caption{MAP-TV lambda selection under the three alignment variants. Strong
-regularization is selected in every case.}
-\label{fig:lambda-sweep}
-\end{figure}
+\includegraphics[width=\textwidth]{../../output/paper_figures/fig03_nullspace_drift.png}
+\caption{Null-space drift trajectories. Panels (a) and (b) plot artifact
+$\uparrow$ and corr $\downarrow$ versus training step; panel (c) shows
+forward-consistency loss (log scale). Canonical checkpoints are marked by
+$\circ$, and 60K endpoints by $\times$.}
+\label{fig:nullspace-drift}
+\end{figure*}
+
+\begin{table}[t]
+\centering
+\scriptsize
+\caption{Drift trajectory summary from 10K to 60K.}
+\label{tab:drift-summary}
+\resizebox{\linewidth}{!}{%
+\begin{tabular}{lllll}
+\toprule
+Variant ($1\times$ input) & Anchor & artifact 10K $\rightarrow$ 60K & corr 10K $\rightarrow$ 60K & forward-loss behavior \\
+\midrule
+HotLoss & full 0.1 & $0.339 \rightarrow 0.883$ & $0.773 \rightarrow 0.648$ & confounded baseline \\
+Stats & none & $0.390 \rightarrow 0.643$ & $0.756 \rightarrow 0.689$ & --- \\
+Stats+PixelShuffle & none & $0.413 \rightarrow 0.709$ & $0.747 \rightarrow 0.667$ & failed-head control \\
+Stats+HP-FC & HP-FC 0.1 & $0.369 \rightarrow 0.655$ & $0.758 \rightarrow 0.688$ & pinned at 0.004--0.009 after 10K \\
+Stats+Full-FC & Full-FC 0.1 & $0.379 \rightarrow 0.677$ & $0.758 \rightarrow 0.677$ & oscillatory then stable \\
+\bottomrule
+\end{tabular}%
+}
+\end{table}
+
+Empirically, Stats+HP-FC drift from 40K to 60K almost overlaps with anchor-free
+Stats, while the forward loss stays near floor. Across none / HP-FC / Full-FC /
+Native-FC anchors, late-stage plateaus remain similar, supporting the
+null-space drift interpretation.
+
+\subsection{Input-Mode Ablation}
+
+We evaluate the matrix
+$\{\text{$1\times$ stats},\ \text{hybrid drizzle}\}\times\{\text{none},\ \text{band},\ \text{full},\ \text{legal}\}$
+up to 60K steps. Table~\ref{tab:t2-ablation} reports canonical checkpoints.
+
+\begin{table*}[t]
+\centering
+\scriptsize
+\setlength{\tabcolsep}{3pt}
+\caption{T2: Input-mode and anchoring ablations under the unified harness.}
+\label{tab:t2-ablation}
+\resizebox{\textwidth}{!}{%
+\begin{tabular}{lccccccccccc}
+\toprule
+Variant & Input & anchor/parameterization & step & split $\downarrow$ & artifact $\downarrow$ & corr $\uparrow$ & FRC@16 $\uparrow$ & FRC@14 $\uparrow$ & FRC@12 $\uparrow$ & lattice $\downarrow$ & sharp P95 $\uparrow$ \\
+\midrule
+Stats & $1\times$ stats & none & 15K & 0.073 & 1.943 & 0.758 & 0.712 & 0.660 & 0.429 & 0.001 & 0.864 \\
+Stats+PixelShuffle & $1\times$ stats & PixelShuffle control & 5K & 0.050 & 1.782 & 0.739 & 0.734 & 0.692 & 0.392 & 0.001 & 0.682 \\
+Stats+HP-FC & $1\times$ stats & HP-FC 0.1 & 11K & 0.054 & 1.766 & 0.777 & 0.744 & 0.741 & 0.197 & 0.001 & 0.698 \\
+Stats+Full-FC & $1\times$ stats & Full-FC 0.1 & 7K & 0.054 & 1.726 & 0.771 & 0.744 & 0.708 & 0.150 & 0.001 & 0.697 \\
+Hybrid & hybrid $2\times$ & none & 10K & 0.054 & 1.762 & 0.719 & 0.945 & 0.870 & 0.190 & 0.001 & 0.683 \\
+Hybrid+Native-FC & hybrid $2\times$ & native $1\times$ FC & 5K & 0.064 & 1.669 & 0.718 & 0.891 & 0.769 & 0.195 & 0.001 & 0.766 \\
+Hybrid+ResObs & hybrid $2\times$ & ResObs $\lambda=1.2$ & 15K & 0.041 & 2.726 & 0.711 & 0.986 & 0.984 & 0.979 & 0.013 & 0.968 \\
+\bottomrule
+\end{tabular}%
+}
+\end{table*}
+
+Input-side evidence injection can expose additional subpixel phase structure,
+but this does not translate into free fidelity gains: the selected
+Hybrid+ResObs point is sharper and higher-FRC, while also showing lower
+observation-side corr and higher artifact risk.
+
+\subsection{Frame-Budget Analysis}
+
+A classical CPU subset matrix is evaluated for drizzle and TGV with
+$N\in\{31,62,124,248\}$ using phase-stratified sampling. Drizzle shows a clear
+information-budget trend as $N$ increases (better split consistency, lower
+artifact, and higher FRC), whereas TGV keeps lower artifact but exhibits
+non-monotonic raw-control correlation.
+
+\subsection{Robustness}
+
+Shift perturbation stress tests add Gaussian noise
+$\sigma\in\{0,0.05,0.1,0.2\}$ pixels to contour-refined shifts. Raw-control
+correlation is relatively stable for both drizzle and TGV under this small
+noise range, while coverage/FRC proxies degrade more clearly. Replacing
+command-prior shifts with contour-refined shifts yields large end-to-end gains,
+confirming that data-driven alignment refinement is effective; command shifts
+remain priors, not truth.
+
+\subsection{Checkpoint Selection Protocol in Practice}
+
+Per-variant Pareto scatter is built on (artifact, corr), with a fixed TGV
+reference point. Canonical checkpoints are selected jointly from metric trend
+and visual panels, then contrasted against 60K endpoints. Endpoint-only
+reporting would systematically present the worst drifted model for each
+variant.
+
+\subsection{Negative Results}
+
+The PixelShuffle HR-head control performs worse than the bilinear head in this
+setting and introduces stripe-like artifacts. We keep it only as an attribution
+control. Networks targeting $4\times$ output do not show credible gains under
+the measured MTF constraints, and rendered AVI bursts are excluded as SR inputs
+because of 8-bit quantization and heavy frame duplication.
+
+\subsection{Held-Out ROI-2 Visual/Proxy Audit}
+
+To verify that the visual gate is not a single-ROI coincidence, we repeat
+structure proxies on an independent second ROI (upper-right plate
+edge/zigzag-branch region). Lattice ranking remains consistent with the center
+ROI (drizzle $<$ TGV $<$ Hybrid+ResObs $<$ Hybrid-60K), while sharpness and
+zigzag-profile ordering is not fully stable across ROIs. We therefore report
+ROI-2 as a held-out audit, not as winner certification.
 

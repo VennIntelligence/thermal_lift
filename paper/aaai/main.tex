@@ -10,6 +10,9 @@
 \usepackage{natbib}
 \usepackage{caption}
 \usepackage{amsmath}
+\usepackage{booktabs}
+\usepackage{multirow}
+\usepackage{adjustbox}
 
 \pdfinfo{
 /TemplateVersion (2026.1)
@@ -17,7 +20,7 @@
 
 \setcounter{secnumdepth}{2}
 
-\title{Data-Driven Micro-Scan Alignment for Contour-Level Thermal Super-Resolution}
+\title{Detailed but Drifting: Null-Space Hallucination in Ground-Truth-Free Thermal Burst Super-Resolution}
 \author{Anonymous Submission}
 \affiliations{Anonymous Institution}
 
@@ -26,25 +29,19 @@
 \maketitle
 
 \begin{abstract}
-Long-wave infrared chip inspection is limited by optical resolution, thermal
-noise, and imperfect micro-scan motion. This paper skeleton organizes the
-current Thermal Lift evidence into a reproducible 2x contour-level
-super-resolution proof of concept. The central finding is that filename or
-stage-command motion is only a prior: data-driven contour alignment gives more
-accurate frame registration and changes the interpretation of forward-model
-methods. On the 255-frame main session, shift-and-add provides the most stable
-baseline, iterative back-projection is useful as a forward-model stress test,
-and MAP-TV becomes a conservative regularized diagnostic rather than the
-sharpest or best method. The result is a bounded contour-visibility claim, not
-a 4x or 5 um metrology claim.
+Long-wave infrared (LWIR) thermography resolves sub-degree temperature signatures of defects and process variations in semiconductor inspection. In this modality, a more detailed-looking reconstruction does not imply genuinely higher resolution: diffraction bounds the recoverable bandwidth, high-end thermal optics are costly, and paired high-resolution ground truth is unavailable at any stage. We study a calibrated 2$\times$ micro-scan burst super-resolution system around three questions: whether the multi-frame observation carries recoverable high-frequency information, whether learned models actually receive it, and whether newly added detail remains anchored to the observations.
+
+We identify a failure mode we term \emph{null-space drift}. The imaging chain is modeled as an observation operator mapping a latent high-resolution temperature field to recorded low-resolution frames; its null space consists of high-frequency structures that alter the reconstruction while leaving observations nearly unchanged. On real data, networks trained on physics-matched synthetic bursts produce new detail whose growth is consistent with this null or near-null space: forward-consistency error remains pinned at the noise floor while ground-truth-free artifact and correlation diagnostics steadily degrade. We further show that for drift in the exact or $\epsilon$-null space, any bounded observation-side anchoring---finite weights, arbitrary bounded frequency bands---is structurally insensitive; effective remedies must come from priors, input-side evidence, or checkpoint-selection protocols rather than stronger consistency penalties.
+
+Under ground-truth-free evaluation combining phase-stratified split-half consistency, observation-side drift diagnostics, and pre-specified Pareto checkpoint selection (detailed in the supplement), classical variational reconstruction is most faithful to verifiable observations, while evidence-injected learning yields richer apparent contour detail alongside more unverifiable high-frequency content---no single method is certifiably dominant. This work characterizes null-space hallucination in ground-truth-free thermal super-resolution and provides an actionable framework for balancing detail and fidelity when high-resolution ground truth is lacking.
 \end{abstract}
 
 \input{sections/01_introduction}
-\input{sections/02_data}
-\input{sections/03_alignment}
+\input{sections/02_related_work}
+\input{sections/03_problem_forward_model}
 \input{sections/04_methods}
 \input{sections/05_experiments}
-\input{sections/06_discussion}
+\input{sections/06_limitations_conclusion}
 
 \nocite{thermal-lift-log,aaai2026authorkit}
 \bibliography{refs}

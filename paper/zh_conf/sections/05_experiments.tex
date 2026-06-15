@@ -1,0 +1,191 @@
+\section{实验与消融}
+
+% 图四、表二、图五提前入队，尽量落在本节首页（LaTeX 按源码顺序排 float）
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{../../output/paper_figures/fig05_combined_visual.png}
+  \caption{主视觉对比（双感兴趣区域$\times$双域）。列：\eng{Drizzle}、\eng{TGV}、\eng{Hybrid}\,60K、\eng{Hybrid+ResObs}\,$\lambda\!=\!1.2$@15K。
+  上两行为中心锯齿走线感兴趣区域，下两行为留出感兴趣区域\,2（右上外围板边/走线分支）。温度域检查"是否只是描边"，高通域承载锐度/纹理差异。
+  本图为任务级视觉门控，不作为保真或分辨率证据。}
+  \label{fig:f5-main-visual}
+\end{figure*}
+
+\begin{table*}[t]
+  \centering
+  \caption{主对比（T1）。加粗 = 该列最优（$\uparrow$最大/$\downarrow$最小）；
+    FRC@\{14,12\}\,$\mu$m 见附录 S-T1。}
+  \label{tab:t1-main}
+  \scriptsize
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{lccccccccc}
+    \toprule
+    方法 & step & split$\downarrow$ & artifact$\downarrow$ & corr$\uparrow$ & FRC@16$\uparrow$ & lattice$\downarrow$ & sharp$\uparrow$ & FWHM\,($\mu$m)$\downarrow$ & dip$\uparrow$ \\
+    \midrule
+    bicubic & --- & 0.047 & 1.388 & \textbf{1.000}\rlap{$^\dagger$} & 0.951 & \textbf{0.001} & 0.344 & 60 & \textbf{1.000} \\
+    drizzle & --- & \textbf{0.024} & 1.138 & 0.771 & 0.439 & \textbf{0.001} & 0.481 & 45 & 0.970 \\
+    MAP-TV ($5\times$) & --- & \textbf{0.024} & 2.333 & 0.438 & 0.965 & 0.002 & 0.352 & 42 & \textbf{1.000} \\
+    TGV & --- & 0.032 & \textbf{0.695} & 0.741 & 0.975 & 0.011 & \textbf{0.999} & \textbf{40} & 0.973 \\
+    \midrule
+    HotLoss & 8K & 0.051 & 1.789 & 0.774 & 0.752 & \textbf{0.001} & 0.656 & \textbf{40} & \textbf{1.000} \\
+    Stats & 15K & 0.073 & 1.943 & 0.758 & 0.712 & \textbf{0.001} & 0.864 & \textbf{40} & \textbf{1.000} \\
+    Stats+HP-FC & 11K & 0.054 & 1.766 & 0.777 & 0.744 & \textbf{0.001} & 0.698 & \textbf{40} & \textbf{1.000} \\
+    Stats+Full-FC & 7K & 0.054 & 1.726 & 0.771 & 0.744 & \textbf{0.001} & 0.697 & \textbf{40} & \textbf{1.000} \\
+    Hybrid & 10K & 0.054 & 1.762 & 0.719 & 0.945 & \textbf{0.001} & 0.683 & \textbf{40} & \textbf{1.000} \\
+    Hybrid+Native-FC & 5K & 0.064 & 1.669 & 0.718 & 0.891 & \textbf{0.001} & 0.766 & \textbf{40} & \textbf{1.000} \\
+    Hybrid+ResObs $\lambda\!=\!1.2$ & 15K & 0.041 & 2.726 & 0.711 & \textbf{0.986} & 0.013 & 0.968 & \textbf{40} & \textbf{1.000} \\
+    \bottomrule
+  \end{tabular}
+  }
+
+  \vspace{2pt}
+  \raggedright\scriptsize
+  $^\dagger$bicubic corr = 1.000 为平凡值（恒等上采样，未注入信息）。
+  TGV 的 split/FRC 为相位分层实际半集重建（seed 42，A/B = 124/124），非 drizzle 代理。
+  MAP-TV 为 $5\times$ 去卷积基准，输出网格步长与 $2\times$ 方法不同。
+  锯齿走线 FWHM 在 $2\times$（5\,$\mu$m 步进）下量化饱和，区分度低。
+  学习类变体检查点按代理帕累托选取（附录 C.5），非训练端点——端点上报会交出漂移最严重的检查点。
+  Hybrid/Hybrid+ResObs 缓存均值已过 23\,$^\circ$C 自检。
+\end{table*}
+
+\begin{figure*}[t]
+  \centering
+  \includegraphics[width=\textwidth]{../../output/paper_figures/fig03_nullspace_drift.png}
+  \caption{零空间漂移轨迹。三子图共享训练步数横轴，覆盖五个 $1\times$ 输入变体：
+  (a)~伪影$\uparrow$、(b)~相关性$\downarrow$ vs 步数；(c)~前向一致性损失（对数 $y$ 轴），
+  Stats+HP-FC / Stats+Full-FC 自约 10K 起贴底于 0.004--0.009 灰带。
+  正式检查点 $\circ$，60K 端点 $\times$。}
+  \label{fig:f3-drift}
+\end{figure*}
+
+本节在同一无真值评估框架下比较经典与学习类方法，回答三个递进问题：
+(i)~无真值下谁更好？没有可认证的赢家（\S\ref{sec:exp-verdict}）；
+(ii)~学习类方法为何持续漂移？合成先验侵蚀活在观测算子的零空间内，损失侧锚定对此盲目（\S\ref{sec:exp-drift}）；
+(iii)~输入通路与残差参数化能否改变权衡？能调节，但不能认证保真（\S\ref{sec:exp-ablation}）。
+全部终表数字来自统一评估框架单次重跑，确保相同感兴趣区域与指标管线；
+轨迹图（\S\ref{sec:exp-drift}）使用 \eng{TensorBoard} 尺度，图注声明。
+
+%% ---------------------------------------------------------------
+\subsection{无真值下不存在可认证的赢家}
+\label{sec:exp-verdict}
+
+表~\ref{tab:t1-main} 汇总经典方法与学习类方法在统一口径下的指标。
+加粗标出每列最优——\textbf{加粗散落在不同方法上，没有任何一行全面胜出}。
+
+散落的加粗直接印证核心裁决。
+\eng{TGV} 在保真代理上领先（伪影最低 0.695、锐度最高 0.999），但在最细对角轮廓上留有全变分阶梯化珠串——这是观测本身不具有的伪影。
+\eng{Hybrid+ResObs} 在频率一致性上领先（FRC@16 = 0.986）且锐度接近 \eng{TGV}（0.968 vs 0.999），但伪影为全表最高（2.726）、相关性最低之一（0.711），携带不可验证的高频纹理。
+\eng{Drizzle} 的分半一致性最优，但频率恢复最弱（FRC@16 = 0.439）。
+统一评估框架的作用是将证据按维度拆开，而非评出赢家。
+
+图~\ref{fig:f5-main-visual} 将这种互补失效做成双域、双感兴趣区域的视觉对照。四列读法：\eng{Drizzle} 偏软但最忠于观测；\eng{TGV} 轮廓最锐但有全变分阶梯化珠串；
+\eng{Hybrid}\,60K 端点边缘过度增厚（漂移后果）；\eng{Hybrid+ResObs} 锐度与 \eng{TGV} 相当但仍携带不可验证的高频内容。
+目视偏好是任务级主观判断，不构成保真证据。
+第二验证感兴趣区域（图~\ref{fig:f5-main-visual} 下两行）的格点伪影排序与中心区域一致（drizzle < TGV < Hybrid+ResObs < Hybrid-60K），
+但锐度 P95 与锯齿走线剖面排序跨区域不一致——因此该图仅作为留出视觉/代理审计，不升级为方法胜负判定（附录 D.6）。
+
+%% ---------------------------------------------------------------
+\subsection{核心发现：漂移活在零空间}
+\label{sec:exp-drift}
+
+图~\ref{fig:f3-drift} 是全文核心机制结果。
+五个 $1\times$ 输入变体在训练过程中的代理轨迹揭示了一条统一失效机制：合成先验侵蚀沿观测算子零空间方向累积，损失侧锚定对此盲目。
+
+\begin{table}[t]
+  \centering
+  \caption{$1\times$ 输入变体的漂移摘要}
+  \label{tab:drift-summary}
+  \scriptsize
+  \begin{tabular}{lccc}
+    \toprule
+    变体 & artifact $10\text{K}{\to}60\text{K}$ & corr $10\text{K}{\to}60\text{K}$ & 前向损失 \\
+    \midrule
+    HotLoss & $0.339{\to}0.883$ & $0.773{\to}0.648$ & 被混淆 \\
+    Stats & $0.390{\to}0.643$ & $0.756{\to}0.689$ & --- \\
+    Stats+PS & $0.413{\to}0.709$ & $0.747{\to}0.667$ & --- \\
+    Stats+HP-FC & $0.369{\to}0.655$ & $0.758{\to}0.688$ & 贴底 \\
+    Stats+Full-FC & $0.379{\to}0.677$ & $0.758{\to}0.677$ & 振荡后稳定 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+两个实测事实构成零空间判据。
+\textbf{第一，漂移平行}：四种锚定变体（none / HP-FC / Full-FC / Hybrid+Native-FC）的漂移曲线近乎一致，
+均收敛到 artifact $\approx 0.65$--$0.70$ / corr $\approx 0.67$--$0.69$ 平台——
+例如 Stats+HP-FC 在 40K$\to$60K 的增量（artifact $+0.015$ / corr $-0.008$）
+与无锚 Stats（$+0.016$ / $-0.009$）几乎重合。
+\textbf{第二，前向损失贴底}：HP-FC 与 Full-FC 的观测域前向一致性损失自 10K 起全程贴底于 0.004--0.009，
+说明漂移分量落在观测算子 $A$ 的零/近零空间内——$A$ 看不到的方向上，有限权重的锚定提供零恢复曲率。
+
+这与理论预测一致：对 $A$ 的精确或 $\epsilon$-零空间内的漂移分量，有界频带的观测侧锚无法制造非消失的恢复力（附录 A.2，命题 P1--P3）。
+\eng{Hybrid} 输入变体的轨迹因代理跨输入模式不可横比，移至附录（图 S-F3）。
+
+% T2 提前定义，使其尽早进入 float 队列
+\begin{table*}[t]
+  \centering
+  \caption{消融矩阵（T2）：输入模式$\times$锚定/参数化。
+    加粗 = 该列最优；FRC@\{14,12\}\,$\mu$m 见附录 S-T1。}
+  \label{tab:t2-ablation}
+  \scriptsize
+  \resizebox{\textwidth}{!}{%
+  \begin{tabular}{lcccccccccc}
+    \toprule
+    变体 & 输入 & 锚/参数化 & step & split$\downarrow$ & artifact$\downarrow$ & corr$\uparrow$ & FRC@16$\uparrow$ & lattice$\downarrow$ & sharp$\uparrow$ \\
+    \midrule
+    Stats & $1\times$ stats & none & 15K & 0.073 & 1.943 & 0.758 & 0.712 & \textbf{0.001} & 0.864 \\
+    Stats+PixelShuffle & $1\times$ stats & PixelShuffle 控制 & 5K & 0.050 & 1.782 & 0.739 & 0.734 & \textbf{0.001} & 0.682 \\
+    Stats+HP-FC & $1\times$ stats & HP-FC 0.1 & 11K & 0.054 & 1.766 & \textbf{0.777} & 0.744 & \textbf{0.001} & 0.698 \\
+    Stats+Full-FC & $1\times$ stats & Full-FC 0.1 & 7K & 0.054 & 1.726 & 0.771 & 0.744 & \textbf{0.001} & 0.697 \\
+    \midrule
+    Hybrid & hybrid $2\times$ & none & 10K & 0.054 & 1.762 & 0.719 & 0.945 & \textbf{0.001} & 0.683 \\
+    Hybrid+Native-FC & hybrid $2\times$ & native $1\times$ FC & 5K & 0.064 & \textbf{1.669} & 0.718 & 0.891 & \textbf{0.001} & 0.766 \\
+    Hybrid+ResObs & hybrid $2\times$ & ResObs $\lambda\!=\!1.2$ & 15K & \textbf{0.041} & 2.726 & 0.711 & \textbf{0.986} & 0.013 & \textbf{0.968} \\
+    \bottomrule
+  \end{tabular}
+  }
+
+  \vspace{2pt}
+  \raggedright\scriptsize
+  $1\times$ 与 hybrid 输入间以 \verb|\midrule| 分组；两组代理数值不可跨输入模式直接比较。
+  Stats+PixelShuffle 仅作 HR 头归因对照（条纹伪影，附录 D.4）。
+  Hybrid+ResObs 的 split$\downarrow$ 最优与 artifact 最高并存，反映残差参数化压低分半不一致的同时拉高了高频内容。
+\end{table*}
+
+%% ---------------------------------------------------------------
+\subsection{消融：输入通路与观测锚定}
+\label{sec:exp-ablation}
+
+表~\ref{tab:t2-ablation} 按 $\{1\times\text{ stats},\ \text{hybrid drizzle}\} \times \{\text{none},\ \text{band},\ \text{full},\ \text{legal}\}$ 矩阵隔离两个因素的贡献，全部变体训练至 60K step。
+消融矩阵揭示两条清晰的归因线。
+
+\textbf{锚轴为空。}
+在两种输入下，所有损失侧锚定变体（Stats+HP-FC / Stats+Full-FC / Hybrid+Native-FC）的漂移曲线均与无锚基线重合（\S\ref{sec:exp-drift}），前向损失贴底。
+有限权重的观测侧锚定无法让先验漂移变得可观测——与命题 P1--P3 一致。
+
+\textbf{输入通路有信号。}
+\eng{Hybrid} 输入使 FRC@16 从 $1\times$ 输入的 0.712--0.744 跃升至 0.945（无锚 Hybrid）乃至 0.986（Hybrid+ResObs），
+表明亚像素相位通过 \eng{drizzle} 通道直接注入了网络。
+但这份输入证据不是免费的保真收益：Hybrid 组的相关性系统低于 $1\times$ 组（0.711--0.719 vs 0.758--0.777），
+Hybrid+ResObs 的伪影（2.726）为全表最高。
+
+\textbf{残差参数化使权衡可调。}
+\eng{Hybrid+ResObs} 的 $\lambda$ 旋钮将保真--锐度--纹理三维权衡显式化。
+$\lambda = 1.2$@15K 在频率一致性上大幅领先，锐度接近 \eng{TGV}，但以更高伪影和更低观测保真为代价。
+中心细线窗口诊断（附录 D.0）中该工作点的 lattice（0.014）低于 \eng{TGV}（0.017），
+但该口径依赖窗口选择——第二验证窗重选出 $\lambda = 0.1$、排序部分反转。
+无论哪个工作点，观测保真均低于 \eng{TGV}，因此不构成可认证支配。
+
+结论：输入通路能暴露亚像素证据，而损失侧锚定无法让合成先验漂移变得可观测。T2 中没有任何一行能认证学习类保真。
+
+%% ---------------------------------------------------------------
+\subsection{帧数预算、鲁棒性与负结果}
+\label{sec:exp-misc}
+
+经典方法帧数预算消融（$N\in\{31,62,124,248\}$）显示 \eng{Drizzle} 主要增益在 $N=62$ 即出现（corr $0.747\to0.764$），之后边际递减；
+位移扰动压力测试（$\sigma$ 至 0.2\,px）下原始控制相关性稳定但 FRC 代理更敏感。
+轮廓精修对齐相对台位指令先验提升 \eng{Drizzle} 相关性从 0.662 至 0.771——这是数据驱动对齐精修有效的端到端证据。
+完整曲线与数值表见附录 D.5。
+
+负结果如实上报：\eng{PixelShuffle} HR 头~\cite{shi2016realtime}引入条纹伪影，代理全程劣于双线性头（仅作头归因对照保留）；
+$4\times$ 网络无真实增益，与 MTF 界一致（$4\times$ Nyquist 处 MTF $\le 0.042$，附录 A.1）；
+有界损失侧锚定对零空间漂移无效，已由三个锚定变体闭合验证（\S\ref{sec:exp-drift}）。
+详见附录 D.4。

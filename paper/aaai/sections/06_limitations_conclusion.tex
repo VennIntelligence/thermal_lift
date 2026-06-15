@@ -1,0 +1,55 @@
+\section{Limitations and Conclusion}
+
+\subsection{Limitations}
+
+\begin{itemize}
+\item \textbf{Single instrument.} All real data come from one calibrated LWIR
+system and one chip family (248 clean frames in the main session). The protocol
+and null-space diagnostics are designed to transfer, but external validity is
+currently argued rather than demonstrated as a broad benchmark.
+
+\item \textbf{No external high-resolution anchor.} We do not have an
+independent high-resolution thermal reference for the exact same scene. Our
+``trustworthy'' claim therefore means consistency under internal controls
+(FRC-based controls, observation anchoring, and structure proxies), not
+agreement with a held-out ground truth.
+
+\item \textbf{Partial FRC-control instability.} Positive/negative controls around
+the 10--12\,$\mu$m rebound are not ideal. We mitigate this by making the
+17\,$\mu$m cutoff the main claim and explicitly marking the rebound range as a
+potential artifact-risk region.
+
+\item \textbf{Proxy ceiling.} Artifact/correlation proxies and split-half
+consistency can guard against hallucination, but they cannot certify every
+recovered fine detail. Our acceptance rule is intentionally conservative and may
+reject reconstructions that are useful but not certifiable.
+
+\item \textbf{PSF uncertainty and finest structures.} The plausible PSF range
+($\sigma\in[0.2,0.5]$ LR pixels) is bounded but not pinned to a single value,
+and all PSF-dependent conclusions are reported with this interval. At 10\,$\mu$m
+pitch, 1--2 pixel structures are near the physical resolution boundary; the
+deliverable is contour visibility and stability, not literal recovery.
+\end{itemize}
+
+\subsection{Conclusion}
+
+We study burst super-resolution at a deliberately hard operating point: an
+industrial LWIR micro-scan system with no high-resolution ground truth at any
+stage. Under a fully measured forward model, we show that (i) the burst carries
+real but bounded coherent information beyond a single LR frame, (ii) standard
+$1\times$ statistical inputs can hide subpixel phase evidence that becomes
+visible under evidence injection, and (iii) synthetic-prior-trained networks can
+drift along the observation operator null space while forward-consistency loss
+stays near floor.
+
+Classical reconstruction anchors (coverage-weighted TGV and fine-grid MAP-TV)
+remain the most faithful to verifiable observations, while learning-based
+variants can produce richer-looking details together with more unverifiable
+high-frequency content. In this ground-truth-free region, we therefore do not
+certify a single winner. Instead, we report verifiable fidelity proxies, a
+structure-grain proxy with dual-domain visual gates, and a task-level contour
+preference that survives explicit controls.
+
+The resulting claim is intentionally bounded: controlled contour-level
+$2\times$ enhancement, with transparent reporting of what survives controls and
+what does not.

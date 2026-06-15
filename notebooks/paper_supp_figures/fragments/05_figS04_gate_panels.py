@@ -1,7 +1,7 @@
 # %% [markdown]
 # ## S-F4 — checkpoint 选择的视觉 gate panel（supp D.6 / C.5 配图）
 #
-# 选点协议第 6 步的实物证据：每臂 canonical 候选 + 60K 端点的温度域三联图，
+# 选点协议第 6 步的实物证据：每个变体 canonical 候选 + 60K 端点的温度域三联图，
 # 标注 proxy 数值。诊断面板按训练管线原样存档（非 CVPR 排版），证据价值在
 # 内容而非版式。
 
@@ -13,7 +13,7 @@ for arm in ["v6", "v8.1a", "v8.1b", "v9b"]:
     display(show_figure(EP11_DIR / f"panel_{arm}.png", REBUILD))
 
 # %% [markdown]
-# > **图表说明**: 每行一个臂，三联为「候选 checkpoint（≥5K 间隔的理想点距离
+# > **图表说明**: 每行一个变体，三联为「候选 checkpoint（≥5K 间隔的理想点距离
 # > top-3）+ 60K 端点对照」的 center-zoom 温度图（inferno，1–99 百分位）。
 # > **怎么看**: 与 60K 端点相比，canonical 选点（v6@8K、v8.1a@15K、v8.1b@5K、
 # > v9b@11K）的中心结构更接近观测、风格化更弱；v8.1b 行可见 PixelShuffle 的

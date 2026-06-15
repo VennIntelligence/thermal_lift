@@ -1,9 +1,13 @@
 # Thermal Lift Paper Workspace
 
-This directory contains two lightweight writing tracks:
+This directory contains three lightweight writing tracks:
 
-- `aaai/`: AAAI-style paper skeleton for a short, submission-shaped argument.
+- `aaai/`: AAAI-style paper skeleton (English, `pdflatex`).
+- `zh_conf/`: Generic Chinese dual-column conference skeleton (`xelatex` + `ctex`).
 - `slides/`: Beamer deck skeleton for the full experimental story and project report.
+
+Markdown source of truth for both paper tracks: `docs/paper/zh/*.zh.md`
+(Chinese directly → `zh_conf/`; translate to English → `aaai/`).
 
 The current AAAI files use the official AAAI-26 author kit downloaded from:
 
@@ -29,6 +33,12 @@ pdflatex main.tex
 bibtex main
 pdflatex main.tex
 pdflatex main.tex
+```
+
+Build the Chinese dual-column skeleton:
+
+```bash
+make -C paper zh_conf
 ```
 
 Build the Beamer report:

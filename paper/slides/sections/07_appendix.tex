@@ -1,0 +1,63 @@
+\section{附录：补充证据}
+
+% ---------------------------------------------------------------- 帧预算 + 鲁棒性
+\begin{frame}{附录 A：帧数预算与鲁棒性}
+  \begin{columns}[T]
+    \begin{column}{0.42\textwidth}
+      \small
+      \textbf{帧数预算}（drizzle，$N\!\in\!\{31,\ldots,248\}$）：
+      raw-control corr $0.747\!\to\!0.771$、
+      split NRMSE $0.072\!\to\!0.031$、FRC@16 $0.109\!\to\!0.479$；
+      多数增益在 $N\!=\!62$ 即出现。
+      \medskip
+
+      \textbf{对齐源消融}（command$\to$contour-refined）：
+      drizzle corr $0.662\!\to\!0.771$、TGV corr $0.642\!\to\!0.741$。
+    \end{column}
+    \begin{column}{0.58\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.74\textheight,keepaspectratio]{fig07_budget_robustness.pdf}
+    \end{column}
+  \end{columns}
+  \takeaway{数据驱动对齐精修是端到端有效的证据；\redflag{command shift 仍是先验，不是对齐真值}。}
+\end{frame}
+
+% ---------------------------------------------------------------- PSF 三路证据
+\begin{frame}{附录 B：PSF 标定的三路证据与仲裁}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \small
+      三条独立路线\textbf{超容差分歧}（spread $1.01$\,px）：
+      \begin{itemize}
+        \footnotesize
+        \item Route A（forward 残差）：$\sigma\!=\!0.226$
+        \item Route B（ESF 拟合）：$\sigma\!=\!1.129$
+        \item Route C（joint hold-out）：$\sigma\!=\!0.119$
+      \end{itemize}
+      \footnotesize 仲裁：Route B 实为 $\sigma_{\text{total}}^2\!=\!\sigma_{\text{PSF}}^2\!+\!w_{\text{edge}}^2$ 的表观值；
+      采纳区间 $\sigma\in[0.2,0.5]$。
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.74\textheight,keepaspectratio]{figS02_psf_evidence.pdf}
+    \end{column}
+  \end{columns}
+  \takeaway{$2\times$ Nyquist 处 MTF 在区间内变化 $65\times$——所有依赖 PSF 的计算须扫区间或标注 $\sigma$。}
+\end{frame}
+
+% ---------------------------------------------------------------- 负结果
+\begin{frame}{附录 C：负结果（如实呈现，不静默丢弃）}
+  \begin{itemize}
+    \small
+    \item \textbf{PixelShuffle HR 头}：引入条纹伪影，proxy 全程差于 bilinear 头——仅作 head 归因对照。
+    \item \textbf{$4\times$ 网络无真实增益}：与 MTF 界一致——
+          $4\times$ Nyquist 处 Gaussian-only $\mathrm{MTF}\le 0.042$（$\sigma{=}0.2$），其余条件 noise-dominated。
+    \item \textbf{有界 loss 侧锚定无效}：已由 Stats+HP-FC / Stats+Full-FC / Hybrid+Native-FC \textbf{三变体闭合验证}。
+    \item \textbf{渲染 AVI 不作 SR 输入}：8-bit 量化 + $67\%$ 帧重复，被数据审计排除，仅作方向旁证。
+  \end{itemize}
+  \begin{center}
+    \footnotesize\color{darkgray!80}
+    理论界先于实验：$4\times$ 的负结果\textbf{不是工程失败，而是物理预测的兑现}。
+  \end{center}
+  \takeaway{\redflag{负结果与正结果同等如实报告}——这正是无真值场景下可信度的来源。}
+\end{frame}

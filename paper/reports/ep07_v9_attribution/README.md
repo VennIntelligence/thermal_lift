@@ -8,7 +8,7 @@
 
 V9 系列目前支持三个已证实结论：第一，1x 统计输入会在网络前端丢掉多帧亚像素相位信息，hybrid 2x drizzle 输入能在早期 checkpoint 中透传中心细 zigzag 结构；第二，1x forward consistency 无论 highpass band 还是 full band 都没有压住真实数据漂移，说明漂移主要落在当前 forward 算子不可见或弱约束的方向；第三，UNet 训练时间轴呈现明确的 fidelity-sharpness trade-off，后期锐化超过 TGV 的区域与观测去相关和幻觉过冲重合。
 
-这份报告仍是骨架：V9C 完整 60K 结果、V10 显式残差幅度惩罚实验、以及 EP15 口径 split-half FRC 尚未并入。因此本文只把 Claim 1-3 标为“已证实”，把 Claim 2 的 hybrid+legal forward 第三臂标为“待 V9C”，把 Claim 4 标为“待 V10”。
+这份报告仍是骨架：V9C 完整 60K 结果、V10 显式残差幅度惩罚实验、以及 EP15 口径 split-half FRC 尚未并入。因此本文只把 Claim 1-3 标为“已证实”，把 Claim 2 的 hybrid+legal forward 第三个变体标为“待 V9C”，把 Claim 4 标为“待 V10”。
 
 ## Evidence Conventions
 
@@ -55,11 +55,11 @@ Interpretation: Claim 1 不声明 2x drizzle 输入本身就是最终 SR 解；�
 | V9D full-band forward anchor | full-band 锚定不优于 highpass-band，且早中期震荡更明显，复现全频低通梯度冲突风险 | `../../output/ep07_v9_review/ep07_eval_real_metrics.png` | 已证实 |
 | V9C hybrid + legal 1x highpass anchor | 需要完整 60K 曲线确认 hybrid 输入下合法 1x 锚是否仍无法关闭漂移通道 | `../../output/ep07_v9_review/ep07_v9c_metrics.csv` (TODO) | 待 V9C |
 
-Interpretation: 当前证据足以关闭“只靠 1x forward consistency 修 V9”的路线；但 Claim 2 的 2x2 矩阵完整闭合仍需要 V9C 终点。若 V9C 60K 也不能同时改善 artifact/corr 与中心窗口保真，则 Claim 2 可从“1x 输入臂已证实”升级为“hybrid 输入臂也证实”。
+Interpretation: 当前证据足以关闭“只靠 1x forward consistency 修 V9”的路线；但 Claim 2 的 2x2 矩阵完整闭合仍需要 V9C 终点。若 V9C 60K 也不能同时改善 artifact/corr 与中心窗口保真，则 Claim 2 可从“1x 输入变体已证实”升级为“hybrid 输入变体也证实”。
 
 ## Claim 3: Prior Erosion and a Proxy-Specific (not Absolute) Pareto
 
-**Claim.** 合成结构先验会随训练步数侵蚀真实观测细节。V9A 时间轴不是单调变好，而是在保真和锐度之间移动：20K 附近最保真但偏软，30K 以后 sharp_p95 上升同时 hp_corr_input 塌陷。在**观测保真 proxy** 上，当前 UNet 时间轴前沿不被严格优于 EP10 TGV 工作点——但这一「支配」是 **proxy 特定、非绝对**的：proxy（`hp_corr_input`、`sharp_p95`）不度量轮廓**连续性**，且 `sharp_p95` 无法区分连续锐线与珠串/颗粒。在结构 grain 读数（`lattice`）与目视上，TGV 在最细 trace 上呈 TV-staircase 珠串、学习臂呈 grain，**两者无单轴全胜**（详见 `docs/paper/reframe_c4_claim3.md`）。
+**Claim.** 合成结构先验会随训练步数侵蚀真实观测细节。V9A 时间轴不是单调变好，而是在保真和锐度之间移动：20K 附近最保真但偏软，30K 以后 sharp_p95 上升同时 hp_corr_input 塌陷。在**观测保真 proxy** 上，当前 UNet 时间轴前沿不被严格优于 EP10 TGV 工作点——但这一「支配」是 **proxy 特定、非绝对**的：proxy（`hp_corr_input`、`sharp_p95`）不度量轮廓**连续性**，且 `sharp_p95` 无法区分连续锐线与珠串/颗粒。在结构 grain 读数（`lattice`）与目视上，TGV 在最细 trace 上呈 TV-staircase 珠串、学习方法呈 grain，**两者无单轴全胜**（详见 `docs/paper/reframe_c4_claim3.md`）。
 
 | Object / Step | `hp_corr_input` | `hp_corr_tgv` | `sharp_p95` | `lattice_score` | Reading |
 |---|---:|---:|---:|---:|---|
@@ -79,7 +79,7 @@ Interpretation: 当前证据足以关闭“只靠 1x forward consistency 修 V9�
 
 Interpretation: `sharp_p95` 和 Tenengrad 只能作为锐度 proxy。它们变大可能来自真实边缘增强，也可能来自振铃、饱和对比或假边缘；因此 Claim 3 必须绑定 `hp_corr_input`、视觉对照、lattice/artifact 指标和后续 split-half FRC，不能用锐度单轴宣称 SR 成功。
 
-补充（2026-06-13 中心细线窗口复核）：`lattice` 排序为 drizzle 0.0015 < v9a_20k 0.0009 < TGV 0.0169 < v9a_60k 0.0153 < **V10 0.024**——学习臂携带的高频内容最多、且无 GT 不可验证；TGV 的珠串是 TV 正则 staircase 伪影（观测 drizzle 本身连续）。据此 **C4 从「经典支配」改写为「互补失效、无 GT 可认证赢家」**，并新增「显式 task-level 轮廓可辨偏好（非保真证据）」轴。`sharp_p95`/`hp_corr_input` 平面不含连续性轴，引用时必须声明。
+补充（2026-06-13 中心细线窗口复核）：`lattice` 排序为 drizzle 0.0015 < v9a_20k 0.0009 < TGV 0.0169 < v9a_60k 0.0153 < **V10 0.024**——学习方法携带的高频内容最多、且无 GT 不可验证；TGV 的珠串是 TV 正则 staircase 伪影（观测 drizzle 本身连续）。据此 **C4 从「经典支配」改写为「互补失效、无 GT 可认证赢家」**，并新增「显式 task-level 轮廓可辨偏好（非保真证据）」轴。`sharp_p95`/`hp_corr_input` 平面不含连续性轴，引用时必须声明。
 
 ## Claim 4: Explicit Fidelity-Sharpness Control
 
@@ -91,7 +91,7 @@ Interpretation: `sharp_p95` 和 Tenengrad 只能作为锐度 proxy。它们变�
 | zero-training fusion baseline | TGV anchor + V9A 60K 在 lambda=0.1-0.3 上支配 TGV 工作点；drizzle anchor 曲线保真高但不够锐 | `../../output/ep07_v9_review/fusion_pareto_overlay.png`; `../../output/ep07_v9_review/fusion_baseline_metrics.csv` | 已完成 |
 | split-half stability | 显式控制后的候选点在 EP15 口径下稳定，而不是只在单次可视化中锐化 | `../../output/ep15_*/` (TODO) | 待 V10 / EP15 |
 
-Interpretation（2026-06-13 更新）: V10（λ=0.02–0.15, bs64）已跑；其 fine-window 评估曾因未把 drizzle base 加回（`common.py` 漏传 `residual_channel`，已修复）而误判「灾难失败 hp_corr≈0.46/lattice≈0.08」。修正后落在 V9A 折中区、不支配 TGV，但 λ 区间过弱（惩罚损失占比仅 ~1–4%）、bs64 混杂未除，故**既非正结果也非干净反证**。同时 C4 已从「经典支配」改写为**「互补失效、无 GT 可认证赢家」**（`docs/paper/reframe_c4_claim3.md`）：TGV 有 TV-staircase、学习臂 grain 最多且不可验证。高-λ(bs128) 扫描的新判据见 `algos/ep07_unet_sr/scripts/run_v10_highlam.md`。zero-training fusion baseline 仍是「学习能微微越过 TGV proxy」的最干净后处理证据。
+Interpretation（2026-06-13 更新）: V10（λ=0.02–0.15, bs64）已跑；其 fine-window 评估曾因未把 drizzle base 加回（`common.py` 漏传 `residual_channel`，已修复）而误判「灾难失败 hp_corr≈0.46/lattice≈0.08」。修正后落在 V9A 折中区、不支配 TGV，但 λ 区间过弱（惩罚损失占比仅 ~1–4%）、bs64 混杂未除，故**既非正结果也非干净反证**。同时 C4 已从「经典支配」改写为**「互补失效、无 GT 可认证赢家」**（`docs/paper/reframe_c4_claim3.md`）：TGV 有 TV-staircase、学习方法 grain 最多且不可验证。高-λ(bs128) 扫描的新判据见 `algos/ep07_unet_sr/scripts/run_v10_highlam.md`。zero-training fusion baseline 仍是「学习方法能微微越过 TGV proxy」的最干净后处理证据。
 
 ### Zero-Training Fusion Baseline
 
@@ -110,8 +110,8 @@ Fusion baseline 的直接含义：V10 不只要打败单个 UNet checkpoint，�
 | Category | Conclusion | Evidence State |
 |---|---|---|
 | 已证实 | 1x 统计输入存在相位信息瓶颈；hybrid 2x drizzle 输入能让真实细结构进入网络并在早期 checkpoint 透传 | Claim 1 已有中心窗口定量与图证据 |
-| 已证实 | 1x forward consistency 的 highpass/full-band 锚定不能阻止 v8.1/V9B/V9D 真实数据漂移 | Claim 2 在 1x 输入臂已闭合 |
-| 已证实 | V9A 后期锐度提升伴随观测去相关；UNet 时间轴在**观测保真 proxy** 上不被严格优于 TGV（proxy 特定、**非绝对**：TGV 有 TV-staircase、学习臂 grain 最多，无单轴全胜） | Claim 3 已有 Pareto、条带、final panel 证据 + lattice 复核 |
+| 已证实 | 1x forward consistency 的 highpass/full-band 锚定不能阻止 v8.1/V9B/V9D 真实数据漂移 | Claim 2 在 1x 输入变体已闭合 |
+| 已证实 | V9A 后期锐度提升伴随观测去相关；UNet 时间轴在**观测保真 proxy** 上不被严格优于 TGV（proxy 特定、**非绝对**：TGV 有 TV-staircase、学习方法 grain 最多，无单轴全胜） | Claim 3 已有 Pareto、条带、final panel 证据 + lattice 复核 |
 | 待 V9C | hybrid drizzle 输入下的合法 1x forward anchor 是否也失败 | V9C 60K 后补指标与中心窗口诊断 |
 | 已完成对照 | zero-training fusion baseline 给出 V10 必须打败的后处理前沿 | TGV + 0.1-0.3 * V9A60 delta 支配 TGV 工作点 |
 | 已修正 / 待高-λ | V10（λ0.02–0.15,bs64）评估 bug 已修复：不支配 TGV、落 V9A 区；λ 过弱+bs 混杂 ⇒ 高-λ(bs128) 待跑 | `output/ep07_v9_review/v10_pareto/` + `run_v10_highlam.md` |
@@ -136,10 +136,10 @@ TODO: 按 EP15 口径补充 split-half FRC，而不是继续依赖单图锐度 p
 | TODO | Owner / Trigger | Expected Update |
 |---|---|---|
 | 更新 C1 迁移后的真实图名 | C1 脚本迁移完成后 | 若文件名不同，修正本文所有 `../../output/ep07_v9_review/...` 链接 |
-| 补 V9C 60K | V9C 完成后 | 更新 Claim 2 第三臂、Conclusion Status |
+| 补 V9C 60K | V9C 完成后 | 更新 Claim 2 第三个变体、Conclusion Status |
 | 补 V10 lambda sweep | V10 完成后 | 与 TGV 工作点和 zero-training fusion baseline 同时比较，从“待 V10”改为正/负结论 |
 | 补 EP15 split-half FRC | EP15 口径确定并产出后 | 填写 split-half FRC TODO 小节 |
 
 ## Changed Files
 
-- `reports/ep07_v9_attribution/README.md`
+- `paper/reports/ep07_v9_attribution/README.md`

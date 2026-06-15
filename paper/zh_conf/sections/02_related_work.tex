@@ -1,0 +1,25 @@
+\section{相关工作}
+
+多帧超分辨（\eng{MFSR}）从频域表述 \cite{tsai1984multiframe} 与空域迭代回投影 \cite{irani1991improving}
+发展至鲁棒快速变体 \cite{farsiu2004fast}，形成了以位移--\eng{PSF}--抽取为核心的观测模型；
+\eng{Drizzle} \cite{fruchter2002drizzle} 以通量守恒的亚像素散射提供最小假设融合，
+\eng{TV}/\eng{TGV} 正则化反演 \cite{rudin1992nonlinear,bredies2010tgv} 与显式 \eng{PSF} 的 \eng{MAP} 表述
+\cite{elad1997restoration,hardie1997joint} 则给出了经典族中较强的重建质量。
+深度多帧超分辨将上述流程端到端化：\eng{DBSR} \cite{bhat2021deep}、\eng{BIPNet} \cite{dudhane2022burst}、
+\eng{Burstormer} \cite{dudhane2023burstormer} 在 \eng{RGB}/\eng{RAW} 上取得显著增益；
+卫星场景中 \eng{HighRes-net} 与 \eng{RAMS} \cite{deudon2020highres,salvetti2020rams} 是少见的实测多帧基准。
+热成像 \eng{SR} 主要由 \eng{PBVS} 挑战 \cite{rivadeneira2020thermal,rivadeneira2023thermal} 与专用 \eng{CNN}/\eng{GAN}
+\cite{chudasama2020therisurnet,rivadeneira2020novel} 推动，但多在渲染后 8-bit 图像上用合成退化训练，
+并依赖更高端相机的留出 \eng{HR} 做全参考评估。上述三条线索共享一个前提：训练或评估阶段存在配对真值（或其代理）。
+当部署场景（如本文所面对的工业热成像光栅扫描）根本无法获取 \eng{HR} 真值时，
+该前提失效，由此引出两个未被充分讨论的问题：如何在无 \eng{GT} 条件下评估重建质量，
+以及学习类方法在此条件下会产生何种系统性失效。真实世界 \eng{SR} 通过合成退化弥合域差 \cite{bellkligler2019blind,wang2021real,zhang2021designing}，
+但物理匹配的合成管线只能缩小、不能消除先验驱动的分布偏移。
+
+对于无真值评估，分半一致性与傅里叶环相关（\eng{FRC}）在冷冻电镜与超分辨显微中已是标准工具
+\cite{vanheel2005fourier,nieuwenhuizen2013measuring,banterle2013fourier}，
+却很少被移植到学习类 \eng{SR}；无参考 \eng{IQA} \cite{mittal2013making} 则无法区分真实锐化与幻觉式锐化。
+对于失效机制，逆问题文献已将重建分解为前向算子的值域与零空间分量
+\cite{schwab2019deep,chen2021equivariant,ulyanov2018deep,heckel2019deep}，
+数据一致性层在 \eng{MRI} 重建中亦为标准件 \cite{schlemper2018deep}，
+但尚无工作在真实无真值的工业成像系统上实证量化学习类 \eng{SR} 的零空间漂移并给出诊断手段。本文正是填补这一空白。

@@ -1,0 +1,56 @@
+% Chinese dual-column conference paper (Fandol + TeX Gyre Termes).
+% Build: make -C paper zh_conf
+% Fonts: run paper/zh_conf/scripts/setup_fonts.sh once if fonts/ is empty.
+
+\documentclass[twocolumn,10pt,a4paper]{article}
+\usepackage{zhconf}
+
+\title{%
+  \zhconftitle{%
+    细节更多，却在漂移：\\
+    无真值热成像多帧超分辨中的零空间幻觉
+  }%
+}
+\author{%
+  \zhconfauthor{匿名作者$^{1}$}%
+  \zhconfaffil{$^{1}$匿名单位（投稿前替换）}%
+}
+\date{}
+
+\begin{document}
+
+\twocolumn[
+  \begin{@twocolumnfalse}
+    \maketitle
+    \begin{zhabstract}
+      长波红外（\eng{LWIR}）热成像能够测出缺陷与工艺偏差引起的亚摄氏度温度差异，在半导体检测中有重要应用。
+      在这一场景下，重建图像的表观细节更多并不等于真实分辨率的提升，因此不能仅凭视觉观感判断超分辨是否成功。
+      这一问题还受到物理与数据条件的多重约束：衍射会抑制光学通带外的信息，高端热成像光学成本高昂，配对的高分辨率热真值也无法获得。
+      本文研究一个经过标定的 \(2\times\) 微扫描多帧超分辨系统，围绕三个问题展开：观测序列是否携带可恢复的高频信息、学习类方法是否真正接收到这些信息、其新增细节是否锚定于观测。
+
+      本文识别出一种我们称为\zhemph{零空间漂移}的现象。我们把成像过程建模为一个观测算子，它将假想的高分辨率温度场映射为实际记录的低分辨率帧。
+      这一算子存在零空间，即一类会改变重建图像、却几乎不改变任何已记录观测的高频结构。我们发现，在物理匹配的合成数据上训练的网络迁移到真实数据后，
+      其新增细节主要表现为与这一零/近零空间一致的漂移。把重建结果重新投影回低分辨率观测域，前向一致性误差始终停在噪声与模型误差决定的下界附近；
+      在算子层面，我们进一步证明：对落入精确或 \(\epsilon\)-零空间的漂移，有界的观测侧锚定（有限权重、任意有界频带）不敏感，补救只能来自先验、输入证据或选点协议。
+      与此同时，在真实数据上不依赖真值的伪影与相关性诊断却持续劣化。这说明网络生成了更多表观高频细节，但它们并未受到观测的充分约束。
+
+      基于无真值的评估手段（包括受控的分半一致性、观测侧漂移诊断与帕累托选点），经典变分重建对可验证观测最为保真，
+      而证据注入式学习类重建给出表观细节更丰富的可见轮廓，却同时带来更多无法验证的高频内容。
+      本文据此揭示并刻画了无真值热成像超分辨中的零空间幻觉，并给出可操作的诊断框架，为缺乏高分辨率热真值时的“细节--保真”权衡提供依据。
+    \end{zhabstract}
+    \zhkeywords{热成像超分辨；零空间幻觉；无真值评估；微扫描；半导体检测}
+    \vspace{1.0em}
+  \end{@twocolumnfalse}
+]
+
+\input{sections/01_introduction}
+\input{sections/02_related_work}
+\input{sections/03_problem_forward_model}
+\input{sections/04_methods}
+\input{sections/05_experiments}
+\input{sections/06_limitations_conclusion}
+
+\bibliographystyle{gbt7714-2015-numeric}
+\bibliography{../bib/refs}
+
+\end{document}

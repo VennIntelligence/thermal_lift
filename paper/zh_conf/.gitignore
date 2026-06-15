@@ -1,0 +1,13 @@
+# Fandol fonts (~34 MB) — run scripts/setup_fonts.sh to fetch.
+fonts/
+
+# LaTeX build products (also covered by paper/.gitignore).
+*.aux
+*.bbl
+*.blg
+*.log
+*.out
+
+# Compiled document outputs only; figure PDFs (e.g. figures/*.pdf) are tracked.
+main.pdf
+supp.pdf

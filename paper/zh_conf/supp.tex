@@ -1,0 +1,75 @@
+% Supplementary material — single-column, shares zhconf typography.
+% Build: make -C paper zh_conf_supp
+%   or:  cd paper/zh_conf && xelatex supp.tex && bibtex supp && xelatex supp.tex && xelatex supp.tex
+%
+% Design notes:
+%   - Separate PDF from main.tex (standard for conference supplementary material).
+%   - Single column (onecolumn): the null-space proofs in App. A and the wide
+%     benchmark tables in App. D do not fit comfortably in the 2-column main text.
+%   - Reuses zhconf.sty for identical fonts/citation style; geometry widened for
+%     single-column reading width.
+
+\documentclass[onecolumn,11pt,a4paper]{article}
+\usepackage{zhconf}
+
+% Single-column reading width (override the two-column geometry from zhconf).
+\geometry{left=2.6cm,right=2.6cm,top=2.4cm,bottom=2.4cm}
+
+\usepackage{longtable}
+
+% 长代码路径较多，放宽断行避免 overfull（允许稍宽的词间距而非溢出页边）。
+\sloppy
+
+% Appendix-style section numbering: A, A.1, A.1.1 ...
+\renewcommand{\thesection}{\Alph{section}}
+\renewcommand{\thesubsection}{\thesection.\arabic{subsection}}
+\renewcommand{\thesubsubsection}{\thesubsection.\arabic{subsubsection}}
+
+% Show subsubsections in the table of contents.
+\setcounter{secnumdepth}{3}
+\setcounter{tocdepth}{2}
+
+% Proposition lead-in helper: \prop{P1}{精确零空间不变性}
+\newcommand{\prop}[2]{\medskip\noindent\textbf{命题~#1（#2）.}\ }
+\newcommand{\lemmastate}[2]{\medskip\noindent\textbf{引理~#1（#2）.}\ }
+\newcommand{\coro}[2]{\medskip\noindent\textbf{推论~#1（#2）.}\ }
+
+\title{%
+  \zhconftitle{%
+    补充材料\\
+    \large 细节更多，却在漂移：无真值热成像多帧超分辨中的零空间幻觉
+  }%
+}
+\author{\zhconfauthor{匿名作者（投稿前替换）}}
+\date{}
+
+\begin{document}
+
+\maketitle
+
+\noindent\small
+本补充材料是同名主文的附录，单栏排版，编号自成体系（A--E）。文中所有「主文~\S」指向正文章节，
+「附录~A.2」「见~D.4.3」等指向本文件内部。本文件与主文共享同一参考文献库与图表资产，
+不重复正文已给出的结论，只补充推导、协议、完整表格与复现细节。
+\normalsize
+
+\medskip
+\hrule
+\medskip
+
+\tableofcontents
+
+\bigskip
+
+\input{supp_sections/A_theory}
+\input{supp_sections/B_system_data}
+\input{supp_sections/C_method_details}
+\input{supp_sections/D_full_results}
+\input{supp_sections/E_reproducibility}
+
+% 补充材料当前不含独立引用；若后续加入 \cite{...}，取消下面两行注释并改用
+% `make -C paper zh_conf_supp`（含 bibtex pass）重新编译。
+% \bibliographystyle{gbt7714-2015-numeric}
+% \bibliography{../bib/refs}
+
+\end{document}

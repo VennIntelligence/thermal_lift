@@ -2,7 +2,7 @@
 
 Fidelity (highpass corr vs the drizzle 2x input channel) against the sharpness
 proxy (P95 gradient) on the center fine-line window:
-  * V9A training-time trajectory (5K-60K),
+  * Hybrid training-time trajectory (V9A run id, 5K-60K),
   * post-hoc linear fusion curves fused(lambda) = (1-lambda)*anchor + lambda*UNet,
   * TGV / drizzle-input reference points and the dominance quadrant of the
     TGV work point.
@@ -34,13 +34,13 @@ OUT_DIR = PROJECT_ROOT / "output" / "paper_figures"
 
 FUSION_STYLE = {
     ("tgv", "v9a60"): dict(color=METHOD_COLORS["accent_1"], ls="-", marker="o",
-                           label=r"TGV $+\lambda\cdot$V9A-60K"),
+                           label=r"TGV $+\lambda\cdot$Hybrid-60K"),
     ("tgv", "v9a20"): dict(color=METHOD_COLORS["accent_1"], ls="--", marker="s",
-                           label=r"TGV $+\lambda\cdot$V9A-20K"),
+                           label=r"TGV $+\lambda\cdot$Hybrid-20K"),
     ("drizzle", "v9a60"): dict(color=METHOD_COLORS["secondary"], ls="-", marker="o",
-                               label=r"Drizzle $+\lambda\cdot$V9A-60K"),
+                               label=r"Drizzle $+\lambda\cdot$Hybrid-60K"),
     ("drizzle", "v9a20"): dict(color=METHOD_COLORS["secondary"], ls="--", marker="s",
-                               label=r"Drizzle $+\lambda\cdot$V9A-20K"),
+                               label=r"Drizzle $+\lambda\cdot$Hybrid-20K"),
 }
 ANNOTATED_STEPS = {"v9a_5k": "5K", "v9a_20k": "20K", "v9a_30k": "30K", "v9a_60k": "60K"}
 
@@ -66,12 +66,12 @@ def main() -> None:
         color=METHOD_COLORS["accent_1"],
     )
 
-    # V9A training trajectory.
+    # Hybrid (V9A run id) training trajectory.
     steps = traj[traj["step"].notna() & (traj["name"].str.startswith("v9a"))]
     steps = steps.sort_values("step")
     ax.plot(
         steps["hp_corr_input"], steps["sharp_p95"], color="#999999", lw=1.0,
-        marker="o", markersize=3.5, label="V9A checkpoints (5K-60K)", zorder=2,
+        marker="o", markersize=3.5, label="Hybrid checkpoints (5K-60K)", zorder=2,
     )
     for _, row in steps.iterrows():
         if row["name"] in ANNOTATED_STEPS:
@@ -97,7 +97,7 @@ def main() -> None:
     if not best.empty:
         bx, by = best.iloc[0][["hp_corr_input", "sharp_p95"]]
         ax.annotate(
-            r"TGV $+\,0.2\cdot$V9A-60K",
+            r"TGV $+\,0.2\cdot$Hybrid-60K",
             xy=(bx, by), xytext=(bx - 0.0205, by + 0.115), fontsize=7.5,
             arrowprops=dict(arrowstyle="-", color="#666666", lw=0.6),
         )

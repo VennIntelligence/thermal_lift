@@ -1,0 +1,54 @@
+\section{第二幕：信息在不在（Q1）}
+
+% ---------------------------------------------------------------- 理论 MTF
+\begin{frame}{理论上限：MTF 把 $2\times$ 推到可行边缘、把 $4\times$ 推出界}
+  \begin{columns}[T]
+    \begin{column}{0.46\textwidth}
+      \small
+      系统传递函数（PSF $\times$ 探测器孔径）：
+      \[
+        \mathrm{MTF}(f)=\underbrace{e^{-2\pi^2\sigma^2 f^2}}_{\text{Gaussian PSF}}\cdot
+        \underbrace{|\mathrm{sinc}(Wf)|}_{\text{box }W=10\,\mu\mathrm{m}}
+      \]
+      \scriptsize
+      \begin{tabular}{@{}lccc@{}}
+        \toprule
+        网格 (Nyquist) & $\sigma{=}0.20$ & $\sigma{=}0.35$ & $\sigma{=}0.50$ \\
+        \midrule
+        $2\times$ ($f{=}1.0$) & 0.454 & 0.089 & 0.007 \\
+        $4\times$ ($f{=}2.0$) & 0.042 & $6{\times}10^{-5}$ & ${\sim}0$ \\
+        \bottomrule
+      \end{tabular}
+      \par\medskip
+      \footnotesize $2\times$：乐观 $\sigma$ 端仍有可用余量；
+      $4\times$：除最乐观条件外\textbf{全线 noise-dominated}。
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.74\textheight,keepaspectratio]{figS15b_mtf_frequency_response.png}
+    \end{column}
+  \end{columns}
+  \takeaway{理论先于实验定界：$2\times$ 仅\textbf{轮廓级}可行；$4\times$ 出界——与后续 $4\times$ 网络负结果互证。}
+\end{frame}
+
+% ---------------------------------------------------------------- 实证 FRC
+\begin{frame}{实证下界：相位分层 split-half FRC，cutoff $=17.0\,$µm}
+  \begin{columns}[T]
+    \begin{column}{0.40\textwidth}
+      \small
+      把 248 帧按\textbf{亚像素相位分层}拆成两半，各自重建后算频域相关：
+      \begin{itemize}
+        \item $1/7$ cutoff $=\mathbf{17.0\,}$\textbf{µm}：确有超出 $20\,$µm 分辨率的相干信息，
+              但\textbf{低于}$11$--$14\,$µm 的理论期望。
+        \item 设正 / 负 / 漂移\textbf{控制组}校准判读。
+      \end{itemize}
+      \medskip
+      \redflag{$10$--$12\,$µm 反弹}在负控制与漂移控制中\textbf{同时出现}。
+    \end{column}
+    \begin{column}{0.60\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.74\textheight,keepaspectratio]{fig02_frc.pdf}
+    \end{column}
+  \end{columns}
+  \takeaway{信息\textbf{真实但有界}；\redflag{$10$--$12\,$µm 反弹只标 coverage/lattice + 漂移风险，不作分辨率证据}。}
+\end{frame}

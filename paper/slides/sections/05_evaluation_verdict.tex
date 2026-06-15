@@ -1,0 +1,68 @@
+\section{第四幕：无真值评估与诚实裁决}
+
+% ---------------------------------------------------------------- 评估协议 + 金句
+\begin{frame}{无真值评估协议：看轨迹，不看端点}
+  \begin{columns}[T]
+    \begin{column}{0.44\textwidth}
+      \small
+      协议三件套：
+      \begin{itemize}
+        \item \textbf{相位分层 split-half 一致性}（FRC，带控制组）
+        \item \textbf{观测侧漂移诊断}（artifact / raw-control corr）
+        \item \textbf{Pareto 选点}：预先规定的机械化检查点选择
+      \end{itemize}
+      \medskip
+      关键洞察：两个 proxy \textbf{构造性反相关}（同一张 highpass 图的两个泛函），
+      \redflag{不能同时最大化}。
+    \end{column}
+    \begin{column}{0.56\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.70\textheight,keepaspectratio]{figS09_fusion_pareto.pdf}
+    \end{column}
+  \end{columns}
+  \takeaway{金句：\textbf{上报训练端点，等于让每个变体都交出它最差的 checkpoint}——选点是方法的一部分，不是事后处理。}
+\end{frame}
+
+% ---------------------------------------------------------------- 主视觉对比
+\begin{frame}{主对比：两个 ROI $\times$ 双域，把证据拆开看}
+  \centering
+  \includegraphics[width=\linewidth,height=0.70\textheight,keepaspectratio]{fig05_combined_visual.pdf}
+  \par\vspace{-0.2em}
+  {\scriptsize\color{darkgray!80}温度行查“是否只是描边”，highpass 行承载锐度/grain：
+  drizzle 偏软 · TGV 轻微 TV-staircase · Hybrid 端点边缘过度增厚 · Hybrid+ResObs 锐度$\approx$TGV 而 grain 更低。}
+  \takeaway{\redflag{这是 task-level 视觉门控，不是保真或分辨率证据}；目视偏好 $\neq$ 保真证据。}
+\end{frame}
+
+% ---------------------------------------------------------------- 诚实裁决 + T1
+\begin{frame}{诚实裁决：没有 GT-可认证的单一赢家}
+  \footnotesize
+  \begin{center}
+  \begin{tabular}{@{}lcccc@{}}
+    \toprule
+    方法 & split NRMSE\,$\downarrow$ & artifact\,$\downarrow$ & raw-corr\,$\uparrow$ & FRC@16\,$\uparrow$ \\
+    \midrule
+    bicubic           & 0.047 & 1.388 & 1.000$^\dagger$ & 0.951 \\
+    drizzle           & 0.024 & 1.138 & 0.771 & 0.439 \\
+    MAP-TV ($5\times$)$^\ddagger$ & 0.024 & 2.333 & 0.438 & 0.965 \\
+    \textbf{TGV}      & 0.032 & \textbf{0.695} & 0.741 & 0.975 \\
+    Hybrid            & 0.054 & 1.762 & 0.719 & 0.945 \\
+    Hybrid+ResObs     & 0.041 & 2.726 & 0.711 & 0.986 \\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+  \begin{columns}[T]
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \textbf{经典 TGV 最忠于可验证观测}：各向异性 + coverage 加权两项改动使
+      artifact $3.870\!\to\!0.695$（$-82\%$，与上表同口径）。
+      \redflag{但最细对角轮廓有轻微 TV-staircase/beading}。
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \textbf{学习}表观轮廓最丰富，却携带\textbf{最多不可验证高频}。
+      \redflag{无真值不可验证——不称其“更干净/更保真”}。
+    \end{column}
+  \end{columns}
+  \takeaway{{\scriptsize$^\dagger$ corr 对 bicubic 为平凡参照；$^\ddagger$ $5\times$ 网格口径不同。}\;
+  互补的失效模式 $\Rightarrow$ \redflag{不存在单一最优方法}。}
+\end{frame}

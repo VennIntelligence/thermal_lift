@@ -1,0 +1,140 @@
+\section{复现说明}
+
+\subsection{代码与环境}
+
+\subsubsection{仓库结构}
+
+随附代码包按以下结构组织。
+
+\begin{table}[ht]
+  \centering
+  \caption{随附代码包目录结构与论文对应}
+  \label{tab:repo-structure}
+  \small
+  \begin{tabular}{p{0.27\linewidth}p{0.46\linewidth}p{0.18\linewidth}}
+    \toprule
+    目录 & 内容 & 论文对应 \\
+    \midrule
+    \texttt{core/} & 共享层：数据审计、位移模型、理论界计算、锚点 gate、绘图规范 & \S3 全部标定数字 \\
+    \texttt{configs/} & 物理参数单一来源：stage 标定、PSF 标定、噪声底、对齐结果 & \S3.1 标定链 \\
+    \texttt{tcforge/} & 物理匹配合成平台（独立包） & \S4.2 \\
+    \texttt{algos/ep06\_sr\_poc/} & forward 算子 \(+\) 指标库 & \S3.1 / 附录 A.3 \\
+    \texttt{algos/ep07\_unet\_sr/} & 学习方法训练/推理/评估代码 \(+\) 诊断管线 & \S4.3 / \S5 \\
+    \texttt{algos/ep10\_*/} & drizzle / MAP-TV / TGV 经典方法 & \S4.1 \\
+    \texttt{algos/ep15\_info\_limit/} & FRC、\(\sigma\) 仲裁、去卷积基准 & 附录 A.4 / \S3.1 \\
+    \texttt{algos/ep16\_budget\_robustness/} & 帧预算与鲁棒性矩阵 & \S5.4--5.5 \\
+    \texttt{scripts/paper\_figures/} & 论文图生产脚本 & F1--F7 \\
+    \texttt{paper/reports/}、\texttt{research\_log/} & 正式报告与全程实验日志 & 可追溯性 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+原始数据（\texttt{data/}）和实验产物（\texttt{output/}）不入版本控制，前者需手动放置，后者由脚本重建。
+
+\subsubsection{环境配置}
+
+本项目使用 \eng{UV} 进行依赖管理。根目录 venv（\texttt{uv sync} \(+\) \texttt{uv pip install -e core/}）用于全局脚本、notebook 和数据审计。
+每个算法目录（\texttt{algos/xxx/}）是独立项目，拥有自己的 venv 和 lockfile，通过 \texttt{uv sync} 创建。共享代码以 \texttt{pip install -e ../../core} 方式安装。
+\eng{TGV} 经典方法因包含 C/CUDA 编译依赖而使用 conda 环境（\texttt{environment.yml}）。各算法环境之间零耦合，可独立运行和删除。
+
+\subsubsection{新机器一键部署}
+
+\begin{verbatim}
+git clone <repo> thermal_lift && cd thermal_lift
+# place data/data_raw/ (not distributed; see E.3)
+uv sync && uv pip install -e core/
+uv run python scripts/build_ep01_cache.py       # build frame_audit.csv
+uv run python scripts/build_all_notebooks.py --execute  # all artifacts
+\end{verbatim}
+
+\subsection{图表重建命令}
+
+下表列出每张论文图表的生成脚本、所需环境和输入依赖。环境标注中 "root" 表示仓库根 venv，"ep07" 等表示对应算法目录内的 venv。
+
+\subsubsection{主文图表}
+
+\begin{table}[ht]
+  \centering
+  \caption{主文图表生成脚本与环境}
+  \label{tab:main-figs}
+  \small
+  \begin{tabular}{p{0.20\linewidth}p{0.50\linewidth}p{0.09\linewidth}p{0.12\linewidth}}
+    \toprule
+    图表 & 脚本 & 环境 & 耗时 \\
+    \midrule
+    F1 系统标定 & \texttt{scripts/paper\_figures/fig01\_system\_calibration.py} & root & 秒级 \\
+    F2 FRC 曲线 & \texttt{scripts/paper\_figures/fig02\_frc.py} & root & 秒级 \\
+    F3 零空间漂移 & \texttt{algos/ep07\_unet\_sr/scripts/plot\_drift\_trajectories\_paper.py} & ep07 & 秒级 \\
+    F4 Pareto 选点 & \texttt{algos/ep07\_unet\_sr/scripts/plot\_checkpoint\_selection.py} & ep07 & 分钟级 \\
+    F5 主视觉对比 & \texttt{algos/ep11\_dl\_benchmark/scripts/run\_unified\_harness\_t1\_t2.py} & ep11 & \(\sim\)3\,min \\
+    F7 预算鲁棒性 & \texttt{algos/ep16\_budget\_robustness/scripts/run\_ep16\_classical.py --summarize-only} & ep16 & 秒级 / \(\sim\)3.2\,h \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+T1/T2 与 F5 同源生成命令：
+
+\begin{verbatim}
+cd algos/ep11_dl_benchmark
+CUDA_VISIBLE_DEVICES=0 uv run python scripts/run_unified_harness_t1_t2.py \
+  --device cuda:0 \
+  --workers 4 \
+  --output-dir ../../output/ep11_unified_harness
+\end{verbatim}
+
+输出位于 \texttt{output/ep11\_unified\_harness/}，包含四个产物文件
+\texttt{all\_arm\_metrics.csv}、
+\texttt{t1\_metrics.csv}、
+\texttt{t2\_metrics.csv} 与
+\texttt{run\_manifest.json}；
+主视觉图为 \texttt{output/paper\_figures/} 下的 \texttt{fig05\_main\_visual.\{png,pdf\}}。
+
+\subsubsection{V9 Review 诊断管线}
+
+以下脚本在 ep07 环境下依序执行，输出统一到 \texttt{output/ep07\_v9\_review/}：
+
+\begin{verbatim}
+uv run python scripts/v9_review/extract_tb_metrics.py             # extract TB scalars
+uv run python scripts/v9_review/run_pareto_sweep.py --device cuda # checkpoint inference
+uv run python scripts/v9_review/render_comparison_panels.py       # comparison panels
+uv run python scripts/v9_review/run_fusion_baseline.py            # fusion sweep
+\end{verbatim}
+
+\subsubsection{补充材料图表}
+
+\begin{table}[ht]
+  \centering
+  \caption{补充材料图表重建脚本}
+  \label{tab:supp-figs}
+  \small
+  \begin{tabular}{p{0.27\linewidth}p{0.50\linewidth}p{0.15\linewidth}}
+    \toprule
+    资产 & 重建脚本 & 环境 \\
+    \midrule
+    S-F1 FRC 档案图 & \texttt{scripts/paper\_figures/fig02\_frc.py} & root \\
+    S-F2 PSF 证据链 & \texttt{scripts/paper\_figures/figS02\_psf\_evidence.py} & root \\
+    S-F9 融合 Pareto & \texttt{scripts/paper\_figures/figS09\_fusion\_pareto.py} & root \\
+    S-F10 Hybrid（V9A）演化条带 & \texttt{scripts/paper\_figures/figS10\_v9a\_strip.py} & root \\
+    D.2 MAP-TV 基准 & \texttt{algos/ep15\_info\_limit/scripts/run\_m4\_deconv\_anchor.py} & ep15 \\
+    \bottomrule
+  \end{tabular}
+\end{table}
+
+\subsubsection{训练复现}
+
+各变体的完整训练 CLI 存档于 \texttt{algos/ep07\_unet\_sr/scripts/} 下的
+\texttt{run\_training.md}、\texttt{run\_v9.md}、\texttt{run\_v10.md} 三个文件。
+单个变体 60K 步约需 10--20 小时（取决于 batch size 和 GPU 型号）。
+
+随机性控制：合成数据与 split 全部使用显式 seed（FRC: 42/123/456；EP16 子集: 101/202/303、扰动: 401--403；训练池与 drizzle 变体按 \([\text{seed}, \text{epoch}, \text{scene}]\) 确定性采样）。
+长任务输出 run manifest 记录全部配置与结果状态。
+
+\subsection{数据与伦理声明}
+
+\textbf{样品性质。} 论文热像来自实验室采集的工业芯片 \eng{LWIR} 温度矩阵（主 session 248 帧 clean set），全幅 \eng{FOV}（\(640 \times 480\) \eng{LR} / \(1280 \times 960\) \eng{HR}）可直接用于配图，无需 \eng{ROI} 脱敏或型号匿名化。
+
+\textbf{数据分发。} 原始 \eng{TXT} 温度矩阵不随论文公开（实验室数据管理惯例）。读者可在 \eng{TCForge} 合成数据上完整复现训练与评估协议。
+
+\textbf{可公开内容。} \eng{TCForge} 合成平台全部源码、所有标定常数（\(\theta = 47.6°\)、pitch 10\,\(\mu\)m、空间分辨率 20\,\(\mu\)m、PSF \(\sigma\) 区间 [0.2, 0.5]、噪声底 0.0724\,\(^\circ\)C）、评估脚本和 frame\_audit.csv schema 均随代码包提供。
+
+\textbf{诚实声明。} 真实数据结论的第三方复现依赖三层证据：协议（本文）、实验日志（\texttt{research\_log/} 随仓库提供）和中间产物 CSV（\texttt{paper/reports/} 随仓库提供）。

@@ -1,0 +1,99 @@
+\section{第三幕：零空间漂移（Q2/Q3，全文核心）}
+
+% ---------------------------------------------------------------- TCForge 管线
+\begin{frame}{学习路线：物理匹配合成 $\to$ 训练 $\to$ 真实数据部署}
+  \begin{columns}[T]
+    \begin{column}{0.32\textwidth}
+      \small
+      无配对真值，于是\textbf{合成域训练、真实域部署}：
+      \begin{itemize}
+        \item \textbf{TCForge}：参数全部实测的前向退化（几何 $\to$ 温度场 $\to$ PSF/降采 $\to$ LR burst）。
+        \item \textbf{ThermalLift-UNet}：骨干冻结，仅变\textbf{输入通路}与\textbf{观测锚定}。
+        \item 在真实 248 帧上\textbf{无真值}部署评估。
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.68\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.76\textheight,keepaspectratio]{fig_tcforge_pipeline.pdf}
+    \end{column}
+  \end{columns}
+  \takeaway{合成与真实之间存在域差；问题不在“能否训练”，而在“真实数据上新增的细节是否可信”。}
+\end{frame}
+
+% ---------------------------------------------------------------- 核心现象图（最重要）
+\begin{frame}{核心现象：细节越来越多，诊断却越来越差}
+  \begin{columns}[T]
+    \begin{column}{0.36\textwidth}
+      \small
+      随训练进行，真实数据上：
+      \begin{itemize}
+        \item 伪影代理 \textbf{artifact}：$\sim0.37 \to 0.65$（持续\textbf{上升}）
+        \item 观测相关 \textbf{corr}：持续\textbf{下降}
+        \item 前向一致性误差：\textbf{贴底} $0.004$--$0.009$，\textbf{纹丝不动}
+      \end{itemize}
+      \medskip
+      \footnotesize 实测：有限权重锚（HP-FC）的 $40\text{K}\to60\text{K}$ 漂移
+      （artifact $+0.015$）与\textbf{无锚 Stats}（$+0.016$）\textbf{几乎重合}。
+    \end{column}
+    \begin{column}{0.64\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.62\textheight,keepaspectratio]{fig03_nullspace_drift.pdf}
+      \par{\scriptsize\color{darkgray!75}轨迹口径：eval\_real（TB-scale），与 T1/T2 的 harness 表非同尺度、不可横比。}
+    \end{column}
+  \end{columns}
+  \takeaway{\textbf{两曲线诊断}：前向一致性贴底 + proxy 持续漂移 $\Rightarrow$ 漂移投影到观测算子的\textbf{零/近零空间}。}
+\end{frame}
+
+% ---------------------------------------------------------------- 原理：零空间命题
+\begin{frame}{原理：为什么观测侧锚定对漂移“结构性失明”}
+  \small 任意 HR 扰动分解为可观测分量与盲区分量：
+  \[
+    \delta x = \delta x_{\text{range}} + \delta x_{\text{null}},
+    \qquad A\,\delta x_{\text{null}} = 0 .
+  \]
+  \begin{block}{命题 P1（精确零空间不变性）}
+    对任意只经 $A$ 接触预测的观测域损失 $\mathcal{L}(\hat{x})=\ell(A\hat{x},y)$：
+    \[
+      \mathcal{L}(\hat{x}+\delta x_{\text{null}})=\mathcal{L}(\hat{x}),
+      \qquad
+      \langle \nabla\mathcal{L}(\hat{x}),\,\delta x_{\text{null}}\rangle
+      =\langle \nabla_1\ell,\,A\,\delta x_{\text{null}}\rangle = 0 .
+    \]
+  \end{block}
+  \footnotesize $\epsilon$-零空间（P2/P3）：在近零奇异方向 $\sigma_i\!\to\!0$ 上，观测损失灵敏度 $O(\epsilon)$、
+  平方损失恢复曲率 $\|WAv_i\|^2\!\le\!\|W\|^2\sigma_i^2 \to 0$。
+  \takeaway{\redflag{任何有界观测侧锚定（有限权重、任意有界频带）对 $\delta x_{\text{null}}$ 都恒盲}——这是定理，不是调参问题。}
+\end{frame}
+
+% ---------------------------------------------------------------- 推论 + T2 消融
+\begin{frame}{推论：锚定治不了，补救只能来自输入侧证据}
+  \footnotesize
+  \begin{center}
+  \begin{tabular}{@{}lllccc@{}}
+    \toprule
+    变体 & 输入 & 锚/参数化 & artifact\,$\downarrow$ & corr\,$\uparrow$ & FRC@16\,$\uparrow$ \\
+    \midrule
+    Stats            & $1\times$ stats   & none            & 1.943 & 0.758 & 0.712 \\
+    Stats+HP-FC      & $1\times$ stats   & HP-FC 0.1       & 1.766 & 0.777 & 0.744 \\
+    Stats+Full-FC    & $1\times$ stats   & Full-FC 0.1     & 1.726 & 0.771 & 0.744 \\
+    \midrule
+    Hybrid           & hybrid $2\times$  & none            & 1.762 & 0.719 & 0.945 \\
+    Hybrid+Native-FC & hybrid $2\times$  & native $1\times$ FC & 1.669 & 0.718 & 0.891 \\
+    Hybrid+ResObs    & hybrid $2\times$  & ResObs $\lambda{=}1.2$ & 2.726 & 0.711 & 0.986 \\
+    \bottomrule
+  \end{tabular}
+  \end{center}
+  \begin{columns}[T]
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \textbf{锚轴全 null}：none / HP-FC / Full-FC / Native-FC
+      四种锚定的漂移曲线\textbf{近乎一致}，无一压平漂移。
+    \end{column}
+    \begin{column}{0.5\textwidth}
+      \footnotesize
+      \textbf{补救在输入侧}：把亚像素相位以更细网格 \textbf{drizzle 通道}重新送进网络，
+      相位结构才在训练中可见。
+    \end{column}
+  \end{columns}
+  \takeaway{\redflag{proxy 不可跨输入模式横比}（hybrid 合法携带更多高频，artifact 基线天然更高）；表中\textbf{无一行能认证学习保真}。}
+\end{frame}

@@ -71,8 +71,8 @@ CLAIM_BOUNDARY = "visual/proxy evidence only; not resolution, metrology, or GT f
 ARMS = [
     ("drizzle", "Drizzle"),
     ("tgv", "TGV"),
-    ("v9a_late_60k", "V9A 60K"),
-    ("v10_lam120_15k", "V10 lam120 15K"),
+    ("v9a_late_60k", "Hybrid 60K"),
+    ("v10_lam120_15k", "Hybrid+ResObs\nlambda=1.2 15K"),
 ]
 
 RANK_SPECS = {

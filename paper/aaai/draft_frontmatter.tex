@@ -1,0 +1,62 @@
+% Draft compile: title + abstract + introduction + related work only.
+% Build: cd paper/aaai && pdflatex draft_frontmatter.tex && bibtex draft_frontmatter && pdflatex draft_frontmatter.tex && pdflatex draft_frontmatter.tex
+
+\documentclass[letterpaper]{article}
+\usepackage[submission]{aaai2026}
+\usepackage{times}
+\usepackage{helvet}
+\usepackage{courier}
+\usepackage[hyphens]{url}
+\usepackage{graphicx}
+\urlstyle{rm}
+\def\UrlFont{\rm}
+\usepackage{natbib}
+\usepackage{caption}
+\usepackage{amsmath}
+
+\pdfinfo{
+/TemplateVersion (2026.1)
+}
+
+\setcounter{secnumdepth}{2}
+
+\title{Detailed but Drifting: Null-Space Hallucination in Ground-Truth-Free Thermal Burst Super-Resolution}
+\author{Anonymous Submission}
+\affiliations{Anonymous Institution}
+
+\begin{document}
+
+\maketitle
+
+\begin{abstract}
+Long-wave infrared (LWIR) thermography supports semiconductor inspection by measuring sub-degree
+temperature patterns from defects and process variations. In this setting, a sharper-looking
+reconstruction does not imply higher true resolution, so visual sharpness cannot by itself indicate
+successful super-resolution. The setting is constrained by physics and data: diffraction suppresses
+out-of-band information, higher-end optics are costly, and paired high-resolution thermal
+measurements are unavailable. We study a calibrated 2$\times$ micro-scan burst-SR system through three
+questions: whether the burst contains recoverable high-frequency information, whether learned
+models actually receive it, and whether added detail remains anchored to the observations.
+
+Our main finding is \textbf{null-space drift}. We model imaging as an observation operator $A$ that maps a
+hypothetical high-resolution temperature field to the measured low-resolution frames through
+motion, optical blur, detector integration, and downsampling. The operator has a null space:
+high-frequency changes that alter the reconstruction while producing nearly the same measured
+frames. When networks trained on physics-matched synthetic data are applied to real data, their
+added details drift primarily in this null space. The evidence is diagnostic: the
+forward-consistency loss---the mismatch after passing the reconstruction back through $A$---stays at the
+noise/model-error floor, while ground-truth-free artifact and correlation diagnostics on real data
+continue to worsen. We therefore use a ground-truth-free evaluation protocol combining controlled
+split-half consistency, observation-side drift diagnostics, and pre-specified checkpoint selection.
+The conclusion is bounded: classical variational reconstruction is most faithful to verifiable
+observations, whereas evidence-injected learning gives sharper visible contours but more
+unverifiable high-frequency content; without high-resolution thermal ground truth, neither is
+certifiably dominant.
+\end{abstract}
+
+\input{sections/01_introduction}
+\input{sections/02_related_work}
+
+\bibliography{refs}
+
+\end{document}

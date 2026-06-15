@@ -2,7 +2,7 @@
 
 > **触发**: 用户目视发现 + 主线量化复核（中心细线 ROI）。
 > **角色**: 本文件是 C4「classical-vs-learned 裁决」与 Claim 3「Pareto 前沿」**改写的单一权威底稿**。
-> 所有正文/报告改动（`01_outline.md`、`07_experiments.md`、`reports/ep07_v9_attribution/`、`run_v10_highlam.md`）以本文件措辞为准。
+> 所有正文/报告改动（`zh/07_experiments.zh.md`、`zh/README.md` 红队禁写清单、`paper/reports/ep07_v9_attribution/`、`run_v10_highlam.md`）以本文件措辞为准。
 > **方向**: A（平衡版核心裁决）+ B（显式 task-level 轮廓可辨指标，诚实标注非保真证据）。
 
 ---
@@ -24,22 +24,22 @@
 |---|---|---|---|---|
 | drizzle（观测，软上限） | 1.000 | 0.503 | 0.0015 | 连续但糊，未解析梳齿 |
 | v9a_20k（最保真 ckpt） | 0.974 | 0.62 | 0.0009 | 偏软 |
-| **TGV（经典锚）** | 0.960 | 0.959 | 0.0169 | 解析梳齿，但轻微 TV-staircase 珠串 |
+| **TGV（经典基准）** | 0.960 | 0.959 | 0.0169 | 解析梳齿，但轻微 TV-staircase 珠串 |
 | v9a_60k | ~0.906 | ~1.2 | 0.0153 | 梳齿被焊粗/合并（过冲） |
 | **V10 λ=1.2@15K（高-λ最终工作点）** | 0.922 | 0.987 | 0.0141 | 锐度约等于 TGV、grain 更低，但保真仍低于 TGV |
 
 > 注：MAP-TV 同属 TV 家族，预期亦有 staircase，但本轮未单独量化；写作时标注「likely shares the TV staircase」。
 
-## 3. 新 C4（英文，落 `01_outline.md` / 后续 LaTeX）
+## 3. 新 C4（英文，落 `zh/02_introduction.zh.md` 贡献段 / 后续 LaTeX）
 
 > **C4 — Honest classical-vs-learned verdict: complementary failure modes, no GT-certifiable winner.**
 > Anisotropic coverage-weighted TGV resolves the raster-anisotropy stripe artifacts (artifact 3.87→0.695, raw-control corr 0.916) and is the most observation-faithful method on the fidelity proxies, but it imprints a mild total-variation **staircase ("beading") on the finest diagonal contours** — an artifact absent from the (continuous) multi-frame observation, and reflected in its being the highest-`lattice` faithful reference. Evidence-injected learned reconstructions (hybrid-drizzle / residual-over-drizzle) are the **sharpest by inspection and resolve the central fine "comb" most crisply**, but they carry the **most high-frequency content** (a mix of plausibly-real detail and unverifiable grain) and drift measurably on observation fidelity. We therefore report a three-part, GT-free verdict — verifiable fidelity proxies (favor classical/drizzle), a structural grain proxy plus dual-domain visual panels, and an **explicitly task-level contour-legibility preference** — and conclude that **no method is a GT-certifiable winner; the task-level visual preference is not fidelity evidence, and nothing in this regime supports metrology-grade claims.**
 
 ## 4. 新 Claim 3（英文）
 
-> **Claim 3 — Prior erosion and a proxy-specific (not absolute) Pareto.** Synthetic structure priors erode real observation detail with training step: the learned fidelity–sharpness trajectory does not strictly beat the classical TGV working point **on the observation-fidelity proxies**. We explicitly bound this statement: the proxies (`hp_corr_input`, `sharp_p95`) **do not measure contour continuity**, and `sharp_p95` cannot separate a continuous sharp line from a beaded/grainy one. On a structural-grain reading (`lattice`) and by inspection, classical TGV exhibits TV-staircase on the finest traces while the learned arms exhibit grain — **neither dominates on all axes.** The drift mechanism (null-space, Claim 2) is unchanged; what we retract is any claim of *absolute* classical dominance.
+> **Claim 3 — Prior erosion and a proxy-specific (not absolute) Pareto.** Synthetic structure priors erode real observation detail with training step: the learned fidelity–sharpness trajectory does not strictly beat the classical TGV working point **on the observation-fidelity proxies**. We explicitly bound this statement: the proxies (`hp_corr_input`, `sharp_p95`) **do not measure contour continuity**, and `sharp_p95` cannot separate a continuous sharp line from a beaded/grainy one. On a structural-grain reading (`lattice`) and by inspection, classical TGV exhibits TV-staircase on the finest traces while learned variants exhibit grain — **neither dominates on all axes.** The drift mechanism (null-space, Claim 2) is unchanged; what we retract is any claim of *absolute* classical dominance.
 
-## 5. Claims-to-avoid 新增（`01_outline.md` 红队清单）
+## 5. Claims-to-avoid 新增（`zh/README.md` 红队禁写清单）
 
 - 不得把 TGV 写成「无条件最佳 / the trustworthy deliverable」——必须带 TV-staircase 小瑕 caveat。
 - 不得声称学习输出「更干净 / 更保真」——其额外高频不可验证；**目视偏好 ≠ 保真证据**。
@@ -61,8 +61,9 @@
 
 | 文件 | 改动 |
 |---|---|
-| `docs/paper/01_outline.md` | abstract skeleton 末句、C4、Figures(F5)、Claims-to-avoid |
-| `docs/paper/07_experiments.md` | §6.1 verdict line、§6.2/§6.6 措辞、§6.7 可加 staircase/grain 句 |
-| `reports/ep07_v9_attribution/README.md` | Claim 3 标题/解读、Claim 4 回填修正状态、Conclusion Status |
+| `docs/paper/zh/README.md` | 红队禁写清单（Claims-to-avoid）、图表计划 F5 |
+| `docs/paper/zh/02_introduction.zh.md` | 贡献 (2) 诚实裁决措辞 |
+| `docs/paper/zh/07_experiments.zh.md` | §6.1 verdict line、§6.2/§6.6 措辞、§6.7 可加 staircase/grain 句 |
+| `paper/reports/ep07_v9_attribution/README.md` | Claim 3 标题/解读、Claim 4 回填修正状态、Conclusion Status |
 | `algos/ep07_unet_sr/scripts/run_v10_highlam.md` | §2 成功判据（已在 HOLD 横幅预告，正式重写） |
 | `docs/next_move_plan.md`（工作文档，可后补） | §5 Claim 3、§6 POC 含义 |

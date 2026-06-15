@@ -7,7 +7,7 @@
 `output/ep11_unified_harness/`。完整列（runtime、source、cache path、temperature sanity、FRC@20/10
 等）保存在 `all_arm_metrics.csv`；主文 T1/T2 分别使用 `t1_metrics.csv` 与 `t2_metrics.csv`。
 所有 artifact 数字均为 EP11/common.metrics harness scale，不能与 TensorBoard `eval_real/*`
-artifact 混表；`tb_vs_harness_scale_check.csv` 给出三条对照（如 v9b@11K: TB 0.3385 vs harness
+artifact 混表；`tb_vs_harness_scale_check.csv` 给出三条对照（如 Stats+HP-FC / v9b@11K: TB 0.3385 vs harness
 1.7662）。
 
 ### D.1.1 T1 主表精选列
@@ -18,44 +18,44 @@ artifact 混表；`tb_vs_harness_scale_check.csv` 给出三条对照（如 v9b@1
 | drizzle | — | 0.023 | 1.138 | 0.771 | 0.439 | 0.564 | 0.765 | 0.001 | 0.481 | 45 |
 | MAP-TV (5x) | — | 0.024 | 2.333 | 0.438 | 0.965 | 0.955 | 0.947 | 0.002 | 0.352 | 42 |
 | TGV | — | 0.032 | 0.695 | 0.741 | 0.975 | 0.969 | 0.955 | 0.011 | 0.999 | 40 |
-| v6 hot loss | 8K | 0.051 | 1.789 | 0.774 | 0.752 | 0.761 | 0.217 | 0.001 | 0.656 | 40 |
-| v8.1a | 15K | 0.073 | 1.943 | 0.758 | 0.711 | 0.660 | 0.429 | 0.001 | 0.864 | 40 |
-| v9b band | 11K | 0.054 | 1.766 | 0.777 | 0.744 | 0.741 | 0.197 | 0.001 | 0.698 | 40 |
-| v9d full | 7K | 0.054 | 1.726 | 0.771 | 0.744 | 0.708 | 0.150 | 0.001 | 0.697 | 40 |
-| V9A hybrid | 10K | 0.054 | 1.762 | 0.719 | 0.945 | 0.870 | 0.190 | 0.001 | 0.683 | 40 |
-| V9C legal hybrid | 5K | 0.064 | 1.669 | 0.718 | 0.891 | 0.769 | 0.195 | 0.001 | 0.766 | 40 |
-| V10 λ=1.2 | 15K | 0.041 | 2.726 | 0.711 | 0.986 | 0.984 | 0.979 | 0.013 | 0.968 | 40 |
+| HotLoss | 8K | 0.051 | 1.789 | 0.774 | 0.752 | 0.761 | 0.217 | 0.001 | 0.656 | 40 |
+| Stats | 15K | 0.073 | 1.943 | 0.758 | 0.711 | 0.660 | 0.429 | 0.001 | 0.864 | 40 |
+| Stats+HP-FC | 11K | 0.054 | 1.766 | 0.777 | 0.744 | 0.741 | 0.197 | 0.001 | 0.698 | 40 |
+| Stats+Full-FC | 7K | 0.054 | 1.726 | 0.771 | 0.744 | 0.708 | 0.150 | 0.001 | 0.697 | 40 |
+| Hybrid | 10K | 0.054 | 1.762 | 0.719 | 0.945 | 0.870 | 0.190 | 0.001 | 0.683 | 40 |
+| Hybrid+Native-FC | 5K | 0.064 | 1.669 | 0.718 | 0.891 | 0.769 | 0.195 | 0.001 | 0.766 | 40 |
+| Hybrid+ResObs (λ=1.2) | 15K | 0.041 | 2.726 | 0.711 | 0.986 | 0.984 | 0.979 | 0.013 | 0.968 | 40 |
 
 边界说明：MAP-TV 是预计算 5x anchor；TGV 的 split/FRC 列已用独立 TGV half-set 重建回填
 （`output/ep11_unified_harness/tgv_split_frc.json`，seed 42；full-run self-check 相对 L2 = 0.0），
 不再是 EP16 drizzle proxy。该 FRC 仍是 split-consistency proxy，不是物理分辨率证据。
-V10/V9A/V9C 的缓存均值约 23°C，说明 hybrid/V10 推理没有漏加 drizzle base。
+Hybrid+ResObs / Hybrid / Hybrid+Native-FC（run ids: V10/V9A/V9C）的缓存均值约 23°C，说明 hybrid / ResObs 推理没有漏加 drizzle base。
 
 ### D.1.2 T2 input × anchor 精选列
 
 | 方法 | input | anchor/参数化 | step | split↓ | artifact↓ | corr↑ | FRC16↑ | FRC14↑ | FRC12↑ | sharp↑ |
 |---|---|---|---:|---:|---:|---:|---:|---:|---:|---:|
-| v8.1a | 1x stats | none | 15K | 0.073 | 1.943 | 0.758 | 0.711 | 0.660 | 0.429 | 0.864 |
-| v8.1b | 1x stats | PixelShuffle control | 5K | 0.050 | 1.782 | 0.739 | 0.734 | 0.692 | 0.392 | 0.682 |
-| v9b | 1x stats | band-limited 0.1 | 11K | 0.054 | 1.766 | 0.777 | 0.744 | 0.741 | 0.197 | 0.698 |
-| v9d | 1x stats | full-band 0.1 | 7K | 0.054 | 1.726 | 0.771 | 0.744 | 0.708 | 0.150 | 0.697 |
-| V9A | hybrid drizzle2x | none | 10K | 0.054 | 1.762 | 0.719 | 0.945 | 0.870 | 0.190 | 0.683 |
-| V9C | hybrid drizzle2x | legal 1x anchor | 5K | 0.064 | 1.669 | 0.718 | 0.891 | 0.769 | 0.195 | 0.766 |
-| V10 | hybrid drizzle2x | residual λ=1.2 | 15K | 0.041 | 2.726 | 0.711 | 0.986 | 0.984 | 0.979 | 0.968 |
+| Stats | 1x stats | none | 15K | 0.073 | 1.943 | 0.758 | 0.711 | 0.660 | 0.429 | 0.864 |
+| Stats+PixelShuffle | 1x stats | PixelShuffle control | 5K | 0.050 | 1.782 | 0.739 | 0.734 | 0.692 | 0.392 | 0.682 |
+| Stats+HP-FC | 1x stats | HP-FC 0.1 | 11K | 0.054 | 1.766 | 0.777 | 0.744 | 0.741 | 0.197 | 0.698 |
+| Stats+Full-FC | 1x stats | Full-FC 0.1 | 7K | 0.054 | 1.726 | 0.771 | 0.744 | 0.708 | 0.150 | 0.697 |
+| Hybrid | hybrid drizzle2x | none | 10K | 0.054 | 1.762 | 0.719 | 0.945 | 0.870 | 0.190 | 0.683 |
+| Hybrid+Native-FC | hybrid drizzle2x | Native-FC 0.1 | 5K | 0.064 | 1.669 | 0.718 | 0.891 | 0.769 | 0.195 | 0.766 |
+| Hybrid+ResObs | hybrid drizzle2x | ResObs λ=1.2 | 15K | 0.041 | 2.726 | 0.711 | 0.986 | 0.984 | 0.979 | 0.968 |
 
 读数：输入端引入 drizzle2x 证据能改变 fine-window 结构权衡，但不是自动保真胜利；loss-side
-anchor 在 1x/full/band/legal-hybrid 变体中均未压平真实数据漂移。V10 把 sharp/FRC 推高，同时
+anchor 在 1x/full/band/legal-hybrid 变体中均未压平真实数据漂移。Hybrid+ResObs（V10）把 sharp/FRC 推高，同时
 artifact 与 corr 变差；它是可调 trade-off，不是可认证赢家。
 
 ---
 
 ## D.2 FRC 完整档案
 
-本节归档主文 §5.1 中 FRC 分析的全部数值结果，方法学细节见 A.4。
+本节归档 FRC 分析的全部数值结果，方法学细节见 A.4。
 
 ### D.2.1 主曲线与 cutoff
 
-$1/7$ cutoff 为 **17.03 µm**（3-seed 均值曲线），逐 seed 分别为 16.17/16.17/17.03 µm（std = 0.50 µm），half-bit 判据给出相同值。控制组 cutoff 为：bicubic 正控 13.58 µm（未通过预期）、漂移控制 26.20 µm；zero-coverage 均值 27.2%、最大 36.2%。频带全表与控制组详细分析见 A.4.3 和 A.4.4。
+$1/7$ cutoff 为 17.03 µm（3-seed 均值曲线），逐 seed 分别为 16.17/16.17/17.03 µm（std = 0.50 µm），half-bit 判据给出相同值。控制组 cutoff 为：bicubic 正控 13.58 µm（未通过预期）、漂移控制 26.20 µm；zero-coverage 均值 27.2%、最大 36.2%。频带全表与控制组详细分析见 A.4.3 和 A.4.4。
 
 ### D.2.2 MAP-TV 前后 split-half 对照
 
@@ -63,7 +63,7 @@ $1/7$ cutoff 为 **17.03 µm**（3-seed 均值曲线），逐 seed 分别为 16.
 
 ### D.2.3 Zigzag 轮廓指标
 
-MAP-TV 锚在 zigzag 剖面上的结构收益有限：中位 FWHM 从 114 µm 缩窄至 100 µm，dip 从 0.929 微升至 0.934，3/3 剖面保持分离但改善不均（2 条变宽、1 条显著变窄）。论文措辞限定为 "limited contour enhancement"。
+MAP-TV 基准在 zigzag 剖面上的结构收益有限：中位 FWHM 从 114 µm 缩窄至 100 µm，dip 从 0.929 微升至 0.934，3/3 剖面保持分离但改善不均（2 条变宽、1 条显著变窄）。论文措辞限定为 "limited contour enhancement"。
 
 ---
 
@@ -71,9 +71,9 @@ MAP-TV 锚在 zigzag 剖面上的结构收益有限：中位 FWHM 从 114 µm �
 
 ### D.3.1 全局漂移指标
 
-下表记录了各臂在训练期间真实数据 eval（TB-scale，248 帧 contour\_refined）上的 artifact（$\downarrow$）与 raw\_control\_corr（$\uparrow$）轨迹：
+下表记录了各变体在训练期间真实数据 eval（TB-scale，248 帧 contour\_refined）上的 artifact（$\downarrow$）与 raw\_control\_corr（$\uparrow$）轨迹：
 
-| step | v8.1a | V9A | V9B | V9D | V9C |
+| step | Stats | Hybrid | Stats+HP-FC | Stats+Full-FC | Hybrid+Native-FC |
 |---|---|---|---|---|---|
 | 10K | 0.390 / 0.756 | 0.446 / 0.719 | 0.369 / 0.758 | 0.379 / 0.758 | 0.516 / 0.714 |
 | 20K | 0.476 / 0.729 | 0.514 / 0.702 | 0.486 / 0.735 | 0.575 / 0.642 | 0.689 / 0.655 |
@@ -81,7 +81,7 @@ MAP-TV 锚在 zigzag 剖面上的结构收益有限：中位 FWHM 从 114 µm �
 | 40K | 0.627 / 0.698 | 0.656 / 0.665 | 0.640 / 0.697 | 0.672 / 0.681 | 0.688 / 0.672 |
 | 60K | 0.643 / 0.689 | 0.646 / 0.669 | 0.655 / 0.688 | 0.677 / 0.677 | 0.695 / 0.669 |
 
-从轨迹形状看，V9A 是唯一在 30K→60K 段漂移趋平的臂（变化量 −0.014/+0.007，其余单调恶化）。V9D 比 V9B 更差且 1K–28K 段震荡剧烈。V9C 在 30K 后没有恢复，60K 端点为 0.695/0.669，说明 hybrid 输入下的合法 1x anchor 也不能压平漂移。需要强调的是，hybrid 臂（V9A/V9C）与 1x 臂的 proxy 不可跨列横比（见 A.3.2），此处只看各臂轨迹形状。
+从轨迹形状看，Hybrid（V9A）是唯一在 30K→60K 段漂移趋平的变体（变化量 −0.014/+0.007，其余单调恶化）。Stats+Full-FC（V9D）比 Stats+HP-FC（V9B）更差且 1K–28K 段震荡剧烈。Hybrid+Native-FC（V9C）在 30K 后没有恢复，60K 端点为 0.695/0.669，说明 hybrid 输入下的合法 1x anchor 也不能压平漂移。需要强调的是，hybrid 变体（Hybrid / Hybrid+Native-FC）与 1x 变体的 proxy 不可跨列横比（见 A.3.2），此处只看各变体轨迹形状。
 
 ### D.3.2 Fine-window 训练时间轴
 
@@ -89,9 +89,9 @@ MAP-TV 锚在 zigzag 剖面上的结构收益有限：中位 FWHM 从 114 µm �
 
 两个参照点为：drizzle 输入通道 $(1.000, 0.503)$——观测域上限（模糊但零幻觉）；TGV $(0.960, 0.959)$——经典前沿工作点。
 
-V9A 的训练时间轴揭示了一个关键现象——**30K 保真悬崖**。V9A 10K 的 $\text{hp\_corr\_input}$ 为 0.970，20K 达峰 0.974，此后断崖下跌：30K 降至 0.908 并在 40K–60K 焊死于 $0.906 \pm 0.001$。同时，锐度 $\text{sharp\_p95}$ 在 30K 后超过 TGV（1.147 vs 0.959），并在 40K–60K 继续攀升至 1.21–1.25——锐度超过 TGV 的区间恰好与去相关重合，指示过冲为幻觉驱动。对照 v8.1a 60K 同窗口为 0.926/0.936，V9A 60K（0.925/0.935）与之无差别——hybrid 早期增益被训练后期完全抹平。
+Hybrid（V9A）的训练时间轴揭示了一个关键现象——30K 保真悬崖。Hybrid 10K 的 $\text{hp\_corr\_input}$ 为 0.970，20K 达峰 0.974，此后断崖下跌：30K 降至 0.908 并在 40K–60K 焊死于 $0.906 \pm 0.001$。同时，锐度 $\text{sharp\_p95}$ 在 30K 后超过 TGV（1.147 vs 0.959），并在 40K–60K 继续攀升至 1.21–1.25——锐度超过 TGV 的区间恰好与去相关重合，指示过冲为幻觉驱动。对照 Stats（v8.1a）60K 同窗口为 0.926/0.936，Hybrid 60K（0.925/0.935）与之无差别——hybrid 早期增益被训练后期完全抹平。
 
-需注意 V9A 的 35K 中断（batch size 从 128 切换至 64）与悬崖时间重合，混杂尚未排除（见 C.3）。
+需注意 Hybrid（V9A）的 35K 中断（batch size 从 128 切换至 64）与悬崖时间重合，混杂尚未排除（见 C.3）。
 
 Fine-window 是局部诊断窗口，依赖 TGV 参照，独立性低于 FRC/proxy 对——仅用于归因与选型，不替代全局评估协议。
 
@@ -99,27 +99,27 @@ Fine-window 是局部诊断窗口，依赖 TGV 参照，独立性低于 FRC/prox
 
 ## D.4 负结果档案
 
-本节完整记录四项负结果，为主文 §6.7 提供数据背书。每项按「现象 → 数字 → 结论边界」结构组织。
+本节完整记录四项负结果，为主文 §5.4 提供数据背书。每项按「现象 → 数字 → 结论边界」结构组织。
 
 ### D.4.1 PixelShuffle HR 头
 
-v8.1b 使用 pixelshuffle HR 头替代默认的 bilinear 头（其余与 v8.1a 相同），出现了中等边框间条纹状亮色伪影，锯齿未改善，中心细线模糊程度与 bilinear 头相同。TB-scale 数据显示 artifact 全程高于 v8.1a（0.413→0.709 vs 0.390→0.643），corr 全程更低（0.747→0.667 vs 0.758→0.689）。
+Stats+PixelShuffle（v8.1b）使用 pixelshuffle HR 头替代默认的 bilinear 头（其余与 Stats / v8.1a 相同），出现了中等边框间条纹状亮色伪影，锯齿未改善，中心细线模糊程度与 bilinear 头相同。TB-scale 数据显示 artifact 全程高于 Stats（0.413→0.709 vs 0.390→0.643），corr 全程更低（0.747→0.667 vs 0.758→0.689）。
 
-结论边界：head 归因失败——中心细线瓶颈不在解码头。该结果与 v8.1a 的 loss-cooldown 对照共同构成主文 §6.3 的两臂归因：细线模糊对 loss 温度和 head 均不敏感，指向输入信息瓶颈。
+结论边界：head 归因失败——中心细线瓶颈不在解码头。该结果与 Stats（v8.1a）的 loss-cooldown 对照共同构成主文 §5.3 的两个对照归因：细线模糊对 loss 温度和 head 均不敏感，指向输入信息瓶颈。
 
 ### D.4.2 4x 网络
 
 EP12 4x 网络在所有指标上均劣于 EP07 2x 上采样方案：raw-control highpass Pearson 0.223 vs 0.389，artifact 0.535 vs 0.472。
 
-该实验结果与 A.1.3 的理论预测互证：4x Nyquist MTF $\le 0.042$（$\sigma = 0.2$），$\sigma \ge 0.35$ 时接近零；相位 bin 在 3x/4x 网格出现 collapse（见 B.2.3）。4x 无真实增益且理论上不应有——这是「先第一性原理后实验」工作流的展示案例。
+该实验结果与 A.1.3 的理论预测一致：4x Nyquist MTF $\le 0.042$（$\sigma = 0.2$），$\sigma \ge 0.35$ 时接近零；相位 bin 在 3x/4x 网格出现 collapse（见 B.2.3）。4x 无真实增益且理论上不应有——这是「先第一性原理后实验」工作流的展示案例。
 
-### D.4.3 Forward 锚定（V9B band + V9D full + V9C legal hybrid）
+### D.4.3 Forward 锚定（Stats+HP-FC / Stats+Full-FC / Hybrid+Native-FC）
 
-这些锚定臂的漂移曲线与无锚 v8.1a 几乎重合。V9B 的 forward loss 自 10K 步起贴底于 0.004–0.009，同期 artifact 持续上爬。V9B 40K→60K 漂移 +0.0145/−0.0082 vs v8.1a +0.016/−0.009，几乎完全重合。V9D 60K（0.677/0.677）劣于 V9B（0.655/0.688），且 1K–28K 段剧烈震荡——复现了全频低通梯度冲突的已知问题。
+这些锚定变体的漂移曲线与无锚 Stats（v8.1a）几乎重合。Stats+HP-FC（V9B）的 forward loss 自 10K 步起贴底于 0.004–0.009，同期 artifact 持续上爬。Stats+HP-FC 40K→60K 漂移 +0.0145/−0.0082 vs Stats +0.016/−0.009，几乎完全重合。Stats+Full-FC（V9D）60K（0.677/0.677）劣于 Stats+HP-FC（0.655/0.688），且 1K–28K 段剧烈震荡——复现了全频低通梯度冲突的已知问题。
 
-V9C 是最后一条反对意见检验：在 hybrid 输入含 2x drizzle 证据的条件下，forward anchor 不再偷用上采样 mean，而是通过数据管线携带合法的 1x aligned-mean patch。结果仍为 0.516/0.714 @10K → 0.695/0.669 @60K，未压平后期漂移。
+Hybrid+Native-FC（V9C）是最后一条反对意见检验：在 hybrid 输入含 2x drizzle 证据的条件下，forward anchor 不再偷用上采样 mean，而是通过数据管线携带合法的 1x aligned-mean patch。结果仍为 0.516/0.714 @10K → 0.695/0.669 @60K，未压平后期漂移。
 
-结论边界：无论频带选择和输入证据路径如何，1x 观测域锚定对真实漂移不可见——机制即 A.2.3 Proposition 1。V9D 关闭了「band 太窄」的反对意见；V9C 关闭了「hybrid 第 0 通道不是合法 1x 观测」的反对意见。loss-side anchoring route 在 band/full/legal-hybrid 三种变体下正式关闭。
+结论边界：无论频带选择和输入证据路径如何，1x 观测域锚定对真实漂移不可见——机制即 A.2.3 Proposition 1。Stats+Full-FC（V9D）关闭了「band 太窄」的反对意见；Hybrid+Native-FC（V9C）关闭了「hybrid 第 0 通道不是合法 1x 观测」的反对意见。loss-side anchoring route 在 HP-FC / Full-FC / Native-FC 三种变体下正式关闭。
 
 ### D.4.4 AVI 作 SR 输入
 
@@ -129,11 +129,13 @@ V9C 是最后一条反对意见检验：在 hybrid 输入含 2x drizzle 证据�
 
 ## D.5 帧预算与鲁棒性
 
-本节报告 EP16 的三组经典臂实验：E1 帧数预算、E2 shift 扰动、E3 对齐源消融。共 37 个 unique run 全部成功。注意这是推理期稳定性研究，不属于统一 harness。
+本节报告 EP16 的三组经典方法实验：E1 帧数预算、E2 shift 扰动、E3 对齐源消融。共 37 个 unique run 全部成功。注意这是推理期稳定性研究，不属于统一 harness。该轨迹图原为主文 F7，现移至此处仅作 supp 参照。
+
+![图 D-F7：帧数预算（左）与 shift 扰动鲁棒性（右）。Drizzle 的 raw-control corr 多数增益在 $N = 62$ 即出现，FRC/split-half proxy 随更多相位覆盖继续改善；TGV 全程 artifact 低于 drizzle 但 corr 非单调。横轴对应 $N \in \{31,62,124,248\}$ 与 $\sigma \in \{0,0.05,0.1,0.2\}$ px，详见下表。](../../../output/paper_figures/fig07_budget_robustness.png)
 
 ### D.5.1 帧数预算
 
-帧数预算实验使用 phase-stratified 子集（$N \in \{31, 62, 124, 248\}$，seeds 101/202/303），drizzle 和 TGV 两臂：
+帧数预算实验使用 phase-stratified 子集（$N \in \{31, 62, 124, 248\}$，seeds 101/202/303），覆盖 drizzle 和 TGV 两种经典方法：
 
 | 方法 | $N$ | corr | split-half NRMSE | artifact | FRC@16 µm | zigzag FWHM (µm) |
 |---|---:|---:|---:|---:|---:|---:|
@@ -160,23 +162,27 @@ Drizzle corr 的增益大半在 $N = 62$ 前到位（0.747→0.772），之后�
 
 将 command\_prior 与 contour\_refined 两种对齐源的端到端效果作比：drizzle corr 从 0.662 升至 0.771（+0.109），FRC@16 从 0.0166 升至 0.479；TGV corr 从 0.642 升至 0.741（+0.099）。
 
-数据驱动对齐对两个经典臂都带来约 +0.10 corr 的端到端增益，FRC@16 从几乎为零到 0.479——这是 B.2 对齐链投入的最终回报证据。
+数据驱动对齐对两个经典方法都带来约 +0.10 corr 的端到端增益，FRC@16 从几乎为零到 0.479——这是 B.2 对齐链投入的最终回报证据。
 
 ---
 
-## D.6 视觉 gate panel
+## D.6 视觉审查 panel
 
-已有 EP11 四臂（v6、v8.1a、v8.1b、v9b）的 checkpoint 选择 panel：每臂 canonical + 60K 对照的温度域三联图，标注 proxy 值。v8.1b 行保留条纹伪影证据。主文 F5 已补 V9A late 60K 与 V10 λ=1.2@15K 的双域视觉 gate：`output/paper_figures/fig05_main_visual.{png,pdf}`。V9C 的 step 序列 panel 可作为 supp 选图补充，不是主文硬门槛。
+已有 EP11 四个变体（HotLoss、Stats、Stats+PixelShuffle、Stats+HP-FC）的 checkpoint 选择 panel：每个变体 canonical + 60K 对照的温度域三联图，标注 proxy 值。Stats+PixelShuffle 行保留条纹伪影证据。主文 F5 已补 Hybrid late endpoint 60K 与 Hybrid+ResObs λ=1.2@15K 的双域视觉审查，并把中心 ROI 与 held-out ROI2 合成 4 行图：`output/paper_figures/fig05_combined_visual.{png,pdf}`。Hybrid+Native-FC 的 step 序列 panel 可作为 supp 选图补充，不是主文硬门槛。
+
+Hybrid 输入变体（V9A）的单独漂移轨迹（原主文 companion，因 proxy 跨输入模式不可横比移至此处）：
+
+![图 S-F3：Hybrid 输入漂移轨迹（companion；run id: V9A）。artifact / corr vs 训练步数，纵轴尺度仅在 Hybrid 自身轨迹内可比，不能与 $1\times$ 输入变体横向比较。Hybrid 非单调、晚期压平但平台仍低于早期 checkpoint——输入端证据注入改变漂移形态、不消除先验侵蚀。](../../../output/paper_figures/fig03s_v9a_trajectory.png)
 
 ---
 
 ## D.7 零训练融合 baseline
 
-本节建立一个无需额外训练的简单 baseline：对经典重建（锚）与学习臂输出做事后线性融合，测试学习臂的增益是否超出后处理可得的范围。
+本节建立一个无需额外训练的简单 baseline：对经典重建（锚）与学习方法输出做事后线性融合，测试学习方法的增益是否超出后处理可得的范围。
 
 ### D.7.1 方法
 
-融合公式为 $\text{fused}(\lambda) = (1-\lambda) \cdot \text{anchor} + \lambda \cdot \hat{x}_{\text{unet}}$，$\lambda \in \{0, 0.1, \ldots, 1.0\}$。锚选择 drizzle 2x mean（248 帧 contour\_refined）或 TGV。UNet 预测使用 V9A 20K（最保真）和 V9A 60K（最锐）。评估指标为 D.3.2 的 fine-window 四指标。
+融合公式为 $\text{fused}(\lambda) = (1-\lambda) \cdot \text{anchor} + \lambda \cdot \hat{x}_{\text{unet}}$，$\lambda \in \{0, 0.1, \ldots, 1.0\}$。锚选择 drizzle 2x mean（248 帧 contour\_refined）或 TGV。UNet 预测使用 Hybrid（V9A）20K（最保真）和 Hybrid（V9A）60K（最锐）。评估指标为 D.3.2 的 fine-window 四指标。
 
 E3 追加了第二个固定验证窗，入口为
 `algos/ep07_unet_sr/scripts/v9_review/run_fusion_window2.py`，运行时显式设置
@@ -186,19 +192,19 @@ rows 384:518, cols 478:674；第二窗保持同尺寸与同列，向下平移一
 
 ### D.7.2 结果
 
-原 fine-window 上，TGV 锚 × V9A-60K 的低 $\lambda$ 组合形成一段局部 proxy-frontier。$\lambda = 0.2$ 时四指标为 hp\_corr\_input = 0.963（TGV 参照 0.960）、hp\_corr\_tgv = 0.995、sharp\_p95 = 0.968（TGV 参照 0.959）、lattice = 0.0108（TGV 参照 0.0169）。这说明在该局部窗口内，少量 V9A-60K 高频内容可以改善 fine-window proxy 读数；但该读数依赖 TGV/highpass 参照与同窗 $\lambda$ 选择，不是 GT 保真或物理分辨率证据。
+原 fine-window 上，TGV 锚 × Hybrid-60K（V9A）的低 $\lambda$ 组合形成一段局部 proxy-frontier。$\lambda = 0.2$ 时四指标为 hp\_corr\_input = 0.963（TGV 参照 0.960）、hp\_corr\_tgv = 0.995、sharp\_p95 = 0.968（TGV 参照 0.959）、lattice = 0.0108（TGV 参照 0.0169）。这说明在该局部窗口内，少量 Hybrid-60K 高频内容可以改善 fine-window proxy 读数；但该读数依赖 TGV/highpass 参照与同窗 $\lambda$ 选择，不是 GT 保真或物理分辨率证据。
 
 第二窗结果位于 `output/ep07_v9_review/fusion_window2_metrics.csv` 与
-`fusion_window2_summary.md`。第二窗局部参照为 drizzle = (hp\_corr\_input 1.000, sharp\_p95 0.427, lattice 0.0036)，TGV = (0.962, 0.491, 0.0160)。按同一选择规则（TGV 锚 × V9A-60K、$\lambda > 0$，要求 hp\_corr\_input 与 sharp\_p95 不低于本窗 TGV、lattice 不高于本窗 TGV，并以 hp\_corr\_input 优先排序），重选得到 $\lambda = 0.1$：hp\_corr\_input = 0.964、hp\_corr\_tgv = 0.998、sharp\_p95 = 0.508、lattice = 0.0126。$\lambda = 0.2$ 也通过同一 gate（0.964 / 0.994 / 0.525 / 0.0100），但因 hp\_corr\_input 略低而排第二。
+`fusion_window2_summary.md`。第二窗局部参照为 drizzle = (hp\_corr\_input 1.000, sharp\_p95 0.427, lattice 0.0036)，TGV = (0.962, 0.491, 0.0160)。按同一选择规则（TGV 锚 × Hybrid-60K、$\lambda > 0$，要求 hp\_corr\_input 与 sharp\_p95 不低于本窗 TGV、lattice 不高于本窗 TGV，并以 hp\_corr\_input 优先排序），重选得到 $\lambda = 0.1$：hp\_corr\_input = 0.964、hp\_corr\_tgv = 0.998、sharp\_p95 = 0.508、lattice = 0.0126。$\lambda = 0.2$ 也通过同一 gate（0.964 / 0.994 / 0.525 / 0.0100），但因 hp\_corr\_input 略低而排第二。
 
-相比之下，drizzle 锚 × V9A 的任意 $\lambda$ 都没有形成同类前沿点：drizzle 参照本身保真极高，但锐度始终不足。
+相比之下，drizzle 锚 × Hybrid 的任意 $\lambda$ 都没有形成同类前沿点：drizzle 参照本身保真极高，但锐度始终不足。
 
-V10 高-$\lambda$ 工作点的相对位置跨窗保持一致：原窗 $\lambda = 1.2$ @15K 为 hp\_corr\_input = 0.922、sharp\_p95 = 0.987、lattice = 0.0141；第二窗为 hp\_corr\_input = 0.920、sharp\_p95 = 0.501、lattice = 0.0130。两窗中 V10 均低于对应 TGV 的 hp\_corr\_input（0.960/0.962），同时 lattice 低于 TGV、sharp\_p95 接近或略高于 TGV。这支持“V10 是低 grain / 较锐但保真不足的折中点”这一 proxy 位置判断，而不是可认证胜出。
+Hybrid+ResObs（V10）高-$\lambda$ 工作点的相对位置跨窗保持一致：原窗 $\lambda = 1.2$ @15K 为 hp\_corr\_input = 0.922、sharp\_p95 = 0.987、lattice = 0.0141；第二窗为 hp\_corr\_input = 0.920、sharp\_p95 = 0.501、lattice = 0.0130。两窗中 Hybrid+ResObs 均低于对应 TGV 的 hp\_corr\_input（0.960/0.962），同时 lattice 低于 TGV、sharp\_p95 接近或略高于 TGV。这支持“Hybrid+ResObs 是低 grain / 较锐但保真不足的折中点”这一 proxy 位置判断，而不是可认证胜出。
 
 ### D.7.3 结论与边界
 
-第一，零训练线性融合是一个必须报告的强 sanity baseline：在两个非重叠局部窗口中，TGV 锚 × V9A-60K 的低 $\lambda$ 点都能进入相对 TGV 的 proxy-frontier 区域。第二，最优 $\lambda$ 不完全跨窗稳定（0.2 → 0.1），因此不能把单窗最优点写成稳定算法结论；更稳妥的表述是“低 $\lambda$ TGV-anchored 融合在局部 proxy 上构成对学习臂的挑战”。
+第一，零训练线性融合是一个必须报告的强 sanity baseline：在两个非重叠局部窗口中，TGV 锚 × Hybrid-60K 的低 $\lambda$ 点都能进入相对 TGV 的 proxy-frontier 区域。第二，最优 $\lambda$ 不完全跨窗稳定（0.2 → 0.1），因此不能把单窗最优点写成稳定算法结论；更稳妥的表述是“低 $\lambda$ TGV-anchored 融合在局部 proxy 上构成对学习方法的挑战”。
 
-V10 高-λ sweep 的最佳工作点仍按 $\lambda = 1.2$ @15K 报告：原窗 hp\_corr\_input = 0.922、sharp\_p95 = 0.987、lattice = 0.0141；第二窗 hp\_corr\_input = 0.920、sharp\_p95 = 0.501、lattice = 0.0130。它满足“低 grain、锐度不低于 TGV 局部读数”的 proxy 判据，但保真仍低于 TGV，因此不构成可认证胜出。
+Hybrid+ResObs 高-λ sweep 的最佳工作点仍按 $\lambda = 1.2$ @15K 报告：原窗 hp\_corr\_input = 0.922、sharp\_p95 = 0.987、lattice = 0.0141；第二窗 hp\_corr\_input = 0.920、sharp\_p95 = 0.501、lattice = 0.0130。它满足“低 grain、锐度不低于 TGV 局部读数”的 proxy 判据，但保真仍低于 TGV，因此不构成可认证胜出。
 
 边界必须保留：fine-window 与第二窗都是局部 ROI，指标依赖 TGV/highpass 参照而非 GT；$\lambda$ 是在同一真实数据窗口上重选，仍有 selection-on-test caveat；`sharp_p95` 不度量轮廓连续性且可受 beading/grain 影响。D.7 的结论只用于 proxy 稳定性与 baseline 压力测试，不能外推为温度计量、物理分辨率或单一方法胜出声明。

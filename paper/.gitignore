@@ -7,8 +7,10 @@
 *.log
 *.nav
 *.out
-*.pdf
 *.snm
 *.synctex.gz
 *.toc
 
+# Compiled document outputs only; figure PDFs are tracked build assets.
+main.pdf
+supp.pdf

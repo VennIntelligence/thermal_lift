@@ -1,8 +1,8 @@
-"""Supplementary figure S-F10: V9A fine-window evolution strip (temperature domain).
+"""Supplementary figure S-F10: Hybrid fine-window evolution strip (temperature domain).
 
 A 3x3 panel grid on the center fine-line window (2x grid rows 384:518,
-cols 478:674): classical TGV reference, the 1x-input UNet endpoint (v8.1a 60K),
-and the V9A checkpoint sequence 5K-60K.  Each panel is annotated with the
+cols 478:674): classical TGV reference, the 1x-input UNet endpoint (Stats 60K),
+and the Hybrid checkpoint sequence (V9A run id) 5K-60K.  Each panel is annotated with the
 fine-window fidelity (hp_corr_input) and sharpness proxy (sharp_p95).
 
 Each panel is normalized to its own robust 1-99 percentile range: the
@@ -41,14 +41,14 @@ COLS = slice(478, 674)
 
 PANELS = [
     ("tgv", "TGV (classical ref.)", TGV_NPY),
-    ("v8_1a_60k", "v8.1a 60K (1x input)", CACHE_DIR / "v8_1a_60k_step60000_temperature.npy"),
-    ("v9a_5k", "V9A 5K", CACHE_DIR / "v9a_5k_step5000_temperature.npy"),
-    ("v9a_10k", "V9A 10K", CACHE_DIR / "v9a_10k_step10000_temperature.npy"),
-    ("v9a_20k", "V9A 20K (most faithful)", CACHE_DIR / "v9a_20k_step20000_temperature.npy"),
-    ("v9a_25k", "V9A 25K", CACHE_DIR / "v9a_25k_step25000_temperature.npy"),
-    ("v9a_30k", "V9A 30K (fidelity cliff)", CACHE_DIR / "v9a_30k_step30000_temperature.npy"),
-    ("v9a_40k", "V9A 40K", CACHE_DIR / "v9a_40k_step40000_temperature.npy"),
-    ("v9a_60k", "V9A 60K", CACHE_DIR / "v9a_60k_step60000_temperature.npy"),
+    ("v8_1a_60k", "Stats 60K (1x input)", CACHE_DIR / "v8_1a_60k_step60000_temperature.npy"),
+    ("v9a_5k", "Hybrid 5K", CACHE_DIR / "v9a_5k_step5000_temperature.npy"),
+    ("v9a_10k", "Hybrid 10K", CACHE_DIR / "v9a_10k_step10000_temperature.npy"),
+    ("v9a_20k", "Hybrid 20K (most faithful)", CACHE_DIR / "v9a_20k_step20000_temperature.npy"),
+    ("v9a_25k", "Hybrid 25K", CACHE_DIR / "v9a_25k_step25000_temperature.npy"),
+    ("v9a_30k", "Hybrid 30K (fidelity cliff)", CACHE_DIR / "v9a_30k_step30000_temperature.npy"),
+    ("v9a_40k", "Hybrid 40K", CACHE_DIR / "v9a_40k_step40000_temperature.npy"),
+    ("v9a_60k", "Hybrid 60K", CACHE_DIR / "v9a_60k_step60000_temperature.npy"),
 ]
 
 

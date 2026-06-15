@@ -1,0 +1,97 @@
+\section{第一幕：把问题问清楚}
+
+% ---------------------------------------------------------------- 三问框架
+\begin{frame}{三问框架：把“能不能 SR”拆成可检验的三步}
+  \begin{block}{Q1 —— 信息\textbf{在不在}？}
+    多帧观测序列里，是否\textbf{确实携带}超出单帧分辨率的可恢复高频信息？
+    \hfill{\footnotesize（理论 MTF + 实证 FRC 定界）}
+  \end{block}
+  \begin{block}{Q2 —— 信息\textbf{送没送到}？}
+    学习模型是否\textbf{真正接收}到亚像素相位信息，还是在输入编码阶段就被抹掉了？
+    \hfill{\footnotesize（输入表示消融）}
+  \end{block}
+  \begin{block}{Q3 —— 新细节\textbf{忠不忠于观测}？}
+    模型新增的细节，是否\textbf{锚定于观测}，还是自由发挥的幻觉？
+    \hfill{\footnotesize（零空间漂移诊断——全文核心）}
+  \end{block}
+  \takeaway{三问层层递进：信息存在 $\to$ 信息送达 $\to$ 信息忠实；任何一步断裂，“更清晰”都不成立。}
+\end{frame}
+
+% ---------------------------------------------------------------- 前向模型 + 标定
+\begin{frame}{原理与标定：一个参数全部实测的前向模型}
+  \centering
+  \[
+    y_k \;=\; D\,B\,H\,S_{t_k}\,x \;+\; n_k,\qquad k=1,\ldots,K=248
+  \]
+  \begin{columns}[T]
+    \begin{column}{0.46\textwidth}
+      \scriptsize
+      \begin{tabular}{@{}ll@{}}
+        \toprule
+        算子 & 物理含义 / 标定来源 \\
+        \midrule
+        $S_{t_k}$ & 亚像素位移；$\theta=47.6^\circ$ 标定 \\
+        $H$ & Gaussian PSF；$\sigma\in[0.2,0.5]$ LR\,px \\
+        $B$ & 探测器孔径 box 积分（10\,µm pitch）\\
+        $D$ & HR$\to$LR 降采（scale\,=\,2）\\
+        $n_k$ & 读出噪声；噪声底 $0.0724\,^\circ$C \\
+        \bottomrule
+      \end{tabular}
+      \par\medskip
+      \footnotesize 堆叠 $K$ 帧得 $A=[A_1;\cdots;A_K]$，
+      其\textbf{带限衰减、混叠折叠}支配全文方法与分析。
+    \end{column}
+    \begin{column}{0.54\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.64\textheight,keepaspectratio]{fig01_observation_pipeline.pdf}
+    \end{column}
+  \end{columns}
+  \takeaway{位移先验来自台位指令，但 $t_k$ 由数据驱动精修——\redflag{台位指令是先验，不是对齐真值}。}
+\end{frame}
+
+% ---------------------------------------------------------------- 三尺度区分
+\begin{frame}{关键区分：采样间距 $\neq$ 空间分辨率 $\neq$ 输出网格}
+  \begin{columns}[T]
+    \begin{column}{0.38\textwidth}
+      \small
+      三个\textbf{不可互换}的物理量：
+      \begin{itemize}
+        \item \textbf{采样 pitch}：$10\,$µm/px（探测器到样品平面）
+        \item \textbf{空间分辨率}：$\approx 20\,$µm（衍射 + PSF + 孔径共同限制）
+        \item \textbf{SR 输出网格}：$5\,$µm（$2\times$ 网格的像素间距）
+      \end{itemize}
+      \medskip
+      右图在\textbf{同一物理距离轴}上画出三者区别。
+    \end{column}
+    \begin{column}{0.62\textwidth}
+      \centering
+      \includegraphics[width=\linewidth,height=0.74\textheight,keepaspectratio]{fig01_system_calibration.pdf}
+    \end{column}
+  \end{columns}
+  \takeaway{\redflag{更密的网格只是更细的采样格点，不等于更高的分辨率}；$2\times$ Nyquist 周期是 $10\,$µm。}
+\end{frame}
+
+% ---------------------------------------------------------------- 诚实边界
+\begin{frame}{诚实边界：我们声称什么，不声称什么}
+  \begin{columns}[T]
+    \begin{column}{0.48\textwidth}
+      {\color{cvprblue}\textbf{可以声称}}
+      \begin{itemize}
+        \small
+        \item 在 $2\times$ 输出网格上，让芯片内部结构\textbf{轮廓更清晰、更稳定}。
+        \item 数据驱动对齐精修对端到端一致性\textbf{有可测增益}。
+        \item 在显式定量门控下，$2\times$ 轮廓级增强\textbf{能存活}。
+      \end{itemize}
+    \end{column}
+    \begin{column}{0.48\textwidth}
+      {\color{warmred}\textbf{不声称}}
+      \begin{itemize}
+        \small
+        \item \redflag{$5\,$µm 空间分辨率}或\redflag{温度计量级}读数。
+        \item \redflag{$4\times$/$5\times$ 物理恢复}（更细网格只是 contour oversampling）。
+        \item 复原位于分辨率极限的\textbf{最细结构}——这由物理决定。
+      \end{itemize}
+    \end{column}
+  \end{columns}
+  \takeaway{交付物是\textbf{轮廓可见性与稳定性}，不是分辨率数字，也不是温度精度。}
+\end{frame}

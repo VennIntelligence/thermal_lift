@@ -2,7 +2,7 @@
 
 ## B.1 数据审计
 
-本节详述主文 §3.2 中 263 帧原始数据的审计链，说明如何从中筛选出 248 帧 clean set 作为 SR 的默认输入。
+本节详述主文 §3.1 所依赖的数据审计链，说明如何从 263 帧原始数据中筛选出 248 帧 clean set 作为 SR 的默认输入。
 
 ### B.1.1 审计总览
 
@@ -26,7 +26,7 @@ $$\text{is\_sr\_usable} = (\text{session} = 2) \;\wedge\; (R = 0) \;\wedge\; (48
 
 ---
 
-## B.2 对齐管线与质量门控
+## B.2 对齐管线与质量筛选
 
 ### B.2.1 两级对齐
 
@@ -34,15 +34,15 @@ $$\text{is\_sr\_usable} = (\text{session} = 2) \;\wedge\; (R = 0) \;\wedge\; (48
 
 第二级为 contour refinement：在 highpass 域提取 Sobel 梯度幅值 ≥ 93rd percentile 的边缘点（每帧最多 8000 个，确定性子采样），以最小化移动帧边缘点到参考帧边缘距离变换（EDT）的均值为目标（Chamfer 距离），在 NCC 初值 $\pm 1.0$ px 范围内以 0.25 px 步长搜索。验证时将边缘点按奇偶分为 fit 集和 holdout 集，报告的是 held-out Chamfer。
 
-对齐链逐级 held-out Chamfer 中位/P90 如下：无对齐 0.398/0.708 px → stage command prior 0.246/0.442 px → filename affine 0.170/0.204 px → NCC 初始化 0.156/0.175 px → contour refined **0.133/0.161 px**。逐帧相对 stage prior 的修正量级为中位 0.39–0.43 px，这是位移先验与数据驱动对齐之间的真实差距。全部 SR 输入默认使用 contour\_refined 位移。
+对齐链逐级 held-out Chamfer 中位/P90 如下：无对齐 0.398/0.708 px → stage command prior 0.246/0.442 px → filename affine 0.170/0.204 px → NCC 初始化 0.156/0.175 px → contour refined 0.133/0.161 px。逐帧相对 stage prior 的修正量级为中位 0.39–0.43 px，这是位移先验与数据驱动对齐之间的真实差距。全部 SR 输入默认使用 contour\_refined 位移。
 
-### B.2.2 EP04 质量门控
+### B.2.2 EP04 质量筛选
 
-为在对齐结果中区分可靠与不可靠的局部区域，EP04 在参考帧上提取了外轮廓 84 段和内轮廓 390 段，以 13 条完整 X-scanline（208 帧）逐线评估定位精度。门控阈值包括 $\mathrm{SNR} \ge 8$、$\Delta T \ge 0.5\;°\mathrm{C}$、NCC peak $\ge 0.85$、相位覆盖 $\ge 0.15$ px、拟合 $\sigma \in [0.8, 1.3]$ px、split-half $\le 0.04$（A 级）或 $\le 0.06$（B 级），以及 PSF 敏感性 $\le 0.03$。
+为在对齐结果中区分可靠与不可靠的局部区域，EP04 在参考帧上提取了外轮廓 84 段和内轮廓 390 段，以 13 条完整 X-scanline（208 帧）逐线评估定位精度。筛选阈值包括 $\mathrm{SNR} \ge 8$、$\Delta T \ge 0.5\;°\mathrm{C}$、NCC peak $\ge 0.85$、相位覆盖 $\ge 0.15$ px、拟合 $\sigma \in [0.8, 1.3]$ px、split-half $\le 0.04$（A 级）或 $\le 0.06$（B 级），以及 PSF 敏感性 $\le 0.03$。
 
 A 级定位精度的统计结果为：外轮廓 28 段，split-half 中位 0.0277 px、P90 0.0622 px、CRB ratio 中位 1.89×、NCC peak 中位 0.9825；内轮廓 139 段，split-half 中位 0.0273 px、P90 0.0847 px、CRB ratio 中位 2.03×。实测精度约为理论 CRB 下界的 2 倍（见 A.1.3），合理。
 
-通过 gate 的轮廓段按三角色划分：alignment\_input（用于对齐优化）、holdout\_validation（保留验证）和 sr\_target\_not\_truth（重建目标但非对齐真值）。外轮廓通过率 54.8%，内轮廓仅 22.3%。内轮廓的 303 个未过 gate 的段主要失败原因是 sigma\_out\_of\_range（145 段）、fit\_error（71）和 split\_half\_high（45）。这些段恰恰是重建要改善可见性的目标——它们作为 target-not-truth 使用，绝不用作对齐真值。
+通过筛选的轮廓段按三类用途划分：alignment\_input（用于对齐优化）、holdout\_validation（保留验证）和 sr\_target\_not\_truth（重建目标但非对齐真值）。外轮廓通过率 54.8%，内轮廓仅 22.3%。内轮廓的 303 个未通过筛选的段主要失败原因是 sigma\_out\_of\_range（145 段）、fit\_error（71）和 split\_half\_high（45）。这些段恰恰是重建要改善可见性的目标——它们作为 target-not-truth 使用，绝不用作对齐真值。
 
 ### B.2.3 相位覆盖
 
