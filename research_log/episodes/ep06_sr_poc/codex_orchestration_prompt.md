@@ -374,7 +374,7 @@ J(x) = (1/2N) * Σ_i ||y_i - H_i(x)||² + λ * TV(x)
    - `07_roi_analysis.py`: ROI 放大对比
    - `08_conclusions.py`: 结论和下一步
 
-4. **创建正式报告** `reports/ep06_sr_poc/sr_poc_report.md`:
+4. **创建正式报告** `paper/reports/ep06_sr_poc/sr_poc_report.md`:
    - 算法描述
    - 实验设置
    - 定量结果表

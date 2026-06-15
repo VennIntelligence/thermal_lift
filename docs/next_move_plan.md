@@ -8,7 +8,7 @@
 ---
 
 > **⚠️ 2026-06-13 更新（务必先读）**: 本文档 §5 Claim 3「前沿被 TGV 支配」与 §6「TGV 做中心细结构主证据」的措辞**已被取代**。
-> 复核发现：①V10 fine-window 评估曾漏加 drizzle base（已修复），修正后 V10 落 V9A 区、不支配 TGV；②中心细线量化显示 TGV 有 TV-staircase 珠串、学习臂 grain（lattice）最高且无 GT 不可验证——**无单一可认证赢家**。
+> 复核发现：①V10 fine-window 评估曾漏加 drizzle base（已修复），修正后 V10 落 V9A 区、不支配 TGV；②中心细线量化显示 TGV 有 TV-staircase 珠串、学习方法 grain（lattice）最高且无 GT 不可验证——**无单一可认证赢家**。
 > C4/Claim 3 的权威改写见 `docs/paper/reframe_c4_claim3.md`；高-λ 新判据见 `algos/ep07_unet_sr/scripts/run_v10_highlam.md`。
 
 ## 1. TL;DR — 三个核心发现
@@ -56,9 +56,9 @@ ch 7:   drizzle variance @2x
 
 要点：
 
-- **V9A 是唯一漂移压平的臂**（30K→60K artifact −0.014 / corr +0.007，其余臂单调恶化），但平台位置 corr 0.669 低于 v8.1a 的 0.689 → run_v9.md「corr 上升」验收在 60K 不达成。
+- **V9A 是唯一漂移压平的变体**（30K→60K artifact −0.014 / corr +0.007，其余变体单调恶化），但平台位置 corr 0.669 低于 v8.1a 的 0.689 → run_v9.md「corr 上升」验收在 60K 不达成。
 - **V9D（full band）比 V9B（highpass band）更差**且 1K–28K 剧烈震荡（如 20K artifact 0.575 后回弹），复现 ACL-005 的全频低通梯度冲突。**V9B+V9D 合并结论：loss 侧 forward 锚定路线无论 band 都已关闭**。
-- **V9C 早期证据偏负面**：20K 时 artifact 0.689（V9A 同期仅 0.514），漂得比 V9A 更快。注意 V9C 全程 bs=64、V9A 前 35K 为 bs=128，臂间不完全可比，结论以 60K 完整曲线为准。
+- **V9C 早期证据偏负面**：20K 时 artifact 0.689（V9A 同期仅 0.514），漂得比 V9A 更快。注意 V9C 全程 bs=64、V9A 前 35K 为 bs=128，变体间不完全可比，结论以 60K 完整曲线为准。
 
 ## 4. 中心细线窗口诊断（本次新增的关键证据）
 
@@ -115,7 +115,7 @@ ch 7:   drizzle variance @2x
 ## 5. 机制解读（论文 claim 草案）
 
 1. **Claim 1 — 相位信息瓶颈**：多帧亚像素 SR 的学习方法必须在输入端保留相位信息（2x 网格 drizzle 通道），1x 网格统计输入使网络上限退化为单帧锐化。证据：v8.1 A/B 中心模糊对 loss/head 不变 + V9A 早期 0.97 透传。
-2. **Claim 2 — 锚定的零空间失效**：1x forward consistency（任何 band）无法抑制真实数据漂移，因为幻觉方向位于 shift→PSF→下采样算子的零空间。证据：V9B/V9D 漂移曲线与无锚 v8.1a 重合，`loss/forward_model` 躺平地板的同时 artifact 持续上爬；V9C（hybrid 下合法 1x 锚）预计补全第三臂。
+2. **Claim 2 — 锚定的零空间失效**：1x forward consistency（任何 band）无法抑制真实数据漂移，因为幻觉方向位于 shift→PSF→下采样算子的零空间。证据：V9B/V9D 漂移曲线与无锚 v8.1a 重合，`loss/forward_model` 躺平地板的同时 artifact 持续上爬；V9C（hybrid 下合法 1x 锚）预计补全第三个变体。
 3. **Claim 3 — 先验侵蚀与时间轴 Pareto 被经典方法支配**：合成结构先验随训练步数用观测保真换取锐度，整条前沿不及 TGV 的 (0.960, 0.96) 工作点；学习方法唯一占优的锐度区间与可测量的观测去相关（幻觉）重合。
 4. **Claim 4（待实验，V10）**：把 fidelity–sharpness 权衡从「训练时长」这个失控旋钮变成显式设计参数（残差幅度惩罚 λ），并检验学习方法能否在受控条件下越过经典前沿。
 
@@ -135,12 +135,12 @@ ch 7:   drizzle variance @2x
 | C2 | 零训练融合 baseline：`fused = (1−λ)·drizzle_mean + λ·UNet`（λ∈[0,1] 扫描，附 TGV 锚版本），同窗口指标 + Pareto 叠加图 | V10 的对照前沿；可能直接给出比任何 checkpoint 更好的工作点 |
 | C3 | V10 代码实现（残差参数化 + λ 惩罚，规格见提示词）+ pytest + ACL-020 条目 + `run_v10.md` | GPU 实验就绪 |
 | C4 | V9C 完成后（~今晚）：指标提取、fine-window 诊断、ACL-019 回填 | 2×2 矩阵闭合 |
-| C5 | `reports/ep07_v9_attribution/` 报告骨架（claim 1–3 + 图引用 + split-half FRC TODO） | 论文素材登记 |
+| C5 | `paper/reports/ep07_v9_attribution/` 报告骨架（claim 1–3 + 图引用 + split-half FRC TODO） | 论文素材登记 |
 
 ### GPU 批（慢，CPU 批完成后）
 
-- **V10 λ 扫描**：GPU 0 现在空闲，smoke 通过后立刻可上第一臂；V9C 完成后 GPU 1 加入第二臂。设计：`total_steps=25000` 完整 cosine 退火（修正「中 LR 抓 checkpoint」的不principled 之处），λ 三档（具体取值由 smoke 的 loss 量级标定，目标是惩罚项初期占总 loss 10–30%）。
-- 每臂完成后：real_eval 漂移曲线 + fine-window Pareto 叠加 + ACL-020 回填。
+- **V10 λ 扫描**：GPU 0 现在空闲，smoke 通过后立刻可上第一个变体；V9C 完成后 GPU 1 加入第二个变体。设计：`total_steps=25000` 完整 cosine 退火（修正「中 LR 抓 checkpoint」的不principled 之处），λ 三档（具体取值由 smoke 的 loss 量级标定，目标是惩罚项初期占总 loss 10–30%）。
+- 每个变体完成后：real_eval 漂移曲线 + fine-window Pareto 叠加 + ACL-020 回填。
 - 成功判据：某个 λ 的工作点在 (hp_corr_input, sharp_p95) 平面上**支配 TGV (0.960, 0.96)**，且无新增格纹/振铃 → Claim 4 正结果；全部失败 → Claim 3 升级为「即使输出网格锚定也无法越过经典前沿」。
 
 ## 8. 风险与 caveat

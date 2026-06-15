@@ -201,11 +201,11 @@ thermal_lift/
 ├── scripts/                   ← 构建 & 工具脚本          [Git ✅]
 ├── configs/                   ← 全局物理参数配置         [Git ✅]
 ├── docs/                      ← 文档                     [Git ✅]
-├── reports/                   ← 正式分析报告（.md）      [Git ✅]
 ├── research_log/              ← 研究日志                 [Git ✅]
 │   ├── algorithm_changelog.md ← 算法变更日志（必须维护）  [Git ✅]
 │   └── episodes/              ← Episode 进度记录
-└── paper/                     ← 论文                     [Git ✅]
+└── paper/                     ← 论文（中英稿 + slides + reports）  [Git ✅]
+    └── reports/               ← 正式分析报告（.md）
 ```
 
 ### UV 环境管理
@@ -266,7 +266,7 @@ thermal_lift/
 | `.venv/`, `algos/*/.venv/` | ❌ ignore | `uv sync` 重建 |
 | `uv.lock` | ��� track | 保证依赖精确可复现 |
 | `core/`, `scripts/`, `configs/` | ✅ track | 项目核心代码 |
-| `reports/` | ✅ track | 正式 .md 分析报告 |
+| `paper/reports/` | ✅ track | 正式 .md 分析报告 |
 | `research_log/` | ✅ track | 研究日志和 Episode 进度 |
 
 **提交频率规则**: **完成一个任务就 commit 一次**；**纯粹的小修改**（ typo、单行注释、局部措辞、无行为变化的微调）可以不单独 commit，攒到下一次任务收尾时一并提交。
@@ -291,7 +291,7 @@ thermal_lift/
 | 共享核心 | `core/src/thermal_core/`、`scripts/` | ✅ track |
 | Notebook 源码 | `notebooks/epXX_*/fragments/`、`manifest.txt` | ✅ track |
 | 配置 | `configs/`、`algos/*/configs/` | ✅ track |
-| 正式报告 | `reports/`、`research_log/episodes/` | ✅ track |
+| 正式报告 | `paper/reports/`、`research_log/episodes/` | ✅ track |
 | 算法变更日志 | `research_log/algorithm_changelog.md` | ✅ track（SR 算法改动后回填） |
 | 合成引擎 | `tcforge/src/`、`tcforge/tests/`、`tcforge/uv.lock` | ✅ track |
 | Cache 模块 | `core/src/thermal_core/ep*_cache.py`、`scripts/build_*_cache.py` | ✅ track（**源码**，不是产物） |
@@ -549,7 +549,7 @@ uv run python scripts/build_all_notebooks.py --execute
 ```
 research_log/episodes/epXX_name/README.md  ← 进度 + 任务 + 决策记录
 notebooks/epXX_name/                       ← Jupyter 可视化 & 交互分析
-reports/epXX_name/                         ← 正式分析报告
+paper/reports/epXX_name/                         ← 正式分析报告
 output/epXX_name/                          ← 数据产物（CSV、图表等）
 ```
 

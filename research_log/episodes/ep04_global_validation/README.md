@@ -113,7 +113,7 @@ Notebook:
 
 报告:
 
-- `reports/ep04_global_validation/validation_report.md`
+- `paper/reports/ep04_global_validation/validation_report.md`
 
 主要数据产物:
 

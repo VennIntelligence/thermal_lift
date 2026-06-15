@@ -75,7 +75,7 @@ def _normalise_arm_list(raw_arms: list[str] | tuple[str, ...] | None) -> list[st
 
     unknown = sorted(set(arms) - set(ARMS))
     if unknown:
-        raise KeyError(f"Unknown arm(s): {unknown}. Known arms: {sorted(ARMS)}")
+        raise KeyError(f"Unknown variant(s): {unknown}. Known variants: {sorted(ARMS)}")
 
     deduped: list[str] = []
     seen: set[str] = set()
@@ -196,7 +196,7 @@ def parse_args() -> argparse.Namespace:
         nargs="+",
         default=None,
         help=(
-            "Arms to extract. Defaults to the original EP11 set "
+            "Variants to extract. Defaults to the original EP11 set "
             "(v6 v8.1a v8.1b v9b). Use 'all' or add v9a/v9d explicitly."
         ),
     )
@@ -214,7 +214,7 @@ def parse_args() -> argparse.Namespace:
         "--forward-arms",
         nargs="+",
         default=None,
-        help="Forward-loss arms. Defaults to v6 v9b v9d when --extract-forward-loss is set.",
+        help="Forward-loss variants. Defaults to v6 v9b v9d when --extract-forward-loss is set.",
     )
     parser.add_argument(
         "--strict-forward-loss",

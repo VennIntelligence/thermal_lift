@@ -822,7 +822,7 @@ def run_tgv_child(spec: RunSpec, inputs: Inputs, args: argparse.Namespace) -> di
 
 def manifest_payload(args: argparse.Namespace, manifest: Manifest) -> dict[str, Any]:
     return {
-        "task": "EP16 frame-budget shift-robustness alignment-source classical CPU arms",
+        "task": "EP16 frame-budget shift-robustness alignment-source classical CPU methods",
         "created_or_updated": time.strftime("%Y-%m-%dT%H:%M:%S%z"),
         "output_dir": args.output_dir,
         "cpu_resource_contract": {

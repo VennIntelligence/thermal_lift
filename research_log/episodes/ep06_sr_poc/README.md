@@ -37,7 +37,7 @@
 - `output/ep06_sr_poc/` — 数据产物
 - `output/ep06_sr_poc_data_driven_align_sweep/` — default/tuned/NCC-init 三组 full SR sweep 产物
 - `notebooks/ep06_sr_poc/` — 可视化 Notebook
-- `reports/ep06_sr_poc/` — 正式报告
+- `paper/reports/ep06_sr_poc/` — 正式报告
 
 ## 当前结果摘要
 

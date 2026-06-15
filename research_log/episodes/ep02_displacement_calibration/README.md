@@ -209,7 +209,7 @@
 ### 产物
 
 - 脚本: `scripts/avi_y_direction_check.py`
-- 报告: `reports/ep02_displacement_calibration/avi_registration_addendum.md`
+- 报告: `paper/reports/ep02_displacement_calibration/avi_registration_addendum.md`
 - high-pass 汇总: `output/ep02_displacement_calibration/avi_direction_summary.csv`
 - high-pass 逐帧对: `output/ep02_displacement_calibration/avi_registration_pairs.csv`
 - high-pass 图: `output/ep02_displacement_calibration/avi_direction_comparison.png`、`avi_cumulative_motion_paths.png`、`avi_y0um_displacement_timeseries.png`
@@ -236,7 +236,7 @@
 ### 产物
 
 - 脚本: `scripts/avi_txt_yline_match_check.py`
-- 报告: `reports/ep02_displacement_calibration/avi_txt_yline_match_addendum.md`
+- 报告: `paper/reports/ep02_displacement_calibration/avi_txt_yline_match_addendum.md`
 - 汇总: `output/ep02_displacement_calibration/avi_txt_yline_match_summary.csv`
 - 逐帧对: `output/ep02_displacement_calibration/avi_txt_yline_pair_measurements.csv`
 - 图: `avi_txt_yline_axis_match.png`、`avi_txt_yline_projection_monotonicity.png`、`avi_txt_yline_contour_paths.png`
@@ -260,7 +260,7 @@
 ### 产物
 
 - 脚本: `scripts/avi_txt_xline_match_check.py`
-- 报告: `reports/ep02_displacement_calibration/avi_txt_xline_match_addendum.md`
+- 报告: `paper/reports/ep02_displacement_calibration/avi_txt_xline_match_addendum.md`
 - 汇总: `output/ep02_displacement_calibration/avi_txt_xline_match_summary.csv`
 - 逐帧对: `output/ep02_displacement_calibration/avi_txt_xline_pair_measurements.csv`
 - 图: `avi_txt_xline_axis_match.png`、`avi_txt_xline_projection_monotonicity.png`
@@ -306,7 +306,7 @@
 ### 产物
 
 - Notebook: `notebooks/ep02_displacement_calibration/ep02_displacement_calibration.ipynb`
-- 报告: `reports/ep02_displacement_calibration/calibration_report.md`
+- 报告: `paper/reports/ep02_displacement_calibration/calibration_report.md`
 - 输出目录: `output/ep02_displacement_calibration/`
 
 ---
@@ -315,5 +315,5 @@
 
 - 依赖: `output/ep01_data_processing/frame_audit.csv`
 - Notebook: `notebooks/ep02_displacement_calibration/`
-- 报告: `reports/ep02_displacement_calibration/`
+- 报告: `paper/reports/ep02_displacement_calibration/`
 - 输出: `output/ep02_displacement_calibration/`

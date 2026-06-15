@@ -853,7 +853,7 @@ def main() -> int:
         print(f"[harness] wrote {rel(f5_paths[0])} and {rel(f5_paths[1])}")
     failed = [row for row in rows if row.get("status") != "success"]
     if failed:
-        print(f"[harness] failed arms: {[row['arm_id'] for row in failed]}", file=sys.stderr)
+        print(f"[harness] failed variants: {[row['arm_id'] for row in failed]}", file=sys.stderr)
         return 2
     return 0
 

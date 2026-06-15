@@ -229,14 +229,14 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
 > **V9 复制粘贴启动命令以 [`run_v9.md`](run_v9.md) 为准**（含参数省略原则、smoke/全量、burst 池生成）。  
 > 本节仅保留摘要；变更记录见 ACL-016 / ACL-017。
 
-V9 相对 v8.1a 基线**每臂只改一个因子**：
+V9 相对 v8.1a 基线**每个变体只改一个因子**：
 
 | 实验 | 槽位 | 单因子改动 | 训练池 |
 |---|---|---|---|
 | `V9B` | GPU 1 | `--forward-model-weight 0.1 --forward-model-band highpass` | 旧 `training_pool_2x_aa` |
 | `V9A` | GPU 0 | `--input-mode hybrid_drizzle2x` | 新 `training_pool_2x_aa_burst`（含 `lr_burst`） |
 
-两臂共享的 v8.1a conservative loss 壳（均不同于 CLI 默认，必须显式写出）：
+两个变体共享的 v8.1a conservative loss 壳（均不同于 CLI 默认，必须显式写出）：
 
 ```text
 --scale 2 --batch-size 128 --num-workers 8 --total-steps 60000

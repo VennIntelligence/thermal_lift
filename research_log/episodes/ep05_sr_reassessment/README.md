@@ -81,7 +81,7 @@ Notebook:
 
 报告:
 
-- `reports/ep05_sr_reassessment/displacement_reassessment.md`
+- `paper/reports/ep05_sr_reassessment/displacement_reassessment.md`
 
 主要输出:
 

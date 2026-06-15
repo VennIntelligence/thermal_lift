@@ -1,6 +1,6 @@
 # EP16 Budget Robustness
 
-CPU-only classical arms for paper Section 6.4-6.5:
+CPU-only classical methods for paper Section 6.4-6.5:
 
 - E1 frame budget: `N={31,62,124,248}` phase-stratified subsets.
 - E2 shift robustness: Gaussian noise on contour-refined shifts.
@@ -40,4 +40,3 @@ Resource contract:
 - TGV parent parallelism defaults to 2.
 - Each TGV child passes `workers<=6` to `reconstruct_map_tgv`.
 - BLAS/OpenMP thread environment variables default to 1 unless already set.
-

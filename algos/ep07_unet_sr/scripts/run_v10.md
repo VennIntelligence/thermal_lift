@@ -167,7 +167,7 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
 
 ## Post-run Diagnostics
 
-每臂完成后，用 tracked V9 review 管线追加评估：
+每个变体完成后，用 tracked V9 review 管线追加评估：
 
 ```bash
 cd algos/ep07_unet_sr

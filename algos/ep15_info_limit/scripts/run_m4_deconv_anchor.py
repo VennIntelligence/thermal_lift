@@ -1263,7 +1263,7 @@ def run(args: argparse.Namespace) -> dict[str, Any]:
     best_image = full_results[best_sigma].image
     np.save(output_dir / "map_tv_best.npy", best_image.astype(np.float32, copy=False))
 
-    print("Building display arms")
+    print("Building display methods")
     bare_temp = bilinear_drizzle(raw_frames, shifts, scale=scale, desc="bare drizzle temperature")
     bicubic_temp = bicubic_upsample(np.nanmean(raw_frames, axis=0), scale=scale)
     lowfreq_base = bicubic_upsample(

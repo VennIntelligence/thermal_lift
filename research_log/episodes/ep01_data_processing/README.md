@@ -61,7 +61,7 @@
 - [x] 增加 BMP/TXT pairing provenance 表；`rename_mapping.csv` 缺失时只记录 provenance gap，不臆造原始映射
 - [x] 增加 `frame_audit.csv` 下游 contract 表，固定关键列含义和使用边界
 - [x] Notebook 改为只读 `output/ep01_data_processing/` 缓存；重算走 `scripts/build_ep01_cache.py`
-- [x] 更新正式报告 `reports/ep01_data_processing/audit_report.md`
+- [x] 更新正式报告 `paper/reports/ep01_data_processing/audit_report.md`
 - [x] 输出机器可读 CSV 到 `output/ep01_data_processing/`
 
 ---
@@ -104,7 +104,7 @@
 
 - Notebook fragments: `notebooks/ep01_data_processing/fragments/`
 - Notebook 构建产物: `notebooks/ep01_data_processing/ep01_data_processing.ipynb`
-- 正式报告: `reports/ep01_data_processing/audit_report.md`
+- 正式报告: `paper/reports/ep01_data_processing/audit_report.md`
 - 帧审计 CSV: `output/ep01_data_processing/frame_audit.csv`
 - 采集顺序审计 CSV: `output/ep01_data_processing/acquisition_order_audit.csv`
 - SR 汇总 CSV: `output/ep01_data_processing/sr_data_basis_summary.csv`

@@ -10,7 +10,7 @@
 - Notebook fragments: `notebooks/ep09_psf_calibration/fragments/`
 - 输出: `output/ep09_psf_calibration/`
 - 配置: `configs/psf_calibration.json`
-- 正式报告: `reports/ep09_psf_calibration/psf_calibration_report.md`
+- 正式报告: `paper/reports/ep09_psf_calibration/psf_calibration_report.md`
 - EP06 pseudo-HR: `output/ep06_sr_poc/map_tv_highpass.npy`
 
 ## 结果摘要

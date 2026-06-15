@@ -14,7 +14,6 @@ import numpy as np
 import pandas as pd
 from matplotlib.axes import Axes
 from matplotlib.ticker import FuncFormatter
-from mpl_toolkits.axes_grid1.inset_locator import inset_axes
 
 from extract_checkpoint_metrics import (
     DEFAULT_FORWARD_OUTPUT_CSV,
@@ -36,12 +35,12 @@ TRAINING_ARMS = {"v9a", "v9d"}
 TOTAL_STEPS = 60_000
 
 ARM_LABELS = {
-    "v6": "v6 hot + full fwd",
-    "v8.1a": "v8.1a conservative",
-    "v8.1b": "v8.1b PixelShuffle",
-    "v9b": "v9b band fwd",
-    "v9d": "v9d full fwd",
-    "v9a": "v9a hybrid input",
+    "v6": "HotLoss",
+    "v8.1a": "Stats",
+    "v8.1b": "Stats+PixelShuffle",
+    "v9b": "Stats+HP-FC",
+    "v9d": "Stats+Full-FC",
+    "v9a": "Hybrid",
 }
 CANONICAL_STEPS = {
     "v6": 8_000,
@@ -50,8 +49,8 @@ CANONICAL_STEPS = {
     "v9b": 11_000,
 }
 METRIC_COLUMNS = {
-    "artifact_score": "artifact_score (lower is better)",
-    "raw_control_corr": "raw_control_corr (higher is better)",
+    "artifact_score": "artifact score",
+    "raw_control_corr": "raw-control corr",
 }
 
 
@@ -134,9 +133,13 @@ def _read_forward_loss(forward_csv: Path, *, refresh: bool) -> pd.DataFrame:
 
 def _plot_metric_series(ax: Axes, metrics: pd.DataFrame, metric: str, arms: list[str]) -> None:
     for arm in arms:
-        group = metrics[metrics["arm"] == arm].sort_values("step")
+        group = metrics[metrics["arm"] == arm].sort_values("step").copy()
         if group.empty:
             continue
+            
+        # Apply smoothing to reduce jitter/outliers for better visualization
+        group[metric] = group[metric].ewm(span=10, adjust=False).mean()
+
         style = _style_for_arm(arm)
         ax.plot(
             group["step"],
@@ -176,9 +179,15 @@ def _plot_metric_series(ax: Axes, metrics: pd.DataFrame, metric: str, arms: list
             )
 
 
-def _add_forward_inset(ax: Axes, forward: pd.DataFrame) -> None:
-    inset = inset_axes(ax, width="49%", height="43%", loc="lower right", borderpad=0.8)
-    inset.axhspan(0.004, 0.009, color="#999999", alpha=0.18, linewidth=0)
+def _plot_forward_panel(ax: Axes, forward: pd.DataFrame) -> None:
+    """Forward-consistency loss as a standalone, readable third panel.
+
+    Promoted from the former illegible inset: the floor-vs-drift contrast is
+    load-bearing evidence (the observation-domain loss is flat near the floor
+    while the drift proxies keep degrading), so it gets its own panel.
+    """
+
+    ax.axhspan(0.004, 0.009, color="#777777", alpha=0.4, linewidth=0)
 
     plotted = False
     for arm in DEFAULT_FORWARD_ARMS:
@@ -188,49 +197,45 @@ def _add_forward_inset(ax: Axes, forward: pd.DataFrame) -> None:
             continue
         style = _style_for_arm(arm)
         smoothed = group["value"].ewm(span=50, adjust=False).mean()
-        inset.plot(
+        ax.plot(
             group["step"],
             smoothed,
             color=style["color"],
             linestyle=style["linestyle"],
-            linewidth=1.0,
-            label=arm,
+            linewidth=1.2,
+            label=ARM_LABELS.get(arm, arm),
         )
         plotted = True
 
-    inset.set_yscale("log")
-    inset.set_title("Forward loss", fontsize=7)
-    inset.set_xlabel("step", fontsize=6)
-    inset.set_ylabel("loss", fontsize=6)
-    inset.xaxis.set_major_formatter(FuncFormatter(_k_formatter))
-    inset.tick_params(axis="both", labelsize=6, length=2.2, width=0.5)
-    inset.grid(axis="y", alpha=0.25, linewidth=0.4)
-    inset.text(
+    ax.set_yscale("log")
+    ax.set_ylabel("forward-consistency loss (log)")
+    ax.text(
         0.03,
-        0.08,
-        "floor\n0.004-0.009",
-        transform=inset.transAxes,
-        fontsize=6,
-        color="#444444",
+        0.06,
+        "floor 0.004-0.009",
+        transform=ax.transAxes,
+        fontsize=9,
+        color="#222222",
         va="bottom",
     )
     if plotted:
-        inset.legend(loc="upper right", fontsize=6, handlelength=1.2, borderpad=0.2)
+        ax.legend(loc="upper right", fontsize=8, handlelength=1.4, borderpad=0.3)
     else:
-        inset.text(
+        ax.text(
             0.5,
             0.5,
             "no forward-loss scalar",
             ha="center",
             va="center",
-            transform=inset.transAxes,
-            fontsize=6,
+            transform=ax.transAxes,
+            fontsize=8,
         )
 
 
 def _finish_axes(axes: list[Axes] | np.ndarray) -> None:
     for ax in axes:
-        ax.set_xlabel("checkpoint step")
+        ax.set_xlabel("Training Steps", fontsize=10)
+        ax.tick_params(axis='both', which='major', labelsize=9)
         ax.xaxis.set_major_formatter(FuncFormatter(_k_formatter))
         ax.grid(axis="y", alpha=0.3, linewidth=0.5)
         ax.set_xlim(0, TOTAL_STEPS * 1.02)
@@ -246,41 +251,39 @@ def _save_png_pdf(fig: plt.Figure, output_dir: Path, stem: str) -> tuple[Path, P
 
 def plot_main(metrics: pd.DataFrame, forward: pd.DataFrame, output_dir: Path) -> tuple[Path, Path]:
     setup_academic_style()
-    fig, axes = plt.subplots(1, 2, figsize=(7.2, 3.85), sharex=True, constrained_layout=False)
-    fig.subplots_adjust(left=0.075, right=0.99, top=0.92, bottom=0.34, wspace=0.22)
+    fig, axes = plt.subplots(1, 3, figsize=(12, 3.2), sharex=True, constrained_layout=False)
+    fig.subplots_adjust(left=0.06, right=0.98, top=0.88, bottom=0.25, wspace=0.25)
 
     _plot_metric_series(axes[0], metrics, "artifact_score", MAIN_ARMS)
     _plot_metric_series(axes[1], metrics, "raw_control_corr", MAIN_ARMS)
-    _add_forward_inset(axes[0], forward)
+    _plot_forward_panel(axes[2], forward)
 
     axes[0].set_title("(a) Artifact drift")
     axes[0].set_ylabel(METRIC_COLUMNS["artifact_score"])
     axes[1].set_title("(b) Raw-control agreement")
     axes[1].set_ylabel(METRIC_COLUMNS["raw_control_corr"])
+    axes[2].set_title("(c) Forward-consistency loss")
     _finish_axes(axes)
-
+    
     handles, labels = axes[1].get_legend_handles_labels()
-    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.10), ncol=3)
-    fig.text(
-        0.01,
-        0.01,
-        "TensorBoard-scale real-eval proxies; hollow circles mark canonical checkpoints, x marks 60K endpoints.",
-        fontsize=7,
-    )
+    fig.legend(handles, labels, loc="lower center", bbox_to_anchor=(0.5, 0.02), ncol=5, fontsize=9)
     return _save_png_pdf(fig, output_dir, "fig03_nullspace_drift")
 
 
 def plot_v9a_companion(metrics: pd.DataFrame, output_dir: Path) -> tuple[Path, Path]:
     setup_academic_style()
     fig, axes = plt.subplots(1, 2, figsize=(7.2, 2.7), sharex=True)
-    group = metrics[metrics["arm"] == COMPANION_ARM].sort_values("step")
+    group = metrics[metrics["arm"] == COMPANION_ARM].sort_values("step").copy()
+    if not group.empty:
+        for metric in ("artifact_score", "raw_control_corr"):
+            group[metric] = group[metric].ewm(span=10, adjust=False).mean()
 
     for ax, metric in zip(axes, ("artifact_score", "raw_control_corr")):
         if group.empty:
             ax.text(
                 0.5,
                 0.5,
-                "V9A TensorBoard real-eval not available",
+                "Hybrid TensorBoard real-eval not available",
                 ha="center",
                 va="center",
                 transform=ax.transAxes,
@@ -318,7 +321,7 @@ def plot_v9a_companion(metrics: pd.DataFrame, output_dir: Path) -> tuple[Path, P
     fig.text(
         0.01,
         -0.02,
-        "Companion only: V9A uses hybrid drizzle input, so its proxy scale is not cross-mode comparable.",
+        "Companion only: Hybrid uses drizzle-evidence input, so its proxy scale is not cross-mode comparable.",
         fontsize=7,
     )
     return _save_png_pdf(fig, output_dir, "fig03s_v9a_trajectory")

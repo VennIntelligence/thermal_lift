@@ -21,7 +21,7 @@
 # CUDA_VISIBLE_DEVICES="" uv run python scripts/run_ep16_classical.py --arms both --run-tgv --tgv-parallel 2 --tgv-workers 6
 # ```
 #
-# **Scope**: EP16 reports CPU classical arms only: drizzle and TGV. UNet and
+# **Scope**: EP16 reports CPU classical methods only: drizzle and TGV. UNet and
 # GPU MAP-TV are intentionally outside this notebook.
 
 # %%

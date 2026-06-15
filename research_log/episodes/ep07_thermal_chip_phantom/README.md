@@ -10,7 +10,7 @@ EP07 is not a new real-data SR claim. It is an engineering episode for a reprodu
 
 - Notebook source fragments: `notebooks/ep07_thermal_chip_phantom/fragments/`
 - Demo output target: `output/ep07_thermal_chip_phantom/demo_dataset/`
-- Report skeleton: `reports/ep07_thermal_chip_phantom/`
+- Report skeleton: `paper/reports/ep07_thermal_chip_phantom/`
 - TCForge runtime expectation: independent UV project under `tcforge/`
 
 ## Environment

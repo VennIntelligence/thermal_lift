@@ -309,7 +309,7 @@ def _write_notes(
         "- Arm B: EP12 hybrid v1 step 48000 native 4x inference.",
         "- Arm C: bare drizzle mean at 4x.",
         "- Arm D: bicubic LR mean at 4x.",
-        "- Temperature figures use shared full-frame 1-99 percentile limits across all four arms.",
+        "- Temperature figures use shared full-frame 1-99 percentile limits across all four methods.",
         "- Highpass figures use sigma=5 highpass and shared symmetric 99th-percentile limits.",
         f"- Center-crop highpass std: EP07x2up={ep07_std:.6g} deg C, EP12={ep12_std:.6g} deg C.",
         f"- Raw-control highpass Pearson: EP07x2up={ep07_corr:.6g}, EP12={ep12_corr:.6g}.",

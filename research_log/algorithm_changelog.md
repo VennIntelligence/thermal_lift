@@ -34,7 +34,7 @@
 CUDA_VISIBLE_DEVICES= uv run python algos/ep11_dl_benchmark/scripts/run_tgv_split_frc.py \
   --workers 4 --tgv-workers 4
 
-# Refresh only the TGV row while preserving cached rows for other arms
+# Refresh only the TGV row while preserving cached rows for other methods
 cd algos/ep11_dl_benchmark
 CUDA_VISIBLE_DEVICES= uv run python scripts/run_unified_harness_t1_t2.py \
   --only tgv \
@@ -52,7 +52,7 @@ CUDA_VISIBLE_DEVICES= uv run python scripts/v9_review/run_fusion_window2.py
 - Harness TGV 行已刷新：`output/ep11_unified_harness/t1_metrics.csv` 与 `all_arm_metrics.csv` 全 arm success；TGV `split_half_source` / `frc_source` 指向 `output/ep11_unified_harness/tgv_split_frc.json`。
 - E2 ROI2: F5b 资产生成到 `output/paper_figures/fig05b_main_visual_roi2.{png,pdf}`；ROI2 `lattice` 排序与中心 ROI 一致（drizzle < TGV < V10 < V9A60），但 `sharp_p95` 与 profile zigzag 排序部分不一致，因此只报告为 held-out visual/proxy audit。
 - E3 第二窗: TGV×V9A60 λ 原窗 0.2、第二窗 0.1，λ 本身不完全稳定；第二窗 λ=0.1 为 `hp_corr_input=0.9643`, `hp_corr_tgv=0.9985`, `sharp_p95=0.5082`, `lattice=0.0126`，通过本窗 proxy-frontier gate。V10 λ=1.2@15K 第二窗为 `hp_corr_input=0.9199`, `sharp_p95=0.5008`, `lattice=0.0130`，仍低于本窗 TGV fidelity reference，保持“低 grain / 较锐但保真不足”的 proxy 位置判断。
-- 结论: 三项加固均不改变 C1–C4 settle，不支持“学习臂打败 TGV”“更干净/更保真”或物理分辨率声明；所有新增证据限定为 2x contour-level、split-consistency、ROI-level visual/proxy。
+- 结论: 三项加固均不改变 C1–C4 settle，不支持“学习方法打败 TGV”“更干净/更保真”或物理分辨率声明；所有新增证据限定为 2x contour-level、split-consistency、ROI-level visual/proxy。
 
 **涉及文件**: `algos/ep11_dl_benchmark/scripts/run_tgv_split_frc.py`, `algos/ep11_dl_benchmark/scripts/run_unified_harness_t1_t2.py`, `scripts/paper_figures/fig05b_roi2_holdout.py`, `algos/ep07_unet_sr/scripts/v9_review/run_fusion_window2.py`, `docs/paper/07_experiments.md`, `docs/paper/09_figures_tables_assets.md`, `docs/paper/supp/D_full_results.md`
 
@@ -60,7 +60,7 @@ CUDA_VISIBLE_DEVICES= uv run python scripts/v9_review/run_fusion_window2.py
 
 **问题诊断**:
 - 论文最终 T1/T2 需要单一 EP11/common.metrics 口径，不能把 TensorBoard `eval_real/*` 的 artifact scale 与 EP11 harness scale 混进同一表。
-- 旧 EP11 横评脚本只覆盖早期 1x 输入臂，无法安全评估 V9A/V9C hybrid-drizzle 输入和 V10 residual-over-observation；若未透传 `residual_channel=5`，V10 会退化成裸 delta 输出（缓存均值接近 0°C）。
+- 旧 EP11 横评脚本只覆盖早期 1x 输入变体，无法安全评估 V9A/V9C hybrid-drizzle 输入和 V10 residual-over-observation；若未透传 `residual_channel=5`，V10 会退化成裸 delta 输出（缓存均值接近 0°C）。
 - EP10 TGV 的 `best_hr_temperature.npy` 为 highpass/centered 产物，直接读作温度会得到约 0.24°C，必须经 TGV helper 重建普通 Celsius 温度图后再进入视觉对比。
 
 **修改内容**:
@@ -73,7 +73,7 @@ CUDA_VISIBLE_DEVICES= uv run python scripts/v9_review/run_fusion_window2.py
 **预期效果**:
 - 论文 T1/T2/F5 使用同一真实数据 harness 与同一 artifact scale，避免历史 TB-scale 数字污染最终横评表。
 - hybrid/V10 推理路径有 23°C 温度均值自检，防止 residual base 漏加 bug 复发。
-- 风险：TGV split/FRC 尚非独立 TGV split 重算，必须在表注和 manifest 中保留 proxy caveat；MAP-TV 5x 与 2x arms 不可隐式混同。
+- 风险：TGV split/FRC 尚非独立 TGV split 重算，必须在表注和 manifest 中保留 proxy caveat；MAP-TV 5x 与 2x methods 不可隐式混同。
 
 **推荐参数**:
 
@@ -86,12 +86,12 @@ CUDA_VISIBLE_DEVICES=0 uv run python scripts/run_unified_harness_t1_t2.py \
 ```
 
 **训练结果**: _(本条为评估/数据管线变更，无新增训练；2026-06-14 回填)_
-- 完整运行: 13/13 arms success，elapsed 166.6 s；GPU0 峰值观测约 385 MB，未占用第二张 GPU。
+- 完整运行: 13/13 methods success，elapsed 166.6 s；GPU0 峰值观测约 385 MB，未占用第二张 GPU。
 - 输出目录: `output/ep11_unified_harness/`；F5 资产: `output/paper_figures/fig05_main_visual.png`、`output/paper_figures/fig05_main_visual.pdf`。
 - 23°C sanity check: V9A 10K mean 22.366°C，V9C 5K mean 22.985°C，V10 lam120@15K mean 23.288°C，V9A 60K mean 23.307°C；均非 0°C delta 场。
 - T1 selected rows（harness scale，artifact↓ / corr↑）: drizzle 1.138 / 0.771；TGV 0.695 / 0.741；v9b@11K 1.766 / 0.777；V9A@10K 1.762 / 0.719；V9C@5K 1.669 / 0.718；V10 lam120@15K 2.726 / 0.711。
 - TB-vs-harness scale check: v9b@11K TB artifact 0.3385 vs harness 1.7662；v8.1a@15K 0.3919 vs 1.9429；v6@8K 0.3302 vs 1.7891。该表确认两套 artifact scale 不能混用。
-- 结论: 统一 harness 只提供 gate/select 与 task-level visual evidence；不支持“学习臂打败 TGV”“更干净”或“更保真”表述。
+- 结论: 统一 harness 只提供 gate/select 与 task-level visual evidence；不支持“学习方法打败 TGV”“更干净”或“更保真”表述。
 
 **涉及文件**: `algos/ep11_dl_benchmark/scripts/run_unified_harness_t1_t2.py`, `docs/paper/00_status_and_plan.md`, `docs/paper/01_outline.md`, `docs/paper/02_introduction.md`, `docs/paper/05_method.md`, `docs/paper/06b_experimental_setup.md`, `docs/paper/07_experiments.md`, `docs/paper/08_limitations_conclusion.md`, `docs/paper/09_figures_tables_assets.md`, `docs/paper/10_writing_handover.md`, `docs/paper/reframe_c4_claim3.md`, `docs/paper/supp/C_method_details.md`, `docs/paper/supp/D_full_results.md`, `docs/paper/supp/E_reproducibility.md`
 
@@ -176,18 +176,18 @@ CUDA_VISIBLE_DEVICES=<GPU_ID> uv run python -m unet_sr.train \
 
 ---
 
-#### 🆕 高-λ sweep 结果（bs=128 / patch=192 / 25K × 4 臂；2026-06-14 回填）
+#### 🆕 高-λ sweep 结果（bs=128 / patch=192 / 25K × 4 个变体；2026-06-14 回填）
 
 > 闭环上文 conclusion 第 2 点：高-λ（λ∈{0.2,0.5,1.2,3.0}）扫描已完成，bs=64 混杂已消除（统一 bs=128），评估口径自检通过。**结论从「凌乱负结果」升级为「干净的可控权衡 + 有价值工作点」**，但仍**不写成「打败 TGV」**（保真全程 < TGV）。
 
-- **运行**: 4 臂 λ∈{0.2,0.5,1.2,3.0}，bs=128 / patch=192（3090 OOM 从 256 降，全臂统一记 caveat）/ 25K / `--save-every 2500`；每臂 ~4.3–5.3 h，双 GPU 两两并行，wall ≈ 12 h。输出 `outputs/ep07_v10_resid_hl_lam{020,050,120,300}/`（各 10 个 checkpoint + `model_final.pt`）。
+- **运行**: 4 个变体 λ∈{0.2,0.5,1.2,3.0}，bs=128 / patch=192（3090 OOM 从 256 降，全变体统一记 caveat）/ 25K / `--save-every 2500`；每个变体 ~4.3–5.3 h，双 GPU 两两并行，wall ≈ 12 h。输出 `outputs/ep07_v10_resid_hl_lam{020,050,120,300}/`（各 10 个 checkpoint + `model_final.pt`）。
 - **残差自检通过**: `output/ep07_v9_review/cache/v10hl_*_temperature.npy` 20 个文件均值全部 ≈ **23.29°C**（不是 ≈0）→ 本条主记录里的「漏加 base」评估 bug **未复现**，本轮 fine-window 数字可信。
 - **fine-window Pareto（修复后 harness；hp_corr_input=保真↑，sharp_p95=锐度↑但不可单用，lattice=grain/HF↓）**:
 
   | 对象 | hp_corr_input | sharp_p95 | lattice |
   |---|---|---|---|
   | drizzle（观测软上限） | 1.000 | 0.503 | 0.0015 |
-  | **EP10 TGV（经典锚）** | **0.960** | **0.959** | **0.0169** |
+  | **EP10 TGV（经典基准）** | **0.960** | **0.959** | **0.0169** |
   | λ=0.2 @5K→25K | 0.915→0.882 | 1.047→1.264 | 0.0170→0.0242 |
   | λ=0.5 @5K→25K | 0.918→0.886 | 1.039→1.224 | 0.0155→0.0228 |
   | λ=1.2 @5K | 0.941 | 0.891 | 0.0098 |
@@ -204,7 +204,7 @@ CUDA_VISIBLE_DEVICES=<GPU_ID> uv run python -m unet_sr.train \
   1. 残差约束把 *fidelity–sharpness–grain* 三维折中变成**可调的 λ 旋钮**：大 λ（3.0）能同时拿高保真+低 grain（牺牲锐度趋向 drizzle）；λ=1.2@15K 拿到「锐而不 grain、保真刚过门控」的折中 → **存在「有价值工作点」**（`docs/paper/reframe_c4_claim3.md` §7 判据满足）。
   2. **但所有 checkpoint 保真仍 < TGV(0.960)**（最佳点 0.922）；维持 reframe 诚实裁决「no GT-certifiable winner」，**不写成「打败 TGV」**；报锐度必并报 lattice + 视觉。
   3. Phase 2 精化（λ=1.2 二分 / 第二 seed）**已决定跳过**（非支配关系，预算转给统一口径 harness T1/T2 重跑）。
-- **产物**: `output/ep07_v9_review/v10_highlam/{v9a_pareto_metrics.csv, v9a_pareto_scatter.png, v9a_checkpoint_strip.png}`、`output/ep07_v9_review/ep07_eval_real_metrics.csv`（含 V10 四臂 + V9C/V9D 漂移）。
+- **产物**: `output/ep07_v9_review/v10_highlam/{v9a_pareto_metrics.csv, v9a_pareto_scatter.png, v9a_checkpoint_strip.png}`、`output/ep07_v9_review/ep07_eval_real_metrics.csv`（含 V10 四个变体 + V9C/V9D 漂移）。
 
 **涉及文件**: `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/inference.py`, `algos/ep07_unet_sr/src/unet_sr/real_eval.py`, `algos/ep07_unet_sr/scripts/v9_review/common.py`（评估 bug 修复）, `algos/ep07_unet_sr/tests/test_config.py`, `algos/ep07_unet_sr/tests/test_inference.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`, `algos/ep07_unet_sr/scripts/run_v10.md`
 
@@ -259,8 +259,8 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
 **训练结果**: _(2026-06-14 回填；60K 完成)_
 - 输出目录: `outputs/ep07_v9c_hybrid_legal_fwd`（60K + `model_final.pt`）
 - 代码验证: `cd algos/ep07_unet_sr && uv run pytest -q` → 47 passed。
-- 关键指标（TB-scale `eval_real`，artifact↓ / raw_control_corr↑）: 0.516/0.714 @10K → **0.695/0.669 @60K**，与 1x 锚定臂端点（v9b 0.655/0.688、v9d 0.677/0.677、v8.1a 0.643/0.689）落到同一 ≈0.65–0.70 / ≈0.67–0.69 平台。
-- 结论: **合法 1x 观测锚在 hybrid 输入下同样无法压平后期漂移**。这驳倒了「之前锚定失败只是因为 hybrid 第 0 通道不是合法 1x 观测」的反对意见——即使给 loss 单独喂合法 1x `aligned_mean` patch，漂移曲线仍与无锚/带限/全频锚臂几乎重合。**与 V9B/V9D 合并：loss 侧 forward 锚定路线（band / full / legal × hybrid 全变体）正式、彻底关闭**；漂移是先验驱动、零空间驻留，只能从输入端（V9A hybrid 输入）或输出参数化（V10 residual）侧解决。落 `docs/paper/07_experiments.md` §6.2/§6.3 input×anchor 矩阵。
+- 关键指标（TB-scale `eval_real`，artifact↓ / raw_control_corr↑）: 0.516/0.714 @10K → **0.695/0.669 @60K**，与 1x 锚定变体端点（v9b 0.655/0.688、v9d 0.677/0.677、v8.1a 0.643/0.689）落到同一 ≈0.65–0.70 / ≈0.67–0.69 平台。
+- 结论: **合法 1x 观测锚在 hybrid 输入下同样无法压平后期漂移**。这驳倒了「之前锚定失败只是因为 hybrid 第 0 通道不是合法 1x 观测」的反对意见——即使给 loss 单独喂合法 1x `aligned_mean` patch，漂移曲线仍与无锚/带限/全频锚定变体几乎重合。**与 V9B/V9D 合并：loss 侧 forward 锚定路线（band / full / legal × hybrid 全变体）正式、彻底关闭**；漂移是先验驱动、零空间驻留，只能从输入端（V9A hybrid 输入）或输出参数化（V10 residual）侧解决。落 `docs/paper/07_experiments.md` §6.2/§6.3 input×anchor 矩阵。
 
 **涉及文件**: `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `algos/ep07_unet_sr/src/unet_sr/losses.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/tests/test_dataset.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`, `algos/ep07_unet_sr/tests/test_config.py`, `algos/ep07_unet_sr/scripts/run_v9.md`
 
@@ -324,7 +324,7 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
   - `raw_control_corr`: 10K 0.758 → 25K 0.711 → 40K 0.697 → 60K 0.688（对照 v8.1a: 0.756 → 0.717 → 0.698 → 0.689）
   - 40K→60K 漂移: artifact +0.0145 / corr −0.0082，与 v8.1a（+0.016 / −0.009）基本重合 → **漂移未压平，run_v9.md 验收标准未达成**
   - `loss/forward_model` 自 10K 起躺平在 0.004–0.009 地板，同期 artifact 持续上爬 → 漂移方向位于 forward 算子（shift→PSF→下采样→带限 highpass）的零空间，观测一致性对该方向不可见
-- 结论: 带限 forward consistency（weight 0.1, band=highpass）单因子归因失败，对真实数据漂移无可测影响。结合 v8.1a / v8.1b / v9b 三臂漂移曲线几乎重合，确认漂移是「合成先验在真实分布上无监督外推」的结构性矛盾，loss 侧旋钮已证伪。后续处置：artifact/corr 降级为 checkpoint 选择器（Pareto + 视觉门控，不默认取 60K）；观测锚定若要有效需让锚可见漂移方向（如 hybrid 输入下以合法 LR 观测构造 forward 项），或从输入端解决（V9A, ACL-016）。
+- 结论: 带限 forward consistency（weight 0.1, band=highpass）单因子归因失败，对真实数据漂移无可测影响。结合 v8.1a / v8.1b / v9b 三个变体漂移曲线几乎重合，确认漂移是「合成先验在真实分布上无监督外推」的结构性矛盾，loss 侧旋钮已证伪。后续处置：artifact/corr 降级为 checkpoint 选择器（Pareto + 视觉门控，不默认取 60K）；观测锚定若要有效需让锚可见漂移方向（如 hybrid 输入下以合法 LR 观测构造 forward 项），或从输入端解决（V9A, ACL-016）。
 - **V9D 补充** _(2026-06-12 回填，`outputs/ep07_v9d_fwd_fullband`)_: full-band anchor（`--forward-model-band full`，其余同 V9B）60K 跑完，artifact 0.677 / corr 0.677，漂移同样未压平且终点比 V9B（0.655/0.688）更差；1K–28K 阶段 artifact/corr 大幅震荡（如 20K artifact 0.575/corr 0.642 后又回弹），与 ACL-005 全频低通梯度冲突一致。V9B+V9D 合并证据：**loss 侧 forward 锚定路线（无论 band）正式关闭**。
 
 **涉及文件**: `losses.py`, `config.py`, `train.py`, `mask_weights.py`, `scripts/run_v9.md`, `scripts/run_training.md`, `tests/test_model_losses.py`, `tests/test_config.py`
@@ -334,7 +334,7 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
 ### [ACL-016] 2026-06-11 — V9A: hybrid 2x drizzle 输入模式
 
 **问题诊断**:
-- v8.1a/b 两臂中心最细线模糊完全相同，与 loss 温度和 HR head 无关。根因：5 个输入通道全部是 1x 网格统计量（aligned_mean/median/coverage/variance/highpass），248 帧的亚像素相位信息在进网络前已坍缩。
+- v8.1a/b 两个变体中心最细线模糊完全相同，与 loss 温度和 HR head 无关。根因：5 个输入通道全部是 1x 网格统计量（aligned_mean/median/coverage/variance/highpass），248 帧的亚像素相位信息在进网络前已坍缩。
 - EP15 M4 证明 2x 网格经典方法能恢复 12 µm 频带信息（bare/MAP-TV split-half FRC 0.575→0.947）——信息在数据里，只是没喂给网络。
 
 **修改内容**:
@@ -359,7 +359,7 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
 - 视觉效果: 中心最细 zigzag「梯子」区呈现明显的训练阶段 Pareto 权衡——10K/20K 时梯子内部条纹部分可分辨（与输入 drizzle 通道、EP10 TGV 一致）；60K 时粗 zigzag 线最锐利、对比最大，但中心梯子重新糊成橙色团块，粗细线交融，与 v8.1a 60K 体感相同。
 - 关键指标（real_eval 248 帧, contour_refined）:
   - `artifact_score` / `raw_control_corr`: 10K 0.446/0.719 → 20K 0.514/0.702 → 30K 0.660/0.663 → 60K 0.646/0.669。
-  - **漂移在 30K 后压平甚至轻微回头**（30K→60K artifact −0.014 / corr +0.007），是 v8.1a/v9b/v9d 中唯一不单调恶化的臂；但平台位置 corr 0.669 低于 v8.1a 60K 的 0.689，run_v9.md「corr 上升」验收标准在 60K 不达成。
+	  - **漂移在 30K 后压平甚至轻微回头**（30K→60K artifact −0.014 / corr +0.007），是 v8.1a/v9b/v9d 中唯一不单调恶化的变体；但平台位置 corr 0.669 低于 v8.1a 60K 的 0.689，run_v9.md「corr 上升」验收标准在 60K 不达成。
   - 中心细线窗口 highpass corr（vs TGV | vs 输入 drizzle 通道，诊断脚本 `algos/ep07_unet_sr/scripts/v9_review/`（原 `tmp/v9a_review/`，已迁移））: **10K 0.966/0.973 → 60K 0.935/0.925**，v8.1a 60K 为 0.936/0.926 → hybrid 输入在 10K 时几乎完整透传了中心细线信息，60K 时被合成结构先验抹回 v8.1a 水平。
 - 结论: **输入瓶颈假设证实，但训练后期合成先验会重新吃掉输入里的真实细节**。中心细线信息确实存在于 drizzle 输入通道中（ACL-015 推断正确），V9A 早期 checkpoint 能保留它；漂移机制现在精确定位为「结构 loss 先验逐步覆盖观测保真，把真实细纹理当模糊清理掉」。处置：① V9A 最终 checkpoint 不取 60K，在 10K–25K 区间做 Pareto + 视觉联合选优；② 下一个单因子实验方向是结构权重后期退火或 residual-to-drizzle 参数化，而不是更长训练。
 
@@ -397,13 +397,13 @@ CUDA_VISIBLE_DEVICES=1 uv run python -m unet_sr.train \
 - 视觉效果:
   - **V8_1A (bilinear + conservative loss)**: 10K 中心棋盘纹最重（类似 v8 初期），20K 后除中心外棋盘消失、无膨胀；30–40K 棋盘减小、边框由糊变清晰但开始膨胀；60K 对比度最大、边框最膨胀。中心区域只有最细的几条线仍糊，稍粗的线锐利可辨结构；边缘锯齿相对 1B 有改善。
   - **V8_1B (PixelShuffle + 同一 loss)**: 10K 有晕染但比 v8 初版轻；20K 提亮、对比度增强、边框膨胀；30K 边框收回变清晰；至 60K 对比度持续增强。边缘锯齿未改善，且中等边框之间出现条纹状亮色伪影；中心区域同样模糊。
-- 关键指标（synthetic loss 两臂均在 ~40–45K 收敛后平坦；real_eval 248 帧 zoom3x）:
+- 关键指标（synthetic loss 两个变体均在 ~40–45K 收敛后平坦；real_eval 248 帧 zoom3x）:
   - `eval_real/artifact_score`（越小越好）随训练**单调上升**: 1A 0.390(10K)→0.643(60K)，1B 0.413→0.709；1B 全程高于 1A。
   - `eval_real/raw_control_corr`（与 raw bicubic 控制图的 highpass 相关，反映观测保真）**单调下降**: 1A 0.756→0.689，1B 0.747→0.667。对照 EP10 TGV 的 0.916 / artifact 0.695，UNet 输出对真实观测的锚定明显偏弱。
 - 结论:
   1. **PixelShuffle head 归因失败**: 1B 未减轻锯齿，反而引入新的条纹伪影且 artifact_score 全程更高 → final upsampler 不是 2x 相位伪影/锯齿主因，后续保留 bilinear head，放弃 PixelShuffle 分支。
   2. **Loss 降温部分有效**: 1A 锯齿改善、早期无膨胀，说明结构权重过热确实贡献了亮边/膨胀；但 40K 后 synthetic loss 已平坦而真实数据上对比度/膨胀仍持续漂移（artifact ↑ / corr ↓），说明**缺失观测一致性约束**（`forward_model_weight=0`）使无约束方向在合成先验驱动下继续漂移。
-  3. **中心最细线模糊对两臂完全不变** → 与 loss 温度和 HR head 无关，指向前端输入信息瓶颈：5 个输入通道全部是 1x 网格统计量，248 帧的亚像素相位信息在进网络前已被坍缩；而 EP10/EP15 证明 2x 网格经典方法可恢复 12 µm 频带信息（FRC 0.575→0.947）。下一步主攻方向为 2x-grid drizzle/classical-SR 输入通道 + 温和 highpass-band forward consistency。
+  3. **中心最细线模糊对两个变体完全不变** → 与 loss 温度和 HR head 无关，指向前端输入信息瓶颈：5 个输入通道全部是 1x 网格统计量，248 帧的亚像素相位信息在进网络前已被坍缩；而 EP10/EP15 证明 2x 网格经典方法可恢复 12 µm 频带信息（FRC 0.575→0.947）。下一步主攻方向为 2x-grid drizzle/classical-SR 输入通道 + 温和 highpass-band forward consistency。
 
 **涉及文件**: `algos/ep07_unet_sr/src/unet_sr/model.py`, `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep11_dl_benchmark/scripts/run_unet_vs_drizzle_2x.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`, `algos/ep07_unet_sr/tests/test_config.py`, `algos/ep07_unet_sr/scripts/run_training.md`
 
@@ -484,7 +484,7 @@ uv run python scripts/generate_training_pool.py \
 
 ---
 
-### [ACL-012] 2026-06-10 — EP15 M4 GPU MAP-TV 去卷积锚重跑
+### [ACL-012] 2026-06-10 — EP15 M4 GPU MAP-TV 去卷积基准重跑
 
 **问题诊断**:
 - EP06 旧 MAP-TV 结果不可作为 4x baseline：`psf_sigma=1.0` 已超出 M3 支持的可信区间 `0.2-0.5 LR px`，`max_iter=4` 远未收敛，lambda 只取单点，forward model 没有包含探测器孔径 box integration。
@@ -495,7 +495,7 @@ uv run python scripts/generate_training_pool.py \
 2. 默认 forward model 改为 `HR -> shift -> Gaussian PSF -> avg_pool2d detector box -> LR`，`--no-box` 仅作为消融开关。
 3. MAP-TV 主循环使用 FISTA + smoothed TV gradient，full run `max_iter=150`，输出 `iteration,data_rmse,tv_value,objective,relative_update` 收敛曲线。
 4. 参数网格改为 `sigma={0.2,0.3,0.4,0.5} LR px`、`lambda={3e-4,1e-3,3e-3}`；每个 sigma 先用 odd/even split-half NRMSE + artifact/std proxy 选 lambda，再用全 248 帧跑 full reconstruction。
-5. 新增四臂视觉对比、sigma=5 highpass 对比、zigzag 定量剖面、split-half FRC 复验和全参数选择 CSV。
+5. 新增四方法视觉对比、sigma=5 highpass 对比、zigzag 定量剖面、split-half FRC 复验和全参数选择 CSV。
 
 **预期效果**:
 - 给后续 UNet/Transformer 建立经典算法及格线：如果网络不能同时超过 MAP-TV 的 FRC 与 zigzag 指标，则没有采纳价值。

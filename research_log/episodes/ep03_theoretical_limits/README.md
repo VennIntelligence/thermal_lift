@@ -14,7 +14,7 @@
 - [x] recoverability 覆盖 reference contrast 与 inner/outer median contour contrast，扫描 `sigma=0.2/0.35/0.5 px` 和 1x/2x/4x Nyquist。
 - [x] 补充 CRB sensitivity scan：扫描 `DeltaT`、`sigma`、`n_frames` 和抽象 `phase_coverage`，配合 0.05/0.10 px gate 解读。
 - [x] 在 Notebook 每张图/表后保留教程式解读，显式说明能得出什么、不能得出什么。
-- [x] 更新正式报告 `reports/ep03_theoretical_limits/theoretical_limits_report.md`。
+- [x] 更新正式报告 `paper/reports/ep03_theoretical_limits/theoretical_limits_report.md`。
 - [x] 执行 `uv run python scripts/build_notebook.py notebooks/ep03_theoretical_limits --execute` 并记录结果。
 
 ---
@@ -97,7 +97,7 @@ Notebook:
 
 报告:
 
-- `reports/ep03_theoretical_limits/theoretical_limits_report.md`
+- `paper/reports/ep03_theoretical_limits/theoretical_limits_report.md`
 
 主要输出:
 

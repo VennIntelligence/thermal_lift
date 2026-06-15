@@ -1,7 +1,7 @@
 # %% [markdown]
 # ## EP07 2x x2up vs EP12 4x
 #
-# 这组廉价基线回答一个更直接的问题：EP12 专用 4x 网络是否比“满意的 EP07 2x 结果再 cubic 放大 2 倍”更有价值。四臂都使用 EP06 clean main session 248 帧和 `contour_refined` shifts，输出统一落到 1920×2560 4x 网格。
+# 这组廉价基线回答一个更直接的问题：EP12 专用 4x 网络是否比“满意的 EP07 2x 结果再 cubic 放大 2 倍”更有价值。四个方法都使用 EP06 clean main session 248 帧和 `contour_refined` shifts，输出统一落到 1920×2560 4x 网格。
 
 # %%
 EP07X2UP_DIR = OUTPUT_DIR / "ep07x2up_vs_ep12"
@@ -48,7 +48,7 @@ print(f"Rebuild command: {EP07X2UP_COMMAND}")
 show_ep07x2up_fig("ep07x2up_vs_ep12_center_zoom3x_temperature.png")
 
 # %% [markdown]
-# > **图表说明**: 温度视图显示中心 1/3 crop 并 3x 展示，四臂共享全幅 1-99 percentile 色阶。
+# > **图表说明**: 温度视图显示中心 1/3 crop 并 3x 展示，四个方法共享全幅 1-99 percentile 色阶。
 # >
 # > **怎么看**: 普通温度图用于检查内部区域是否自然、中心 zigzag 和大块边界是否真的更清楚，而不是只在 highpass 中被边缘增强。
 # >
@@ -97,7 +97,7 @@ ep07x2up_metrics = read_ep07x2up_csv("metrics_summary.csv")
 display(ep07x2up_metrics.round(6))
 
 # %% [markdown]
-# > **数据说明**: 指标 CSV 给出每臂 highpass artifact score、与 bicubic raw-control highpass 的 Pearson 相关，以及 highpass P95 gradient。
+# > **数据说明**: 指标 CSV 给出每个方法的 highpass artifact score、与 bicubic raw-control highpass 的 Pearson 相关，以及 highpass P95 gradient。
 # >
 # > **怎么看**: artifact score 通常越低越少高频伪影；raw-control highpass Pearson 越高表示结构位置更接近 raw 控制轨；P95 gradient 只辅助观察边缘强度，不能单独作为成功证据。
 # >

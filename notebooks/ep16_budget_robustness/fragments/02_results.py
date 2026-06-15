@@ -128,11 +128,10 @@ show_fig(PAPER_FIGURE)
 # > **Figure note**: `fig07_budget_robustness` combines the frame-budget and
 # > shift-robustness panels for the paper figure slot.
 # >
-# > **How to read it**: The left panel answers how much the classic arms gain
+# > **How to read it**: The left panel answers how much the classic methods gain
 # > from more clean frames; the right panel answers how quickly proxy agreement
 # > degrades under synthetic shift perturbations.
 # >
 # > **Core finding**: The figure supports the Section 6.4-6.5 narrative only as
 # > an inference-time stability study. It should not be described as a direct
 # > spatial-resolution proof.
-

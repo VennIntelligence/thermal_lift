@@ -22,7 +22,7 @@ uv run python algos/ep09_psf_calibration/scripts/summarize_calibration.py
 ```
 
 Outputs are written to `output/ep09_psf_calibration/`. The summary script also updates
-`configs/psf_calibration.json` and writes `reports/ep09_psf_calibration/psf_calibration_report.md`.
+`configs/psf_calibration.json` and writes `paper/reports/ep09_psf_calibration/psf_calibration_report.md`.
 
 ## Interpretation
 
