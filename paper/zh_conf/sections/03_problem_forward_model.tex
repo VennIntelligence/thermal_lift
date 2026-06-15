@@ -38,17 +38,6 @@
 哪些 \eng{HR} 信息可被观测约束，哪些超出观测能力。下一节对此展开分析。
 
 
-\begin{figure*}[t]
-  \centering
-  \includegraphics[width=\textwidth]{../figures/fig_tcforge_pipeline.pdf}
-  \caption{(a) \eng{TCForge} 物理匹配合成管线：以标定前向模型为核心，
-    经 场景几何$\to$温度场渲染$\to$前向退化$\to$训练对 四阶段生成合成训练数据；
-    (b) \eng{ThermalLift-UNet} 网络结构：左侧为输入选择器（\(1\times\) 统计 5 通道
-    或 \eng{hybrid drizzle} 8 通道），中部为共享 \eng{UNet} 骨干，
-    右侧为无归一化高分残差细化模块与最终 \eng{HR} 温度/残差输出。}
-  \label{fig:method-pipeline}
-\end{figure*}
-
 \subsection{可恢复性边界}
 
 在讨论 \eng{HR} 信息的可恢复性之前，需要区分三个相关但含义不同的空间尺度：
@@ -118,4 +107,3 @@
 \paragraph{锯齿走线剖面.}
 在固定中心锯齿走线横截面上测量半高全宽（\eng{FWHM}）与凹陷深度（\eng{dip depth}），
 用于结构级轮廓门控（完整协议见附录~C.6）。
-

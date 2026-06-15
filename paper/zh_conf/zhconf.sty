@@ -17,6 +17,8 @@
 \RequirePackage{amsmath,amssymb}
 \RequirePackage{booktabs}
 \RequirePackage{caption}
+\RequirePackage{stfloats}
+\RequirePackage[section]{placeins}
 \RequirePackage{gbt7714}
 \RequirePackage[hidelinks]{hyperref}
 
@@ -126,6 +128,19 @@
   labelfont={bf,zhcap},
   skip=6pt,
 }
+
+% Dual-column papers need permissive float placement; otherwise wide figures/tables
+% queue up and can drift past the bibliography.
+\setcounter{topnumber}{4}
+\setcounter{bottomnumber}{2}
+\setcounter{totalnumber}{6}
+\setcounter{dbltopnumber}{3}
+\renewcommand{\topfraction}{0.95}
+\renewcommand{\bottomfraction}{0.85}
+\renewcommand{\textfraction}{0.05}
+\renewcommand{\floatpagefraction}{0.78}
+\renewcommand{\dbltopfraction}{0.95}
+\renewcommand{\dblfloatpagefraction}{0.78}
 
 % 段落小标题（\paragraph）与正文加粗：继承主字体宋体粗体。
 \makeatletter
