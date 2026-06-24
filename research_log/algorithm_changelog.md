@@ -8,6 +8,29 @@
 
 ## 变更记录
 
+### [ACL-024] 2026-06-25 — 决策记录:不上 diffusion / 不用现成底子,承诺 unrolled solver(roadmap 落盘)
+
+> 本条是**决策记录(ADR)**,非代码变更。完整 roadmap 见 `research_log/network_upgrade_roadmap.md`。
+
+**决策点**:v3 数据(5K)生成完后,是否把 U-Net 升级为 diffusion / flow matching?是否拿别人训好的超分/扩散模型(Real-ESRGAN / SwinIR / StableSR / SD)当底子在我们数据上微调?远端 5090 有 32G。
+
+**决策**:
+1. **不**把主干换成 diffusion/flow 当**主**架构;**不**用现成 RGB 底子微调。
+2. **承诺** physics-constrained **unrolled solver**(确定性)+ band-limited 监督(沿用 memory `thermal-lift-redesign-direction` 已定方向)。
+3. 生成模型**只在最后**作 unrolled solver 里的 plug-in **不确定度先验**(DPS/ΠGDM 式后验采样)考虑,不替代主干。
+
+**理由(grounded)**:① 计量要 data-consistent 恢复、不要生成式幻觉;② 我们 ACL-023 的 band-limited 原则本就是确定性恢复框架,diffusion 的多峰优势只在我们不追的 band 外;③ 现成 RGB 底子域差大、latent-diffusion 的 VAE 恰好毁掉要恢复的高频;④ 5000 scene 偏向数据高效的 solver,不偏向数据饥饿的 diffusion;⑤ **经验证据**:loss-side forward 锚定已被证伪(`losses.py:299` `forward_model_weight=0`,ACL-017/019)→ 下一步是把同一算子升级成**硬约束(unrolling)**;⑥ 5090/32G 应"把对的东西做大"(更多 unroll 迭代/更深 prox/更狠 randomization),不够从头训高分扩散。
+
+**落盘的实现次序**(详见 roadmap):Step 0 远端跑 5K 生成 → Step 1 torch shift-aware 前向 `A_i` + autograd 转置(用 numpy `ObservationOperator` 做 adjoint dot-product 验证)→ Step 2 K 步 unroll(DC 步 + 现有 U-Net 当 prox,drizzle 暖启;V10 已是 1 步 unroll)→ Step 3 band-aware loss + 标定 σ → Step 4 eval(EP15 FRC,及格线=band 内打赢经典 TGV/MAP-TV);前置 Step 5 远端重跑 EP15 定 20µm 权威频带。
+
+**load-bearing 约束**:① shift 精度是头号风险 → 训练加 shift-jitter randomization;② torch `A_iᵀ` 必须复刻 +0.499 HR-px block-center 偏移(self-check T1);③ 用标定 σ=0.2257 LR-px(T5),不是占位 0.5;④ EP15 未在 20µm 重跑,band 数字在此前不可信。
+
+**硬规矩**:一次只动一个变量(先 solver 打赢经典,再谈生成先验);band gate 一切。
+
+**涉及文件**:新增 `research_log/network_upgrade_roadmap.md`;复用 `algos/ep07_unet_sr/src/unet_sr/{losses.py,model.py,train.py}`、`tcforge/src/tcforge/_ep06_reference/forward.py`、`algos/ep15_info_limit/scripts/run_m2_frc.py`。
+
+---
+
 ### [ACL-023] 2026-06-25 — 探测器 pitch 重标定(20µm)+ forward 算子认证 + v3 信息保存数据管线
 
 **问题诊断**:
