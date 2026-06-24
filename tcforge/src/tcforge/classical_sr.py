@@ -180,6 +180,57 @@ def drizzle_features(
     return np.where(np.isfinite(features), features, 0.0).astype(np.float32, copy=False)
 
 
+def phase_bin_drizzle(
+    lr_burst: np.ndarray,
+    shifts: np.ndarray,
+    *,
+    scale: int = 2,
+    n_bins: int = 4,
+    output_shape: tuple[int, int] | None = None,
+) -> np.ndarray:
+    """Drizzle the burst into per-sub-pixel-phase bins.
+
+    Routes each frame to one of ``n_bins`` cells on a ``g × g`` grid
+    (``g = sqrt(n_bins)``) by its sub-pixel phase ``(frac(dy), frac(dx))``,
+    then runs the standard mean-channel drizzle on each bin's frames. Returns
+    ``(n_bins, H_hr, W_hr)`` float32. Empty bins are filled with the global
+    burst mean, matching ``drizzle_features``' unobserved-bin convention.
+
+    ``n_bins`` must be a perfect square.
+    """
+
+    frames, shift_arr = _validate_burst_and_shifts(lr_burst, shifts)
+    n_frames, h_lr, w_lr = frames.shape
+    scale = int(scale)
+    n_bins = int(n_bins)
+    if n_bins <= 0:
+        raise ValueError("n_bins must be > 0")
+    g = int(round(np.sqrt(n_bins)))
+    if g * g != n_bins:
+        raise ValueError("n_bins must be a perfect square")
+    h_hr, w_hr = _resolve_hr_shape(h_lr, w_lr, scale, output_shape)
+
+    # Route each frame to a phase bin: (frac(dy), frac(dx)) → (row, col) → flat.
+    frac_dy = np.mod(shift_arr[:, 1], 1.0)
+    frac_dx = np.mod(shift_arr[:, 0], 1.0)
+    row = np.clip((frac_dy * g).astype(np.int64), 0, g - 1)
+    col = np.clip((frac_dx * g).astype(np.int64), 0, g - 1)
+    bin_idx = row * g + col
+
+    global_mean = float(np.mean(frames))
+    out = np.empty((n_bins, h_hr, w_hr), dtype=np.float32)
+    for b in range(n_bins):
+        sel = bin_idx == b
+        if np.any(sel):
+            mean_channel = drizzle_features(
+                frames[sel], shift_arr[sel], scale=scale, output_shape=(h_hr, w_hr),
+            )[DRIZZLE_CH_MEAN]
+            out[b] = mean_channel
+        else:
+            out[b] = global_mean
+    return out
+
+
 def drizzle_features_4x(
     lr_burst: np.ndarray,
     shifts: np.ndarray,

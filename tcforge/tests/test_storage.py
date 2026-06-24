@@ -135,3 +135,66 @@ def test_load_scene_compact_includes_optional_ep12_artifacts(tmp_path: Path) -> 
     assert loaded["obs_features_2x_up4x"].shape == (3, 8, 8)
     assert loaded["obs_features_1x_up4x"].shape == (5, 8, 8)
     assert "lr_burst.npy" not in COMPACT_SCENE_FILES
+
+
+def test_uncompressed_burst_and_phase_bin_drizzle_roundtrip_via_mmap(tmp_path: Path) -> None:
+    mask = np.zeros((12, 16), dtype=np.uint8)
+    mask[2:8, 3:10] = 1
+    edge = (mask > 0).astype(np.uint8)
+    obs_features = np.zeros((5, 3, 4), dtype=np.float32)
+    shifts = np.zeros((6, 2), dtype=np.float32)
+    rng = np.random.default_rng(31)
+    lr_burst = rng.normal(1.0, 0.2, size=(6, 3, 4)).astype(np.float32)
+    pbd = rng.normal(1.0, 0.2, size=(4, 12, 16)).astype(np.float32)
+
+    scene_dir = save_scene_compact(
+        tmp_path / "scene_burst",
+        hr_mask=mask,
+        hr_edge=edge,
+        obs_features=obs_features,
+        shifts=shifts,
+        metadata={**_metadata(), "lr_shape": [3, 4], "hr_shape": [12, 16]},
+        lr_burst=lr_burst,
+        phase_bin_drizzle=pbd,
+        compress_burst=False,
+    )
+
+    # Uncompressed .npy burst → mmap-friendly; .npz must NOT exist.
+    assert (scene_dir / "lr_burst.npy").exists()
+    assert not (scene_dir / "lr_burst.npz").exists()
+    assert (scene_dir / "phase_bin_drizzle_2x.npy").exists()
+
+    loaded = load_scene_compact(scene_dir)
+    assert isinstance(loaded["lr_burst"], np.memmap)
+    assert loaded["lr_burst"].dtype == np.float16
+    assert np.max(np.abs(loaded["lr_burst"].astype(np.float32) - lr_burst)) < 0.01
+
+    assert "phase_bin_drizzle" in loaded
+    assert isinstance(loaded["phase_bin_drizzle"], np.memmap)
+    assert loaded["phase_bin_drizzle"].shape == (4, 12, 16)
+    assert np.max(np.abs(loaded["phase_bin_drizzle"].astype(np.float32) - pbd)) < 0.01
+
+
+def test_compressed_burst_backward_compat(tmp_path: Path) -> None:
+    mask = np.zeros((8, 8), dtype=np.uint8)
+    edge = np.zeros_like(mask)
+    obs_features = np.zeros((5, 2, 2), dtype=np.float32)
+    shifts = np.zeros((3, 2), dtype=np.float32)
+    rng = np.random.default_rng(5)
+    lr_burst = rng.normal(1.0, 0.2, size=(3, 2, 2)).astype(np.float32)
+
+    scene_dir = save_scene_compact(
+        tmp_path / "scene_npz",
+        hr_mask=mask,
+        hr_edge=edge,
+        obs_features=obs_features,
+        shifts=shifts,
+        metadata={**_metadata(), "lr_shape": [2, 2], "hr_shape": [8, 8]},
+        lr_burst=lr_burst,
+        compress_burst=True,
+    )
+    assert (scene_dir / "lr_burst.npz").exists()
+    assert not (scene_dir / "lr_burst.npy").exists()
+
+    loaded = load_scene_compact(scene_dir)
+    assert np.max(np.abs(np.asarray(loaded["lr_burst"]).astype(np.float32) - lr_burst)) < 0.01

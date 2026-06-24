@@ -29,12 +29,18 @@ def save_scene_compact(
     metadata: dict[str, Any],
     classical_sr: np.ndarray | None = None,
     lr_burst: np.ndarray | None = None,
+    phase_bin_drizzle: np.ndarray | None = None,
+    compress_burst: bool = True,
 ) -> Path:
     """Save one compact scene without HR temperature arrays.
 
     If *classical_sr* is provided it is saved as ``classical_sr_{scale}x.npy``
     alongside the standard compact files. If *lr_burst* is provided it is
     saved as optional ``lr_burst.npy`` for deferred EP12 feature building.
+    When *compress_burst* is False the burst is stored as a plain (mmap-friendly)
+    uncompressed float16 ``.npy``; when True it remains a compressed
+    ``lr_burst.npz``. If *phase_bin_drizzle* is provided it is saved as an
+    uncompressed float16 ``phase_bin_drizzle_2x.npy``.
     ``hr_mask`` may be binary or a soft coverage mask in ``[0, 1]``; it is
     quantized to 8-bit grayscale PNG and restored as float32 coverage.
     """
@@ -63,7 +69,18 @@ def save_scene_compact(
             raise ValueError("lr_burst must have shape (N, H_lr, W_lr)")
         if not np.isfinite(burst).all():
             raise ValueError("lr_burst contains NaN or Inf")
-        np.save(root / "lr_burst.npy", burst)
+        if bool(compress_burst):
+            np.savez_compressed(root / "lr_burst.npz", lr_burst=burst)
+        else:
+            # Plain uncompressed .npy → mmap-friendly for CPU-bound generation.
+            np.save(root / "lr_burst.npy", burst)
+    if phase_bin_drizzle is not None:
+        pbd = np.asarray(phase_bin_drizzle, dtype=np.float16)
+        if pbd.ndim != 3:
+            raise ValueError("phase_bin_drizzle must have shape (n_bins, H_hr, W_hr)")
+        if not np.isfinite(pbd).all():
+            raise ValueError("phase_bin_drizzle contains NaN or Inf")
+        np.save(root / "phase_bin_drizzle_2x.npy", pbd)
     (root / "metadata.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     return root
 
@@ -99,8 +116,18 @@ def load_scene_compact(scene_dir: str | Path) -> dict[str, Any]:
     if csr_path.exists():
         result["classical_sr"] = np.load(csr_path).astype(np.float32, copy=False)
     lr_burst_path = root / "lr_burst.npy"
+    lr_burst_npz_path = root / "lr_burst.npz"
     if lr_burst_path.exists():
+        # Uncompressed float16 burst → mmap (no full read).
         result["lr_burst"] = np.load(lr_burst_path, mmap_mode="r")
+    elif lr_burst_npz_path.exists():
+        # Backward-compat: compressed burst cannot be mmapped.
+        with np.load(lr_burst_npz_path) as data:
+            key = "lr_burst" if "lr_burst" in data else data.files[0]
+            result["lr_burst"] = np.asarray(data[key])
+    pbd_path = root / "phase_bin_drizzle_2x.npy"
+    if pbd_path.exists():
+        result["phase_bin_drizzle"] = np.load(pbd_path, mmap_mode="r")
     drizzle_variants_path = root / f"drizzle_variants_{scale}x.npy"
     if drizzle_variants_path.exists():
         result["drizzle_variants"] = np.load(drizzle_variants_path, mmap_mode="r")

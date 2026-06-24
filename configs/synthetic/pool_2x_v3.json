@@ -1,0 +1,82 @@
+{
+  "_comment": "Information-preserving 2x training pool (v3). Recalibrated pitch=20um. Requires the generate_training_pool.py + tcforge changes listed in the v3 build spec (random N, random shift constellation, inscribe_disc rotation, phase-bin drizzle, burst compression). NOT runnable until those land.",
+  "dataset": "ThermalChipPhantom_v3_infopreserve",
+  "engine": "TCForge",
+  "version": "0.3.0",
+  "scale": 2,
+  "lr_shape": [480, 640],
+  "hr_shape": [960, 1280],
+  "pixel_size_um": 20.0,
+  "spatial_resolution_um": 20.0,
+  "forward_mode": "physical_block_average",
+  "num_scenes": 5000,
+  "seed": 930930,
+  "output_dir": "data/synthetic/pool_2x_v3_5k",
+
+  "n_frames_per_scene": {"dist": "randint", "low": 24, "high": 96},
+
+  "geometry": {
+    "antialias": true,
+    "ssaa_factor": 4,
+    "ssaa_factor_fine": 6,
+    "inscribe_disc": true
+  },
+
+  "physics_ranges": {
+    "psf_sigma_lr_px": [0.15, 0.55],
+    "noise_sigma_c": {"dist": "lognormal", "mean": 0.0724, "sigma_factor": 0.25},
+    "T_bg_c": [19.0, 23.0],
+    "delta_T_c_by_difficulty": {
+      "easy": [2.0, 5.0],
+      "medium": [1.0, 3.0],
+      "hard": [0.5, 2.0],
+      "stress": [0.3, 0.8]
+    },
+    "low_freq_amplitude_c": [0.02, 0.5],
+    "low_freq_sigma_px": 96.0,
+    "rotation_deg_center": {"dist": "uniform", "low": 0.0, "high": 360.0},
+    "rotation_jitter_deg": 0.0
+  },
+
+  "difficulty_distribution": {"easy": 150, "medium": 400, "hard": 350, "stress": 100},
+  "drift_distribution": {"none": 300, "scalar_offset": 250, "lowfreq": 200, "gain_offset": 100, "temporal_trend": 150},
+  "drift_parameters": {
+    "amplitude_c": [0.0, 0.3], "lowfreq_sigma_px": 96.0, "gain_sigma": 0.01,
+    "offset_sigma_c": 0.1, "temporal_spatial_sigma_px": [0.0, 24.0]
+  },
+
+  "psf_randomization": {
+    "enabled": true, "sigma_range": [0.15, 0.55],
+    "elliptical_probability": 0.50, "airy_probability": 0.15, "angle_random": true
+  },
+
+  "shift_constellation": {
+    "mode": "random_phase",
+    "phase_steps_choices": [2, 3, 4],
+    "coverage_quality_weights": {"good": 0.5, "medium": 0.3, "poor": 0.2},
+    "jitter_std_px": [0.0, 0.08],
+    "include_real_like_fraction": 0.15
+  },
+
+  "noise_model": {"model": "detector_realistic", "fpn_sigma_px": [3.0, 12.0], "stripe_sigma_c": [0.005, 0.025]},
+  "detector_defects": {"enabled": true, "defect_rate": [0.0, 0.001], "mode": "offset", "hot_delta_c": [0.2, 0.8], "cold_delta_c": [-0.8, -0.2]},
+
+  "features": {
+    "drizzle_2x": true,
+    "phase_bin_drizzle": {"enabled": true, "n_bins": 4},
+    "fused_1x_stats": true,
+    "drizzle_variants_k": 4
+  },
+
+  "storage": {
+    "format": "compact",
+    "obs_features_resolution": "1x",
+    "obs_features_dtype": "float16",
+    "compress_features": true,
+    "save_lr_burst": true,
+    "burst_dtype": "float16",
+    "compress_burst": false,
+    "save_hr_temperature": false
+  },
+  "obs_features_channels": ["aligned_mean", "aligned_median", "coverage", "variance", "highpass_fused"]
+}

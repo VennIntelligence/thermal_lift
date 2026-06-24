@@ -36,11 +36,13 @@ from tcforge import (  # noqa: E402
     fuse_burst_to_features,
     generate_lr_burst,
     load_shift_profile,
+    phase_bin_drizzle,
     render_temperature_field,
     save_scene_compact,
     sample_psf_parameters,
     shift_and_add,
 )
+from tcforge import shifts as shift_module  # noqa: E402
 
 
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "synthetic" / "training_pool_4x.json"
@@ -194,19 +196,52 @@ def _require_storage_contract(config: dict[str, Any]) -> None:
         raise ValueError("training pool config must not save HR temperature")
 
 
+def _n_frames_range(config: dict[str, Any]) -> tuple[int, int]:
+    """Resolve n_frames_per_scene into an inclusive (low, high) range.
+
+    Accepts either an int (low == high) or a randint dist mapping
+    ``{"dist": "randint", "low": ..., "high": ...}`` where ``high`` is
+    inclusive.
+    """
+
+    value = config.get("n_frames_per_scene", 0)
+    if isinstance(value, Mapping):
+        dist = str(value.get("dist", "randint"))
+        if dist != "randint":
+            raise ValueError("n_frames_per_scene mapping must use dist 'randint'")
+        low, high = int(value["low"]), int(value["high"])
+    elif isinstance(value, bool):
+        raise ValueError("n_frames_per_scene must be an int or randint mapping")
+    elif isinstance(value, (int, float)):
+        low = high = int(value)
+    else:
+        raise ValueError("n_frames_per_scene must be an int or randint mapping")
+    if low <= 0 or high < low:
+        raise ValueError("n_frames_per_scene must satisfy 0 < low <= high")
+    return low, high
+
+
+def _sample_n_frames(rng: np.random.Generator, config: dict[str, Any]) -> int:
+    low, high = _n_frames_range(config)
+    if low == high:
+        return low
+    # high is treated as inclusive.
+    return int(rng.integers(low, high + 1))
+
+
 def _validate_config(config: dict[str, Any]) -> None:
     _require_storage_contract(config)
     scale = int(config.get("scale", 0))
     lr_shape = tuple(map(int, config.get("lr_shape", [])))
     hr_shape = tuple(map(int, config.get("hr_shape", [])))
-    n_frames = int(config.get("n_frames_per_scene", 0))
+    n_low, _n_high = _n_frames_range(config)
     if scale not in SUPPORTED_SCALES:
         raise ValueError(f"training pool config scale must be one of {sorted(SUPPORTED_SCALES)}, got {scale}")
     if len(lr_shape) != 2 or len(hr_shape) != 2:
         raise ValueError("lr_shape and hr_shape must be [rows, cols]")
     if hr_shape != (lr_shape[0] * scale, lr_shape[1] * scale):
         raise ValueError("hr_shape must equal lr_shape * scale")
-    if n_frames <= 0:
+    if n_low <= 0:
         raise ValueError("n_frames_per_scene must be > 0")
     required_ranges = {
         "T_bg_c",
@@ -271,6 +306,16 @@ def _load_or_fallback_shifts(config: dict[str, Any], *, n_frames: int, scale: in
         return shifts.astype(np.float32, copy=False), metadata
 
 
+def _repeated_shifts(shifts: np.ndarray, n_frames: int) -> np.ndarray:
+    """Repeat/trim a preloaded shift array to exactly ``n_frames`` rows."""
+    arr = np.asarray(shifts, dtype=np.float32)
+    n = int(n_frames)
+    if arr.shape[0] == n:
+        return arr.copy()
+    repeats = int(np.ceil(n / max(arr.shape[0], 1)))
+    return np.tile(arr, (repeats, 1))[:n].astype(np.float32, copy=False)
+
+
 def _generate_one_scene_worker(plan: ScenePlan, output_dir: str) -> dict[str, Any]:
     """Entry point for ProcessPoolExecutor workers — reads globals from _worker_init."""
     assert _WORKER_CONFIG is not None, "worker not initialized"
@@ -299,7 +344,7 @@ def _generate_one_scene(
     scale = int(config["scale"])
     lr_shape = tuple(map(int, config["lr_shape"]))
     hr_shape = tuple(map(int, config["hr_shape"]))
-    n_frames = int(config["n_frames_per_scene"])
+    n_frames = _sample_n_frames(rng, config)
 
     t_bg_c = _uniform_range(rng, physics["T_bg_c"], "T_bg_c")
     delta_t_c = _uniform_range(
@@ -330,11 +375,17 @@ def _generate_one_scene(
     low_freq_amplitude_c = _uniform_range(rng, physics["low_freq_amplitude_c"], "low_freq_amplitude_c")
     low_freq_sigma_px = float(physics.get("low_freq_sigma_px", 96.0))
     low_freq_seed = int(rng.integers(1, np.iinfo(np.int32).max))
-    rotation_center = float(physics["rotation_deg_center"])
+    rotation_center = _uniform_range(rng, physics["rotation_deg_center"], "rotation_deg_center")
     rotation_jitter = float(physics["rotation_jitter_deg"])
     geometry_cfg = dict(config.get("geometry", {}))
     antialias = bool(geometry_cfg.get("antialias", True))
-    ssaa_factor = int(geometry_cfg.get("ssaa_factor", 4))
+    inscribe_disc = bool(geometry_cfg.get("inscribe_disc", False))
+    # Use the finer SSAA factor on the hardest "stress" scenes to bound
+    # rasteriser aliasing on the finest rotated lines.
+    if plan.difficulty == "stress":
+        ssaa_factor = int(geometry_cfg.get("ssaa_factor_fine", geometry_cfg.get("ssaa_factor", 4)))
+    else:
+        ssaa_factor = int(geometry_cfg.get("ssaa_factor", 4))
 
     hr_mask, geo_meta = build_scene_mask_with_metadata(
         plan.difficulty,
@@ -346,6 +397,7 @@ def _generate_one_scene(
         scale=scale,
         antialias=antialias,
         ssaa_factor=ssaa_factor,
+        inscribe_disc=inscribe_disc,
     )
     hr_temperature = render_temperature_field(
         hr_mask,
@@ -357,9 +409,17 @@ def _generate_one_scene(
     )
     hr_edge = edge_map(hr_mask >= 0.5, edge_width_px=2)
 
-    # Use pre-loaded shifts when available (avoids 2000× CSV re-reads)
-    if preloaded_shifts is not None and preloaded_shift_meta is not None:
-        shifts = preloaded_shifts.copy()
+    # Per-scene random shift constellation (v3): generate in-worker from the
+    # deterministic scene seed. Falls back to the preloaded shared profile for
+    # legacy configs without "shift_constellation".
+    constellation_cfg = config.get("shift_constellation")
+    if constellation_cfg is not None:
+        shifts, shift_meta = shift_module.build_scene_shifts(
+            plan.seed, n_frames, constellation_cfg, scale=scale
+        )
+    elif preloaded_shifts is not None and preloaded_shift_meta is not None:
+        # Use pre-loaded shifts when available (avoids 2000× CSV re-reads).
+        shifts = _repeated_shifts(preloaded_shifts, n_frames)
         shift_meta = dict(preloaded_shift_meta)
     else:
         shifts, shift_meta = _load_or_fallback_shifts(config, n_frames=n_frames, scale=scale)
@@ -478,6 +538,18 @@ def _generate_one_scene(
     if config.get("compute_classical_sr", False):
         classical_sr_image = shift_and_add(lr_burst, shifts, scale=scale, output_shape=hr_shape)
 
+    # Phase-binned drizzle stack (optional, controlled by config.features)
+    phase_bin_drizzle_stack = None
+    pbd_cfg = dict(config.get("features", {}).get("phase_bin_drizzle", {}))
+    if bool(pbd_cfg.get("enabled", False)):
+        phase_bin_drizzle_stack = phase_bin_drizzle(
+            lr_burst,
+            shifts,
+            scale=scale,
+            n_bins=int(pbd_cfg.get("n_bins", 4)),
+            output_shape=hr_shape,
+        )
+
     metadata = {
         "scene_id": plan.scene_id,
         "scene_index": int(plan.scene_index),
@@ -517,15 +589,22 @@ def _generate_one_scene(
         "obs_features_channels": list(config["obs_features_channels"]),
         "obs_features_resolution": config.get("storage", {}).get("obs_features_resolution", "1x"),
         "has_classical_sr": classical_sr_image is not None,
+        "has_phase_bin_drizzle": phase_bin_drizzle_stack is not None,
+        "phase_bin_drizzle_n_bins": (
+            int(phase_bin_drizzle_stack.shape[0]) if phase_bin_drizzle_stack is not None else None
+        ),
         "storage": {
             "format": "compact",
             "save_lr_burst": bool(config.get("storage", {}).get("save_lr_burst", False)),
+            "burst_dtype": str(config.get("storage", {}).get("burst_dtype", "float16")),
+            "compress_burst": bool(config.get("storage", {}).get("compress_burst", True)),
             "save_hr_temperature": False,
             "hr_mask_semantics": "coverage" if antialias else "binary",
             "hr_mask_quantization": "uint8_png_0_255",
         },
     }
 
+    storage_cfg = dict(config.get("storage", {}))
     scene_dir = Path(output_dir) / plan.scene_id
     save_scene_compact(
         scene_dir,
@@ -537,9 +616,11 @@ def _generate_one_scene(
         classical_sr=classical_sr_image,
         lr_burst=(
             lr_burst
-            if bool(config.get("storage", {}).get("save_lr_burst", False))
+            if bool(storage_cfg.get("save_lr_burst", False))
             else None
         ),
+        phase_bin_drizzle=phase_bin_drizzle_stack,
+        compress_burst=bool(storage_cfg.get("compress_burst", True)),
     )
     return {
         "scene_id": plan.scene_id,
@@ -602,10 +683,21 @@ def _estimate_memory_per_worker(config: dict[str, Any]) -> float:
     """Estimate peak memory per worker in GB (conservative upper bound)."""
     lr = config.get("lr_shape", [480, 640])
     hr = config.get("hr_shape", [1920, 2560])
-    n_frames = int(config.get("n_frames_per_scene", 248))
+    # Use the MAX possible frame count so the estimate is honest at ~64 workers.
+    try:
+        _n_low, n_frames = _n_frames_range(config)
+    except ValueError:
+        n_frames = 248
     geometry_cfg = dict(config.get("geometry", {}))
     antialias = bool(geometry_cfg.get("antialias", True))
-    ssaa_factor = int(geometry_cfg.get("ssaa_factor", 4)) if antialias else 1
+    # Stress scenes may use the finer SSAA factor; use the largest configured.
+    if antialias:
+        ssaa_factor = max(
+            int(geometry_cfg.get("ssaa_factor", 4)),
+            int(geometry_cfg.get("ssaa_factor_fine", geometry_cfg.get("ssaa_factor", 4))),
+        )
+    else:
+        ssaa_factor = 1
     hr_bytes = hr[0] * hr[1] * 4  # float32
     ssaa_pixels = hr[0] * ssaa_factor * hr[1] * ssaa_factor
     # Incremental geometry keeps one uint8 draw canvas, one uint8 subtract
@@ -649,12 +741,18 @@ def _generate_pool(
         f"= {worker_count * burst_workers_resolved} logical threads (CPUs: {cpu_count})"
     )
 
-    # Pre-load shifts once — shared across all workers via initializer
-    n_frames = int(config["n_frames_per_scene"])
+    # Pre-load shifts once — shared across all workers via initializer.
+    # Skipped when per-scene constellations are configured (v3): each scene
+    # generates its own shifts in-worker from the deterministic scene seed.
     scale = int(config["scale"])
-    preloaded_shifts, preloaded_shift_meta = _load_or_fallback_shifts(
-        config, n_frames=n_frames, scale=scale
-    )
+    if config.get("shift_constellation") is not None:
+        preloaded_shifts = np.zeros((0, 2), dtype=np.float32)
+        preloaded_shift_meta = {"preloaded": False, "reason": "per_scene_shift_constellation"}
+    else:
+        n_low, _ = _n_frames_range(config)
+        preloaded_shifts, preloaded_shift_meta = _load_or_fallback_shifts(
+            config, n_frames=n_low, scale=scale
+        )
 
     rows: list[dict[str, Any]] = []
 

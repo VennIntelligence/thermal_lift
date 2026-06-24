@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from .classical_sr import drizzle_features, drizzle_features_4x, shift_and_add
+from .classical_sr import drizzle_features, drizzle_features_4x, phase_bin_drizzle, shift_and_add
 from .forward import FORWARD_MODES, generate_lr_burst, physical_block_average_forward
 from .fusion import fuse_burst_to_features
 from .geometry import (
@@ -58,7 +58,13 @@ from .physics import (
     temporal_trend_drift,
 )
 from .reconstruct import reconstruct_hr_temperature
-from .shifts import SHIFT_CONVENTION, ideal_phase_grid, load_shift_profile
+from .shifts import (
+    SHIFT_CONVENTION,
+    build_scene_shifts,
+    ideal_phase_grid,
+    load_shift_profile,
+    random_constellation,
+)
 from .storage import COMPACT_SCENE_FILES, load_scene_compact, save_scene_compact
 
 __version__ = "0.1.0"
@@ -83,6 +89,7 @@ __all__ = [
     "build_multi_temp_mask_with_metadata",
     "build_scene_mask",
     "build_scene_mask_with_metadata",
+    "build_scene_shifts",
     "composite",
     "edge_map",
     "evaluate_dataset",
@@ -111,8 +118,10 @@ __all__ = [
     "make_trenches",
     "make_via_array",
     "nrmse",
+    "phase_bin_drizzle",
     "physical_block_average_forward",
     "psnr",
+    "random_constellation",
     "reconstruct_hr_temperature",
     "render_temperature_field",
     "rmse",

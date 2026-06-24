@@ -104,6 +104,197 @@ def ideal_phase_grid(
     return _validate_shifts(shifts)
 
 
+def random_constellation(
+    n_frames: int,
+    *,
+    scale: int = 2,
+    phase_steps: int = 4,
+    coverage: str = "good",
+    jitter_std_px: float = 0.0,
+    seed: int | None = None,
+) -> np.ndarray:
+    """Generate a random per-scene sub-pixel shift constellation in LR pixels.
+
+    Base sub-pixel phases live on a ``phase_steps × phase_steps`` grid with
+    cells at ``(k/phase_steps, m/phase_steps)``. Frames are assigned to cells
+    according to ``coverage``:
+
+    * ``"good"``   — N frames spread as evenly as possible over ALL cells.
+    * ``"medium"`` — randomly drop ~1/3 of the cells; frames use the rest.
+    * ``"poor"``   — cluster frames into ~half the cells (deficient phase
+      coverage).
+
+    Gaussian jitter ``N(0, jitter_std_px)`` is added to every shift, plus a
+    small random integer-pixel offset per frame so frames are not all near the
+    origin. Returns ``(n_frames, 2)`` float32 ``[dx, dy]`` shifts.
+    """
+
+    n = int(n_frames)
+    scale = int(scale)
+    phase_steps = int(phase_steps)
+    if n <= 0:
+        raise ValueError("n_frames must be > 0")
+    if scale <= 0:
+        raise ValueError("scale must be > 0")
+    if phase_steps <= 0:
+        raise ValueError("phase_steps must be > 0")
+    jitter = float(jitter_std_px)
+    if jitter < 0:
+        raise ValueError("jitter_std_px must be >= 0")
+    coverage = str(coverage)
+    if coverage not in {"good", "medium", "poor"}:
+        raise ValueError("coverage must be 'good', 'medium', or 'poor'")
+
+    rng = np.random.default_rng(seed)
+
+    # All sub-pixel phase cells on the phase_steps × phase_steps grid.
+    cells = np.array(
+        [(x / phase_steps, y / phase_steps) for y in range(phase_steps) for x in range(phase_steps)],
+        dtype=np.float32,
+    )
+    n_cells = len(cells)
+
+    if coverage == "good":
+        active_idx = np.arange(n_cells)
+    elif coverage == "medium":
+        # Drop ~1/3 of the cells (keep at least one).
+        n_keep = max(1, n_cells - int(round(n_cells / 3.0)))
+        active_idx = np.sort(rng.choice(n_cells, size=n_keep, replace=False))
+    else:  # poor
+        # Cluster into ~half the cells (keep at least one).
+        n_keep = max(1, n_cells // 2)
+        active_idx = np.sort(rng.choice(n_cells, size=n_keep, replace=False))
+
+    # Round-robin assignment of the N frames across the active cells, in a
+    # shuffled frame order so cells fill as evenly as possible.
+    order = rng.permutation(n)
+    assigned = np.empty(n, dtype=np.int64)
+    assigned[order] = active_idx[np.arange(n) % len(active_idx)]
+    shifts = cells[assigned].copy()
+
+    # Small random integer-pixel offset per frame (realistic, keeps frames off
+    # the origin) — does not change sub-pixel phase.
+    int_offset = rng.integers(-2, 3, size=(n, 2)).astype(np.float32)
+    shifts += int_offset
+
+    if jitter > 0:
+        shifts = shifts + rng.normal(0.0, jitter, size=shifts.shape).astype(np.float32)
+    return _validate_shifts(shifts.astype(np.float32, copy=False), n_frames=n)
+
+
+def build_scene_shifts(
+    seed: int,
+    n_frames: int,
+    constellation_cfg: dict[str, Any],
+    *,
+    scale: int = 2,
+) -> tuple[np.ndarray, dict[str, Any]]:
+    """Build per-scene shifts from a constellation config (deterministic from seed).
+
+    With probability ``constellation_cfg["include_real_like_fraction"]`` a
+    "real_like" constellation is returned (``n_frames`` subsampled with
+    replacement from the real contour-refined profile plus small jitter).
+    Otherwise ``random_constellation`` is called with ``phase_steps`` drawn from
+    ``phase_steps_choices``, ``coverage`` drawn from ``coverage_quality_weights``,
+    and ``jitter_std_px`` drawn uniformly from the configured range.
+
+    Returns ``(shifts, metadata)`` where metadata describes the choice.
+    """
+
+    n = int(n_frames)
+    if n <= 0:
+        raise ValueError("n_frames must be > 0")
+    cfg = dict(constellation_cfg or {})
+    rng = np.random.default_rng(seed)
+
+    real_like_fraction = float(cfg.get("include_real_like_fraction", 0.0))
+    use_real_like = bool(rng.random() < real_like_fraction)
+
+    jitter_low, jitter_high = _range_pair(cfg.get("jitter_std_px", [0.0, 0.0]), "jitter_std_px")
+    jitter = float(rng.uniform(jitter_low, jitter_high))
+
+    if use_real_like:
+        try:
+            base = load_real_default_contour_refined(n_frames=None)
+        except (FileNotFoundError, ValueError) as exc:
+            # Fall back to a random constellation if the real profile is absent.
+            phase_steps_choices = list(cfg.get("phase_steps_choices", [4]))
+            phase_steps = int(rng.choice(phase_steps_choices))
+            coverage = _weighted_coverage(rng, cfg.get("coverage_quality_weights", {"good": 1.0}))
+            shifts = random_constellation(
+                n, scale=scale, phase_steps=phase_steps, coverage=coverage,
+                jitter_std_px=jitter, seed=int(rng.integers(1, np.iinfo(np.int32).max)),
+            )
+            metadata = {
+                "constellation_mode": "random_phase",
+                "convention": SHIFT_CONVENTION,
+                "n_frames": int(shifts.shape[0]),
+                "columns": ["dx_px", "dy_px"],
+                "phase_steps": phase_steps,
+                "coverage": coverage,
+                "jitter_std_px": jitter,
+                "real_like_requested": True,
+                "real_like_fallback_reason": str(exc),
+            }
+            return shifts, metadata
+        idx = rng.integers(0, base.shape[0], size=n)
+        shifts = base[idx].astype(np.float32, copy=True)
+        if jitter > 0:
+            shifts = shifts + rng.normal(0.0, jitter, size=shifts.shape).astype(np.float32)
+        shifts = _validate_shifts(shifts.astype(np.float32, copy=False), n_frames=n)
+        metadata = {
+            "constellation_mode": "real_like",
+            "convention": SHIFT_CONVENTION,
+            "n_frames": int(shifts.shape[0]),
+            "columns": ["dx_px", "dy_px"],
+            "jitter_std_px": jitter,
+            "real_like_source": "real_default_contour_refined",
+        }
+        return shifts, metadata
+
+    phase_steps_choices = list(cfg.get("phase_steps_choices", [4]))
+    phase_steps = int(rng.choice(phase_steps_choices))
+    coverage = _weighted_coverage(rng, cfg.get("coverage_quality_weights", {"good": 1.0}))
+    shifts = random_constellation(
+        n,
+        scale=scale,
+        phase_steps=phase_steps,
+        coverage=coverage,
+        jitter_std_px=jitter,
+        seed=int(rng.integers(1, np.iinfo(np.int32).max)),
+    )
+    metadata = {
+        "constellation_mode": "random_phase",
+        "convention": SHIFT_CONVENTION,
+        "n_frames": int(shifts.shape[0]),
+        "columns": ["dx_px", "dy_px"],
+        "phase_steps": phase_steps,
+        "coverage": coverage,
+        "jitter_std_px": jitter,
+        "real_like_requested": False,
+    }
+    return shifts, metadata
+
+
+def _range_pair(value: Any, name: str) -> tuple[float, float]:
+    if isinstance(value, (int, float)):
+        return float(value), float(value)
+    if isinstance(value, (list, tuple)) and len(value) == 2:
+        low, high = float(value[0]), float(value[1])
+        if high < low:
+            raise ValueError(f"{name} range must satisfy high >= low")
+        return low, high
+    raise ValueError(f"{name} must be a scalar or [low, high] range")
+
+
+def _weighted_coverage(rng: np.random.Generator, weights: dict[str, float]) -> str:
+    names = list(weights)
+    values = np.asarray([float(weights[name]) for name in names], dtype=np.float64)
+    if len(names) == 0 or np.any(values < 0) or float(values.sum()) <= 0:
+        raise ValueError("coverage_quality_weights must be non-negative with positive sum")
+    return str(rng.choice(names, p=values / values.sum()))
+
+
 @functools.lru_cache(maxsize=4)
 def _cached_load_contour_csv(csv_path_str: str, strict_success: bool) -> np.ndarray:
     """Parse and cache contour alignment CSV. Keyed on resolved path string."""

@@ -537,6 +537,7 @@ def build_scene_mask(
     scale: int = DEFAULT_SCALE,
     antialias: bool = DEFAULT_ANTIALIAS,
     ssaa_factor: int = DEFAULT_SSAA_FACTOR,
+    inscribe_disc: bool = False,
 ) -> np.ndarray:
     """Build a deterministic full-scene mask for a requested difficulty level."""
 
@@ -550,6 +551,7 @@ def build_scene_mask(
         scale=scale,
         antialias=antialias,
         ssaa_factor=ssaa_factor,
+        inscribe_disc=inscribe_disc,
     )
     return mask
 
@@ -647,6 +649,7 @@ def build_scene_mask_with_metadata(
     scale: int = DEFAULT_SCALE,
     antialias: bool = DEFAULT_ANTIALIAS,
     ssaa_factor: int = DEFAULT_SSAA_FACTOR,
+    inscribe_disc: bool = False,
 ) -> tuple[np.ndarray, dict[str, object]]:
     """Build a dense IC-layout-style chip mask with blocks and routing.
 
@@ -987,6 +990,16 @@ def build_scene_mask_with_metadata(
     # ── Assemble and rotate ──────────────────────────────────────────────
     # Subtract channels to create concave indentations
     mask = mask & ~subtract_mask
+    # Optionally inscribe a centered disc so corner content cannot be clipped
+    # by reshape=False rotation across arbitrary 0–360° angles (self-check T4).
+    if bool(inscribe_disc):
+        draw_rows, draw_cols = draw_shape
+        yy_d, xx_d = np.mgrid[:draw_rows, :draw_cols]
+        radius = min(draw_rows, draw_cols) / 2.0
+        disc = (
+            (yy_d - draw_rows / 2.0) ** 2 + (xx_d - draw_cols / 2.0) ** 2
+        ) <= radius ** 2
+        mask = mask & disc.astype(np.uint8)
     angle = float(rotation_deg_center) + float(
         rng.uniform(-rotation_jitter_deg, rotation_jitter_deg)
     )
@@ -1000,6 +1013,7 @@ def build_scene_mask_with_metadata(
         "primitives": primitives,
         "antialias": bool(antialias),
         "ssaa_factor": aa_factor,
+        "inscribe_disc": bool(inscribe_disc),
         "mask_semantics": "coverage" if bool(antialias) else "binary",
         "implementation": "tcforge.geometry.build_scene_mask_ic_layout",
     }

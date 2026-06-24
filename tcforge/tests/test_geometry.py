@@ -184,3 +184,58 @@ def test_multi_temp_mask_and_edge_diffusion_keep_shape_and_ranges() -> None:
     assert soft.shape == labels.shape
     assert soft.dtype == np.float32
     assert 0.0 <= float(soft.min()) <= float(soft.max()) <= 1.0
+
+
+def test_inscribe_disc_zeros_corners() -> None:
+    mask, meta = geometry.build_scene_mask_with_metadata(
+        "easy",
+        seed=4242,
+        rotation_deg_center=0.0,
+        rotation_jitter_deg=0.0,
+        canvas_shape=(240, 320),
+        pixel_size_um=20.0,
+        scale=2,
+        antialias=True,
+        ssaa_factor=4,
+        inscribe_disc=True,
+    )
+    assert meta["inscribe_disc"] is True
+    # All four corners lie outside the inscribed disc → must be zero.
+    assert float(mask[0, 0]) == 0.0
+    assert float(mask[0, -1]) == 0.0
+    assert float(mask[-1, 0]) == 0.0
+    assert float(mask[-1, -1]) == 0.0
+
+
+def test_inscribe_disc_conserves_inscribed_mass_across_rotations() -> None:
+    canvas = (240, 320)
+    base, _ = geometry.build_scene_mask_with_metadata(
+        "medium", seed=909, rotation_deg_center=0.0, rotation_jitter_deg=0.0,
+        canvas_shape=canvas, pixel_size_um=20.0, scale=2,
+        antialias=True, ssaa_factor=4, inscribe_disc=True,
+    )
+    h, w = base.shape
+    yy, xx = np.mgrid[:h, :w]
+    r = min(h, w) / 2.0
+    disc = ((yy - h / 2) ** 2 + (xx - w / 2) ** 2) <= r ** 2
+    base_mass = float(base[disc].sum())
+    for ang in (0.0, 37.0, 90.0, 213.0, 359.0):
+        rot, _ = geometry.build_scene_mask_with_metadata(
+            "medium", seed=909, rotation_deg_center=float(ang), rotation_jitter_deg=0.0,
+            canvas_shape=canvas, pixel_size_um=20.0, scale=2,
+            antialias=True, ssaa_factor=4, inscribe_disc=True,
+        )
+        drift = abs(float(rot[disc].sum()) - base_mass) / (base_mass + 1e-9)
+        assert drift < 0.05
+
+
+def test_inscribe_disc_default_false_unchanged() -> None:
+    kwargs = dict(
+        difficulty="hard", seed=2024, rotation_deg_center=33.0, rotation_jitter_deg=0.0,
+        canvas_shape=(240, 320), pixel_size_um=20.0, scale=2,
+        antialias=True, ssaa_factor=4,
+    )
+    default_mask, default_meta = geometry.build_scene_mask_with_metadata(**kwargs)
+    explicit_false, _ = geometry.build_scene_mask_with_metadata(**kwargs, inscribe_disc=False)
+    assert np.array_equal(default_mask, explicit_false)
+    assert default_meta["inscribe_disc"] is False
