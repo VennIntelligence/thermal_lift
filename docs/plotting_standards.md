@@ -157,7 +157,7 @@ METHOD_PALETTE = {
 
 ## Resolution-Distinction Diagram Standard
 
-当解释 detector pitch、calibrated spatial resolution 和 SR output grid 的区别时，必须优先使用同一物理距离轴上的示意图，而不是只用文字说明。该图用于避免把 `10 um/pixel` detector sampling pitch、`20 um` 系统空间分辨率、`5 um/sample` 2x 输出网格混为同一个量。
+当解释 detector pitch、calibrated spatial resolution 和 SR output grid 的区别时，必须优先使用同一物理距离轴上的示意图，而不是只用文字说明。该图用于避免把 `20 um/pixel` detector sampling pitch、`20 um` 系统空间分辨率、`10 um/sample` 2x 输出网格混为同一个量。
 
 标准做法：
 

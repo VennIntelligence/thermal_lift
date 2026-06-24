@@ -35,7 +35,7 @@ fig.suptitle("TCForge Randomized Scenes — HR Mask | Blurred LR", fontsize=14, 
 for i, (diff, seed) in enumerate(scenes):
     print(f"Generating {diff} seed={seed} ...")
     mask, meta = build_scene_mask_with_metadata(
-        diff, seed, canvas_shape=CANVAS, pixel_size_um=10.0, scale=SCALE,
+        diff, seed, canvas_shape=CANVAS, pixel_size_um=20.0, scale=SCALE,
     )
     hr_temp = render_temperature_field(
         mask, t_bg_c=21.0, delta_t_c=3.0,

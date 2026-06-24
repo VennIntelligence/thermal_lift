@@ -9,7 +9,7 @@
 ## 任务清单
 
 - [x] 保持 EP03 口径为物理边界与局部可观测性，不证明 SR 成败。
-- [x] 补充 output grid sample vs Nyquist period 表，明确 `5 um output sample != 5 um spatial resolution`，2x grid Nyquist period 为 `10 um`。
+- [x] 补充 output grid sample vs Nyquist period 表，明确 `10 um output sample != 10 um spatial resolution`，2x grid Nyquist period 为 `20 um`。（按 20 µm/pixel 修正后，旧 5 um/10 um 数值为 2× 标尺误读派生）
 - [x] 补充 MTF x SNR recoverability table/heatmap：`effective_snr = DeltaT * MTF / noise`。
 - [x] recoverability 覆盖 reference contrast 与 inner/outer median contour contrast，扫描 `sigma=0.2/0.35/0.5 px` 和 1x/2x/4x Nyquist。
 - [x] 补充 CRB sensitivity scan：扫描 `DeltaT`、`sigma`、`n_frames` 和抽象 `phase_coverage`，配合 0.05/0.10 px gate 解读。
@@ -21,16 +21,18 @@
 
 ## 关键结果
 
+> **⚠️ SUPERSEDED 2026-06**: the 10.000 / 9.980 µm/pixel pitch was a 2× BMP scale-bar misread; true detector pitch = 20 µm/pixel. The two methods shared the same BMP scale anchor so they agreed in lockstep. The µm-derived grid numbers below have been recomputed for the corrected 20 µm/pixel pitch; the pitch rows are retained (struck through in prose) to record the superseded measurement.
+
 | 项目 | 结果 |
 |---|---:|
-| BMP mm-axis detector pitch | 10.000 um/pixel |
-| TXT/BMP contour cross-check pitch | 9.980 um/pixel |
+| BMP mm-axis detector pitch | ~~10.000~~ → 20.000 um/pixel (SUPERSEDED; 旧值为 2× BMP 标尺误读) |
+| TXT/BMP contour cross-check pitch | ~~9.980~~ um/pixel (SUPERSEDED; 与 BMP 标尺同源，lockstep 一致) |
 | TXT/BMP outer-mask IoU | 0.9938 |
 | Current spatial resolution | 20.000 um |
-| 2x SR output sample | 5.000 um |
-| 2x grid Nyquist period | 10.000 um |
-| 4x exploratory output sample | 2.500 um |
-| 4x grid Nyquist period | 5.000 um |
+| 2x SR output sample | 10.000 um |
+| 2x grid Nyquist period | 20.000 um |
+| 4x exploratory output sample | 5.000 um |
+| 4x grid Nyquist period | 10.000 um |
 | Noise floor | 0.0724 C |
 | 0.3 C / 0.7 C / 1.0 C SNR | 4.14 / 9.67 / 13.81 |
 | Outer contour segments | 84 |
@@ -76,8 +78,8 @@ CRB sensitivity representative values for `DeltaT=0.7 C`:
 
 ## 决策记录
 
-- `10 um/pixel` 是 TXT detector sampling pitch；`20 um` 是当前系统空间分辨率，不得混写。
-- `5 um` 目标至少要求 2x output grid，但 `5 um output sample` 不是 `5 um spatial resolution`；2x grid 的 Nyquist period 是 `10 um`。
+- ⚠️ SUPERSEDED 2026-06: `10 um/pixel` 曾被记为 TXT detector sampling pitch，但那是 2× BMP 标尺误读；true detector pitch = `20 um/pixel`。两种方法共用同一 BMP 标尺锚点，因此 lockstep 一致。`20 um` 同时是当前系统空间分辨率（≈ pitch，临界采样），不得与 output sample 混写。
+- output grid 目标：2x output grid 的 output sample 为 `10 um`，但 `output sample` 不是 `spatial resolution`；2x grid 的 Nyquist period 是 `20 um`。
 - 2x 是当前 contour-level SR POC 的合理默认网格；4x 只能作为探索/可视化，必须附带 forward model、MTF/SNR 和 contour consistency 证据。
 - `effective_snr = DeltaT * MTF / noise` 是必要条件风险图，不是 SR 成功证明。
 - 局部内部/外部 contour 温差显著高于噪声底，支持做局部结构可观测性筛选。

@@ -36,7 +36,7 @@
     "stage_prior_affine": {
       "kind": "stage_coordinate_grid",
       "theta_deg": 47.6,
-      "pixel_size_um": 10.0,
+      "pixel_size_um": 20.0,
       "x_um_values": [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40],
       "y_um_values": [0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 24, 28, 32, 36, 40],
       "description": "Stage-command prior/control. It is not alignment ground truth."

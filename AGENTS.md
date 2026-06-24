@@ -75,7 +75,7 @@
 | 参数 | 值 | 备注 |
 |---|---|---|
 | 探测器输出尺寸 | 640×480 pixels | EP01 实测: 480行×640列 |
-| TXT 采样间距 / detector pitch | 10 μm/pixel | EP03 BMP mm 标尺测得；FOV=6.4×4.8 mm |
+| TXT 采样间距 / detector pitch | 20 μm/pixel | 校准修正：旧 10 μm/pixel 为 BMP 标尺 2× 误读；FOV=12.8×9.6 mm |
 | 当前空间分辨率 | 20 μm | 校准得到；不是 TXT 像素 pitch |
 | 波段 | LWIR 8–14 μm | |
 | 电动台-像素旋转角 θ | 47.6° | 0.1° 精度；EP02 AVI gradient 独立方向验证 θ≈47.14°，95% CI 覆盖 47.6°，但不替换配置 |
@@ -85,7 +85,7 @@
 | Clean SR 默认输入 | 248 frames | `is_sr_usable=True` / `is_main_session=True`；剔除 `R != 0` 重复/补采帧 |
 | 坐标集合 (X, Y) | {0,2,4,6,8,10,12,14,16,18,20,24,28,32,36,40} μm | 16 值 |
 | 每条扫描线 | 16 个采样点 | |
-| stage command 位移 | 40 μm = 4.0 px（命令向量幅值） | 作为 prior / 初始化 / 约束，不作为对齐真值 |
+| stage command 位移 | 40 μm = 2.0 px（命令向量幅值） | 作为 prior / 初始化 / 约束，不作为对齐真值 |
 
 ---
 
@@ -119,7 +119,7 @@
 ```python
 import numpy as np
 THETA_DEG = 47.6
-PIXEL_SIZE_UM = 10.0
+PIXEL_SIZE_UM = 20.0
 
 def coordinate_to_shift(x_um, y_um):
     theta = np.radians(THETA_DEG)

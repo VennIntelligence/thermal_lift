@@ -12,7 +12,7 @@ from scipy.ndimage import gaussian_filter, sobel
 from thermal_core.io import load_frame
 
 
-PIXEL_SIZE_UM = 10.0
+PIXEL_SIZE_UM = 20.0
 
 
 def center_roi(shape: tuple[int, int], size: int = 320) -> tuple[slice, slice]:

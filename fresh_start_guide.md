@@ -15,11 +15,11 @@
 | TXT 温度矩阵 | 263 帧，全部 480 x 640 |
 | 原始主扫描 session | 255 帧，`session=2`，保留为物理温度段诊断 |
 | Clean SR 默认输入 | 248 帧，`is_sr_usable=True` / `is_main_session=True`，剔除 `R != 0` 重复/补采帧 |
-| TXT 采样 pitch | 10 um/pixel，BMP mm 标尺确认 |
+| TXT 采样 pitch | 20 um/pixel，校准修正（旧 10 um/pixel 为 BMP 标尺 2× 误读） |
 | 当前空间分辨率 | 20 um，已校准；不是 TXT 像素 pitch |
 | 目标提升 | 先做 2x contour-level POC，再评估更高倍率 |
 | 坐标集合 | `{0,2,4,6,8,10,12,14,16,18,20,24,28,32,36,40}` um |
-| stage-command 范围 | 40 um = 4.0 px 命令向量幅值，作为 prior / 初始化 / 约束 |
+| stage-command 范围 | 40 um = 2.0 px 命令向量幅值，作为 prior / 初始化 / 约束 |
 | 相位覆盖 | 248 clean SR 帧在 2x SR 四个相位格中分布均匀，当前采样量足够做 2x POC |
 | 温度段 | 3 个温度段；跨 session 不混合 |
 | AVI | 只作方向和命名诊断，不作 SR 输入 |
@@ -86,7 +86,7 @@
 import numpy as np
 
 THETA_DEG = 47.6
-PIXEL_SIZE_UM = 10.0
+PIXEL_SIZE_UM = 20.0
 
 def coordinate_to_shift(x_um, y_um):
     """Stage command to detector-pixel shift prior."""

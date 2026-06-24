@@ -1,7 +1,7 @@
 {
   "theta_deg": 47.6,
   "theta_rad": 0.8308,
-  "pixel_size_um": 10.0,
+  "pixel_size_um": 20.0,
   "current_spatial_resolution_um": 20.0,
   "detector_rows": 480,
   "detector_cols": 640,
@@ -9,5 +9,5 @@
   "stage_axes_orthogonal": true,
   "coordinate_units": "um",
   "shift_units": "detector_pixels",
-  "notes": "theta_deg and pixel_size_um define the stage-command shift prior. pixel_size_um is the 10 um/pixel detector sampling pitch; current_spatial_resolution_um is 20 um. Stage command is not alignment ground truth."
+  "notes": "theta_deg and pixel_size_um define the stage-command shift prior. pixel_size_um is the 20 um/pixel detector sampling pitch (corrected 2026-06; the earlier 10 um/pixel was a 2x BMP scale-bar misread); current_spatial_resolution_um is 20 um (≈ pitch, critically sampled). Stage command is not alignment ground truth."
 }

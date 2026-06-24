@@ -55,7 +55,7 @@ HARNESS_DIR = PROJECT_ROOT / "output" / "ep11_unified_harness"
 HR_DIR = HARNESS_DIR / "hr"
 PAPER_FIGURE_DIR = PROJECT_ROOT / "output" / "paper_figures"
 
-PIXEL_SIZE_UM = 10.0
+PIXEL_SIZE_UM = 20.0
 SCALE_2X = 2
 
 CENTER_ROI_FRAC = {

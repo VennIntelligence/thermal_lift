@@ -37,7 +37,7 @@ SQRT_2PI = np.sqrt(2.0 * np.pi)
 class PhysicalScales:
     """Project-level EP03 physical scales."""
 
-    detector_pitch_um: float = 10.0
+    detector_pitch_um: float = 20.0
     spatial_resolution_um: float = 20.0
     target_grid_um: float = 5.0
     detector_rows: int = 480
@@ -70,7 +70,7 @@ def gaussian_mtf(frequency_cyc_per_px: np.ndarray | float, sigma_px: float) -> n
 
 def build_sampling_resolution_table(
     *,
-    detector_pitch_um: float = 10.0,
+    detector_pitch_um: float = 20.0,
     spatial_resolution_um: float = 20.0,
     target_grid_um: float = 5.0,
 ) -> pd.DataFrame:
@@ -81,7 +81,7 @@ def build_sampling_resolution_table(
                 "quantity": "Detector sampling pitch",
                 "value_um": detector_pitch_um,
                 "detector_pixels": 1.0,
-                "role": "TXT matrix sample spacing; 640 x 480 covers 6.4 x 4.8 mm",
+                "role": "TXT matrix sample spacing; 640 x 480 covers 12.8 x 9.6 mm",
                 "sr_design_use": "Defines the LR pixel grid and stage prior unit conversion",
             },
             {
@@ -111,7 +111,7 @@ def build_sampling_resolution_table(
 
 def build_output_grid_nyquist_table(
     *,
-    detector_pitch_um: float = 10.0,
+    detector_pitch_um: float = 20.0,
     spatial_resolution_um: float = 20.0,
     grid_factors: tuple[int, ...] = (1, 2, 4),
 ) -> pd.DataFrame:
@@ -148,7 +148,7 @@ def build_output_grid_nyquist_table(
 
 def build_mtf_attenuation_table(
     *,
-    detector_pitch_um: float = 10.0,
+    detector_pitch_um: float = 20.0,
     sigmas_px: tuple[float, ...] = (0.2, 0.35, 0.5),
     grid_factors: tuple[int, ...] = (1, 2, 4),
 ) -> pd.DataFrame:
@@ -178,7 +178,7 @@ def build_mtf_snr_recoverability_table(
     noise_sigma_c: float,
     sigmas_px: tuple[float, ...] = (0.2, 0.35, 0.5),
     grid_factors: tuple[int, ...] = (1, 2, 4),
-    detector_pitch_um: float = 10.0,
+    detector_pitch_um: float = 20.0,
 ) -> pd.DataFrame:
     """Combine local contrast, Gaussian MTF, and noise into effective SNR.
 
@@ -678,7 +678,7 @@ def measure_contour_observability(
 def plot_sampling_resolution_diagram(
     table: pd.DataFrame,
     *,
-    detector_pitch_um: float = 10.0,
+    detector_pitch_um: float = 20.0,
     spatial_resolution_um: float = 20.0,
     target_grid_um: float = 5.0,
     annotation_fontsize: float = 9.0,
@@ -697,7 +697,7 @@ def plot_sampling_resolution_diagram(
     ax.text(
         10.0,
         3.55,
-        "10 um/pixel",
+        "20 um/pixel",
         ha="center",
         va="bottom",
         fontsize=annotation_fontsize,

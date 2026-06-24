@@ -15,10 +15,10 @@
 | 探测器类型 | 非制冷微测辐射热计（LWIR） |
 | 波段 | 8–14 μm |
 | 探测器阵列 | 480 × 640 pixels |
-| TXT 采样间距（detector pitch） | 10 μm/pixel（EP03 BMP mm 标尺确认） |
+| TXT 采样间距（detector pitch） | 20 μm/pixel（校准修正：旧 10 μm/pixel 为 BMP 标尺 2× 误读） |
 | 当前空间分辨率 | 20 μm（已校准，不等同于 TXT 像素 pitch） |
-| 视场宽度 | 6.4 mm（640 × 10 μm） |
-| 视场高度 | 4.8 mm（480 × 10 μm） |
+| 视场宽度 | 12.8 mm（640 × 20 μm） |
+| 视场高度 | 9.6 mm（480 × 20 μm） |
 | 输出格式 | 温度矩阵（TXT）+ 伪彩图（BMP） |
 
 ### 精密位移台
@@ -56,7 +56,7 @@ X 轴和 Y 轴使用相同的坐标集（共 16 个值）：
 
 - **细步进区间**: 0–20 μm，步长 2 μm（11 个点）
 - **粗步进区间**: 20–40 μm，步长 4 μm（5 个额外点）
-- **总位移范围**: 40 μm = 4.0 pixel（命令位移幅值）
+- **总位移范围**: 40 μm = 2.0 pixel（命令位移幅值）
 
 ### 扫描模式
 
@@ -96,7 +96,7 @@ EP02 按 `acquisition_order` 确认主扫描为 raster 路径：行内 X 相邻�
 import numpy as np
 
 THETA_DEG = 47.6       # 台面-探测器旋转角
-PIXEL_SIZE_UM = 10.0   # TXT 采样 pitch；20 μm 是空间分辨率
+PIXEL_SIZE_UM = 20.0   # TXT 采样 pitch；20 μm 是空间分辨率
 
 def coordinate_to_shift(x_um, y_um):
     """将位移台坐标转换为探测器像素偏移"""
@@ -110,9 +110,9 @@ def coordinate_to_shift(x_um, y_um):
 
 | 参数 | 值 |
 |------|-----|
-| 总命令位移 | 40 μm = 4.0 pixel |
-| detector x/y 分量 | 约 2.70 / 2.95 pixel |
-| 最小步长对应命令位移 | 2 μm = 0.2 pixel |
+| 总命令位移 | 40 μm = 2.0 pixel |
+| detector x/y 分量 | 约 1.35 / 1.48 pixel |
+| 最小步长对应命令位移 | 2 μm = 0.1 pixel |
 | 旋转角 θ | 47.6°（EP02 AVI gradient 辅助验证支持，不替换全局配置） |
 | stage command 角色 | 位移 prior / 初始化 / 约束；不是对齐真值 |
 
@@ -215,7 +215,7 @@ EP01 已确认：必须按真实采集顺序 `acquisition_order`（由文件 mti
 
 当前将位移证据分为三层：
 
-- stage command prior：由 θ=47.6° 和 10 μm/pixel 采样 pitch 得到命令位移，用于初始化、正则或搜索中心；不能作为真实位移标签
+- stage command prior：由 θ=47.6° 和 20 μm/pixel 采样 pitch 得到命令位移，用于初始化、正则或搜索中心；不能作为真实位移标签
 - TXT localization / local NCC / ESF：用于 alignment anchor 和 quality gate，只能解释局部帧对或局部 ROI，不能外推成全局位移幅值结论
 - Y-only 坐标相邻：固定 X 的相邻 Y 坐标 acquisition gap 中位约 16 帧，部分帧对 gap 可达 31 帧，容易受热场演化污染，不能作为定量位移标定
 - AVI gradient 方向：combined θ≈47.14°，95% CI 覆盖 47.6°，但只作为辅助方向验证，不替换全局 θ
@@ -236,7 +236,7 @@ EP01 已确认：必须按真实采集顺序 `acquisition_order`（由文件 mti
 | 参数 | 旧项目值 | 置信度 | 验证方法 |
 |------|----------|--------|----------|
 | 旋转角 θ | 47.6° | 中高（旧项目数值优化 + EP02 AVI gradient 独立方向验证 CI 覆盖 47.6°；仍非直接物理测量） | 保持配置，后续用原始温度矩阵或新采集做独立验证 |
-| TXT 采样 pitch | 10 μm/pixel | 高（EP03 BMP 标尺，FOV=6.4×4.8 mm） | 已确认 |
+| TXT 采样 pitch | 20 μm/pixel | 高（校准修正：EP03 BMP 标尺 10 μm 为 2× 误读，已修正为 20 μm，FOV=12.8×9.6 mm） | 已确认 |
 | 空间分辨率 | 20 μm | 高（已校准；不是采样 pitch） | 已确认 |
 | X-Y 正交性 | 90° | 高（机械保证） | 已确认 |
 | 位移台精度 | ~1 μm | 中等（标称值，未独立测量） | 重复测量一致性分析 |

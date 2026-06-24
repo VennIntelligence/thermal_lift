@@ -6,7 +6,7 @@
   "scale": 2,
   "lr_shape": [480, 640],
   "hr_shape": [960, 1280],
-  "pixel_size_um": 10.0,
+  "pixel_size_um": 20.0,
   "spatial_resolution_um": 20.0,
   "forward_modes": ["exact_ep06_point"],
   "psf_sigma_lr_px": 0.5,

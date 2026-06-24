@@ -139,7 +139,7 @@ def _make_scene(
         "easy",
         seed,
         canvas_shape=hr_shape,
-        pixel_size_um=10.0,
+        pixel_size_um=20.0,
         scale=scale,
         rotation_deg_center=47.6,
         rotation_jitter_deg=0.2,

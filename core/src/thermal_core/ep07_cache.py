@@ -65,7 +65,7 @@ class DemoConfig:
     lr_shape: tuple[int, int] = (64, 96)
     scale: int = 2
     n_frames: int = 16
-    pixel_size_um: float = 10.0
+    pixel_size_um: float = 20.0
     base_temp_c: float = 21.0
     delta_temp_c: float = 2.5
     low_freq_amplitude_c: float = 0.2

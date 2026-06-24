@@ -62,7 +62,7 @@ class Ep04Config:
     """Runtime configuration for EP04 validation."""
 
     theta_deg: float = 47.6
-    pixel_size_um: float = 10.0
+    pixel_size_um: float = 20.0
     noise_floor_c: float = NOISE_FLOOR_C
     ncc_roi_size: int = 40
     ncc_preprocess: str = "highpass"
@@ -837,7 +837,7 @@ def run_segment_validation(
     frames: dict[str, np.ndarray],
     scanline_files: list[str],
     theta_deg: float = 47.6,
-    pixel_size_um: float = 10.0,
+    pixel_size_um: float = 20.0,
     ncc_roi_size: int = 40,
     ncc_preprocess: str = "highpass",
     esf_half_width: int = 10,
@@ -1042,7 +1042,7 @@ def run_all_segments(
     max_split_half: float = 0.06,
     n_jobs: int = 1,
     theta_deg: float = 47.6,
-    pixel_size_um: float = 10.0,
+    pixel_size_um: float = 20.0,
     noise_floor_c: float = NOISE_FLOOR_C,
     ncc_roi_size: int = 40,
     ncc_preprocess: str = "highpass",
@@ -2707,7 +2707,7 @@ def extract_thermal_boundary_points(
     segment_summary: pd.DataFrame,
     *,
     segments: pd.DataFrame | None = None,
-    pixel_size_um: float = 10.0,
+    pixel_size_um: float = 20.0,
     include_failed: bool = False,
 ) -> pd.DataFrame:
     """Extract one apparent thermal boundary point for every accepted segment."""
@@ -2833,7 +2833,7 @@ def _valid_contour_runs(
 def stitch_thermal_contour(
     boundary_points: pd.DataFrame,
     *,
-    pixel_size_um: float = 10.0,
+    pixel_size_um: float = 20.0,
     min_confidence: str = "medium",
     samples_per_span: int = 16,
 ) -> tuple[pd.DataFrame, pd.DataFrame]:
@@ -3130,7 +3130,7 @@ def _method_row(
     ours_s_px: float,
     split_half_diff_px: float = np.nan,
     crb_px: float = np.nan,
-    pixel_size_um: float = 10.0,
+    pixel_size_um: float = 20.0,
 ) -> dict:
     s_px = _finite_float(estimate.get("s_px", np.nan))
     normal, _ = _segment_normal_and_tangent(segment)
@@ -3168,7 +3168,7 @@ def run_baseline_comparison(
     data_dir: Path,
     *,
     segments: pd.DataFrame | None = None,
-    pixel_size_um: float = 10.0,
+    pixel_size_um: float = 20.0,
     canny_sigma: float = 1.0,
     esf_half_width_px: float = 10.0,
     esf_step_px: float = 0.5,
@@ -3390,7 +3390,7 @@ def run_ep04b_contour_reconstruction(
     output_dir: Path,
     *,
     segments_csv: Path | None = None,
-    pixel_size_um: float = 10.0,
+    pixel_size_um: float = 20.0,
     force_baseline: bool = False,
     contour: str | None = None,
 ) -> dict[str, pd.DataFrame | dict]:

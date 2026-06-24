@@ -55,7 +55,7 @@ from thermal_core.plotting import COLORMAPS, FIGURE_SIZES, get_method_style, sav
 
 
 EXPECTED_CLEAN_SR_FRAMES = 248
-PIXEL_SIZE_UM = 10.0
+PIXEL_SIZE_UM = 20.0
 NOISE_FLOOR_C = 0.0724
 DEFAULT_PSF_SIGMAS = (0.2, 0.3, 0.4, 0.5)
 DEFAULT_LAMBDAS = (3e-4, 1e-3, 3e-3)
