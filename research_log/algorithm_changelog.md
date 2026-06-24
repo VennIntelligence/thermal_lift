@@ -8,6 +8,33 @@
 
 ## 变更记录
 
+### [ACL-023] 2026-06-25 — 探测器 pitch 重标定(20µm)+ forward 算子认证 + v3 信息保存数据管线
+
+**问题诊断**:
+- ep01–ep22 主线结论是 `no GT-certifiable winner`:学习方法从未干净打过经典 TGV/MAP-TV,且训练后期合成先验"反吃"真实细节(V9A 保真悬崖,`hp_corr_input` 0.974→0.906)。两层根因:①输入端 5×1x 统计通道在进网络前坍缩了 248 帧亚像素相位;②训练分布"贴着标定"退化(旋转固定 47.6°±1.5°、复用真实那一组 248 shift、PSF 贴标定),且 GT 信息含量超过信息极限 → 模型被迫在零空间幻觉。
+- 标定本身有错:EP03 由 BMP mm 标尺测得的 detector pitch `10 µm/pixel` 是 **2× 误读**(axis 与 contour cross-check 共用同一 BMP 标尺锚点故 lockstep 一致、无内部矛盾)。真实 pitch = **20 µm/pixel**,阵列仍 480×640(原始 TXT 实测确认)。系统从"2× 过采样"修正为"**临界采样**(分辨率≈pitch=20µm)",2× SR 的真实含义变成 **20µm→10µm 目标分辨率** —— 直接解释"2X 信息很少 / 放弃 4X"。
+
+**修改内容**:
+1. **Pitch 重标定(commit `1ae3177`,26 文件)**:configs(stage_calibration/coordinate_set/synthetic×7)、core 默认值(ep03/ep04/ep07_cache/displacement)、docs(dataset_description/AGENTS/fresh_start_guide)全部 10→20µm;派生数重算(FOV 6.4×4.8→12.8×9.6mm、40µm 命令位移 4.0→2.0px、PSF σ µm 2.26→4.5µm,σ in LR px=0.226 不变);EP03 pitch 标 SUPERSEDED。DO-NOT-TOUCH:对齐 CSV、PSF σ(px)、scale/canvas、paper/(FRC µm 数值待远端 EP15 重跑)。
+2. **forward 算子认证(commit `14110b5`)**:新增 `scripts/forward_roundtrip_selfcheck.py`,5 项全 PASS —— 约定无 dx/dy 交换(存在恒定 +0.5 HR-px block-center 偏移,求解器 adjoint 必须复刻)、in-band 可逆(shift-and-add/drizzle vs PSF-blurred GT corr 0.997)、box 采样物理性混叠 ~3%(realistic,需建模)、360° 旋转在内切圆内质量守恒、FRC 频带代理。**证伪了"原始生成代码本身是错的"这一担忧**。
+3. **v3 信息保存 2× 数据管线(commit `14110b5`)**:tcforge 新增 `geometry.inscribe_disc`(360° 全随机旋转不裁角)、`shifts.random_constellation`/`build_scene_shifts`(每 scene 随机相位星座,good/medium/poor 覆盖,15% real-like 域匹配)、`classical_sr.phase_bin_drizzle`(4 个亚像素相位通道,显式暴露相位);`generate_training_pool.py` 改为每 scene 随机 N(24–96)+ 均匀 360° + phase-bin + stress SSAA=6 + 裸 f16 burst(**不压缩**,因生成 CPU-bound,zstd 只会加 CPU);config `configs/synthetic/pool_2x_v3.json`(5000 scenes)。tcforge 测试 75 passed。
+
+**预期效果**:
+- 输入保相位(burst+shifts+phase-bin)+ 分布全随机化(360°/星座/PSF)打破朝向与单一星座过拟合,GT 信息卡在诚实可恢复频带 → 不再把幻觉规模化。
+- 认证过的 forward + 下一步物理约束展开式求解器(硬 data-consistency)把"防幻觉"从 loss 侧(ACL-017/019 已证伪)移到**架构侧**:模型结构上只能在 forward 零空间填先验,无法覆盖观测。
+
+**核心设计原则(本轮确立)**:随机化"干扰参数"放很宽,但 GT 信息含量必须卡在诚实可恢复频带之上;label 是监督信号,只在 band 内追精度,band 外匹配 label = 幻觉 = 重蹈保真悬崖。
+
+**远端就绪 / 数据量 / 耗时**:`data/synthetic/pool_2x_v3_5k` 已 symlink 到 5090 的 `/mnt/d`(1.6T 空闲);实测每 scene ~45–65MB(burst f16 ~53MB@91帧 + phase-bin 9.4MB + obs 1.3MB),5K 估 **~230–330GB**;smoke 6s/scene,因 2× + N~60 比旧 4×/248 帧轻很多,全 5K 预计几十分钟级(以 tqdm ETA 为准)。64 worker(RAM 限)。生成命令由用户在远端手动贴。
+
+**训练结果**:_(本条为标定/数据管线/工具变更,无新增训练)_。数据生成待用户远端启动;下一步 Step 4 物理约束展开式求解器(data-consistency 硬约束 + band-aware loss/eval)。
+
+**遗留 / caveat**:① 真实数据 PSF/对齐重标定仍需远端跑 `data/`(本地已拉 263 帧 txt 备用于此);② contour-alignment refined shifts 不能干净拟合单一刚性 (θ,pitch)(dx/dy 行给出不一致 θ、残差 p95≈0.79px on ~3px signal)—— stage command 仅 prior、对齐噪声/局部,展开式求解器对 shift 精度敏感需留意;③ `hr_mask_4x.png` 是误导性 legacy 文件名(内容实为 2× 960×1280),待清理;④ paper/ 的 FRC µm 数值与 null-space sinc 推导需远端 EP15 重跑后才能诚实更新。
+
+**涉及文件**:commits `1ae3177`(重标定)、`14110b5`(v3 管线 + self-check);新增 `configs/synthetic/pool_2x_v3.json`、`scripts/forward_roundtrip_selfcheck.py`;tcforge `geometry.py`/`shifts.py`/`classical_sr.py`/`storage.py`/`__init__.py`、`scripts/generate_training_pool.py`。
+
+---
+
 ### [ACL-022] 2026-06-14 — Task E 论文证据硬化：TGV actual split/FRC + F5b ROI2 + D.7 第二窗
 
 **问题诊断**:
