@@ -70,20 +70,32 @@ If the residual plateaus or corr is low: a half-pixel/sign/PSF bug — STOP, pas
 
 ---
 
-## [PENDING — awaiting next code drop: dataset plumbing (burst+shifts+psf into the sample) + train integration]
+## GATE C — training smoke on the real pool  ✅ RUNNABLE NOW
+Validates the full solver training plumbing end-to-end on real scenes: the dataset delivers
+burst+shifts+PSF at the scale-aligned crop, ScenePSF builds from the batch, and the
+`UnrolledSolver` runs forward+backward without NaN.
+```
+uv run python algos/ep07_unet_sr/tests/test_gate_c_smoke.py --pool data/synthetic/pool_2x_v3_5k
+```
+PASS bar (printed): shapes/plumbing OK, all losses+grads finite. If FAIL: STOP, paste output.
 
-## GATE C — smoke (50–100 steps on the real pool)
-Finite loss, no NaNs, prediction/target/observation visually aligned (no half-pixel shift),
-DC term decreasing. Hold bs constant with the real run.
-
-## TRAINING — K-step unrolled solver (the real run)
-- K-step: drizzle warm-start → [DC gradient step (autograd A^T, per-scene PSF, highpass band,
-  Huber) + UNet prox] × K. UNet = existing `ThermalSRUNet` as the proximal net.
-- Loss: band-aware (per-scene PSF sets the band) + terminal DC; structure terms from
-  `ContourSRLoss`. Late-anneal the prior weight to fight the cliff.
-- Checkpoint every 2500; **default stop ~20K** (revisit only with FRC evidence).
-- Eval each checkpoint: synthetic split-half FRC (fast) + the EP11/EP15 real-data harness.
-  Bar = in-band FRC ≥ classical TGV/MAP-TV. Add the drizzle base on every eval path.
+## TRAINING — K-step unrolled solver (the real run)  — RUN after Gates 0/A/B/C all PASS
+```
+uv run python -m unet_sr.solver_train \
+  --training-pool-dir data/synthetic/pool_2x_v3_5k \
+  --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 4 \
+  --total-steps 20000 --batch-size 4 --patch-size-hr 256 \
+  --solver-m-frames 16 --solver-band-sigma 5 --solver-dc-weight 0.1 \
+  --save-every 2500 --num-workers 8 --output-dir outputs/solver_v1
+```
+- Runs in **fp32 (no AMP)** for double-backward stability. If OOM: lower `--batch-size` /
+  `--patch-size-hr` / `--unroll-steps`. Memory is dominated by the K-step double-backward.
+- **Default stop ~20K** (FM-1 cliff); checkpoints every 2500 — select in the 10K–25K window.
+- To fight the cliff, try `--solver-prior-anneal-steps 8000` (DC dominates early, prior ramps in).
+- Eval (offline, separate harness): synthetic split-half FRC + EP11/EP15 real-data; bar = in-band
+  FRC ≥ classical TGV/MAP-TV. Add the drizzle base on every eval path.
+- NOTE: thin/gap loss-weighting is disabled for this first run (a shape-contract mismatch with
+  ContourSRLoss); re-enable once the reshape is confirmed.
 
 ## PARALLEL (not a training gate) — re-run EP15 at 20µm
 Re-derive the authoritative real-data recoverable band at the recalibrated pitch; needed before

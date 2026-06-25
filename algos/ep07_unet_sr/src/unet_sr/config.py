@@ -67,6 +67,16 @@ class TrainingConfig:
     real_eval_center_fraction: float = 1.0 / 3.0
     real_eval_zoom: float = 3.0
     real_eval_overlap: int = 128
+    # --- Physics-constrained unrolled solver (unroll_steps=0 keeps the plain UNet) ---
+    unroll_steps: int = 0
+    solver_m_frames: int = 16
+    solver_band_sigma: float = 5.0
+    solver_huber_delta: float = 0.0
+    solver_share_weights: bool = True
+    solver_eta_init: float = 0.5
+    solver_dc_rim_lr_px: int = 8
+    solver_dc_weight: float = 0.1
+    solver_prior_anneal_steps: int = 0
 
     def validate(self) -> None:
         if self.device == "cpu" and self.amp:
@@ -149,6 +159,15 @@ class TrainingConfig:
             raise ValueError("forward_model_band_sigma must be >= 0")
         if self.input_mode not in ("lr", "hybrid_drizzle2x"):
             raise ValueError("input_mode must be 'lr' or 'hybrid_drizzle2x'")
+        if self.unroll_steps < 0:
+            raise ValueError("unroll_steps must be >= 0")
+        if self.unroll_steps > 0:
+            if self.input_mode != "hybrid_drizzle2x":
+                raise ValueError("unroll_steps>0 (unrolled solver) requires --input-mode hybrid_drizzle2x")
+            if self.scale != 2:
+                raise ValueError("unroll_steps>0 requires --scale 2")
+            if self.solver_m_frames < 1:
+                raise ValueError("solver_m_frames must be >= 1")
         if self.input_mode == "hybrid_drizzle2x" and self.forward_model_weight > 0 and self.scale != 2:
             raise ValueError(
                 "input_mode='hybrid_drizzle2x' with forward_model_weight > 0 requires --scale 2 "
@@ -420,6 +439,26 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=TrainingConfig.real_eval_overlap,
         help="Tiled inference overlap for real eval.",
     )
+    # --- Unrolled solver (used by solver_train.py / test_gate_c_smoke.py) ---
+    parser.add_argument("--unroll-steps", type=int, default=TrainingConfig.unroll_steps,
+                        help="K unroll iterations (0 = plain UNet; >0 enables the physics-constrained solver).")
+    parser.add_argument("--solver-m-frames", type=int, default=TrainingConfig.solver_m_frames,
+                        help="Number of burst frames fed to the DC term per sample (fixed; default 16).")
+    parser.add_argument("--solver-band-sigma", type=float, default=TrainingConfig.solver_band_sigma,
+                        help="Highpass sigma (LR px) for the band-limited DC term (rejects drift; default 5.0).")
+    parser.add_argument("--solver-huber-delta", type=float, default=TrainingConfig.solver_huber_delta,
+                        help="Huber delta for a robust DC term (0 = plain L2; defects/stripe noise).")
+    parser.add_argument("--solver-share-weights", action=argparse.BooleanOptionalAction,
+                        default=TrainingConfig.solver_share_weights, help="Share the prox UNet across unroll steps.")
+    parser.add_argument("--solver-eta-init", type=float, default=TrainingConfig.solver_eta_init,
+                        help="Initial (learnable) DC step size.")
+    parser.add_argument("--solver-dc-rim-lr-px", type=int, default=TrainingConfig.solver_dc_rim_lr_px,
+                        help="LR-px rim masked out of the DC term (patch-edge zero-padding artifact; default 8).")
+    parser.add_argument("--solver-dc-weight", type=float, default=TrainingConfig.solver_dc_weight,
+                        help="Weight of the terminal data-consistency loss term (default 0.1).")
+    parser.add_argument("--solver-prior-anneal-steps", type=int, default=TrainingConfig.solver_prior_anneal_steps,
+                        help="Linearly ramp the structure-prior loss weight from 0->1 over N steps (0 = off; "
+                             "fights the fidelity cliff by letting DC dominate early).")
     return parser
 
 
@@ -482,6 +521,15 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         real_eval_center_fraction=args.real_eval_center_fraction,
         real_eval_zoom=args.real_eval_zoom,
         real_eval_overlap=args.real_eval_overlap,
+        unroll_steps=args.unroll_steps,
+        solver_m_frames=args.solver_m_frames,
+        solver_band_sigma=args.solver_band_sigma,
+        solver_huber_delta=args.solver_huber_delta,
+        solver_share_weights=args.solver_share_weights,
+        solver_eta_init=args.solver_eta_init,
+        solver_dc_rim_lr_px=args.solver_dc_rim_lr_px,
+        solver_dc_weight=args.solver_dc_weight,
+        solver_prior_anneal_steps=args.solver_prior_anneal_steps,
     )
     cfg.validate()
     return cfg

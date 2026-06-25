@@ -239,6 +239,8 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         loss_weight_max_width_px: int = 3,
         min_burst_frames: int = 30,
         shift_noise_std_px: float = 0.05,
+        provide_burst: bool = False,
+        solver_m_frames: int = 16,
     ) -> None:
         if scale <= 0:
             raise ValueError("scale must be positive")
@@ -254,6 +256,10 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         self.data_scale = int(scale)
         self.min_burst_frames = int(min_burst_frames)
         self.shift_noise_std_px = float(shift_noise_std_px)
+        self.provide_burst = bool(provide_burst)
+        self.solver_m_frames = int(solver_m_frames)
+        if self.provide_burst and input_mode != "hybrid_drizzle2x":
+            raise ValueError("provide_burst (unrolled solver) requires input_mode='hybrid_drizzle2x'")
         if self.input_mode == "hybrid_drizzle2x" and patch_size_hr % self.data_scale != 0:
             raise ValueError("hybrid_drizzle2x requires patch_size_hr divisible by the 2x data scale")
 
@@ -398,6 +404,14 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
             epoch = self._epoch
             packed["obs_features"] = self._build_hybrid_obs(obs_up, packed, epoch, scene_index)
             packed["_hybrid_epoch"] = epoch
+            if self.provide_burst and "_lr_burst" not in packed:
+                lr_burst = scene.get("lr_burst")
+                if lr_burst is None:
+                    raise ValueError(
+                        f"scene {scene['scene_dir']} has no lr_burst; provide_burst requires save_lr_burst=true"
+                    )
+                packed["_lr_burst"] = lr_burst
+                packed["_shifts"] = np.asarray(scene["shifts"], dtype=np.float32)
         elif self.residual:
             from scipy.ndimage import zoom
             obs_hr = zoom(obs, (1, self.data_scale, self.data_scale), order=1).astype(np.float32)
@@ -489,6 +503,35 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
             mask = np.rot90(mask, k, axes=(0, 1)).copy()
         return obs, target, edge, mask, lr_obs
 
+    def _add_burst_to_sample(
+        self, sample: dict[str, Any], scene: dict[str, Any], index: int,
+        y_lr: int, x_lr: int, p_hr: int,
+    ) -> None:
+        """Crop M burst frames at the SAME scale-aligned LR ROI as the HR patch, with EXACT
+        shifts (no noise) + per-scene PSF, for the unrolled solver's data-consistency term.
+        Scale-aligned integer crop => forward_burst(HR_patch) == burst_patch in the interior
+        (validated; the DC term masks an ~8 LR-px rim). M is fixed (collation needs constant M;
+        every v3 scene has >= 24 frames)."""
+        burst = scene["_lr_burst"]
+        sc_shifts = scene["_shifts"]
+        n = int(burst.shape[0])
+        m = min(self.solver_m_frames, n)
+        rng = np.random.default_rng(self.seed + int(index) + self._epoch * len(self) + 17)
+        sel = np.sort(rng.choice(n, size=m, replace=False))
+        ds = self.data_scale
+        y1, x1, p1 = y_lr // ds, x_lr // ds, p_hr // ds
+        burst_patch = np.asarray(burst[sel][:, y1 : y1 + p1, x1 : x1 + p1], dtype=np.float32)
+        if burst_patch.shape != (m, p1, p1):
+            raise ValueError(f"burst patch shape {burst_patch.shape} != {(m, p1, p1)}")
+        md = scene["metadata"]
+        sy = md.get("psf_sigma_y_lr_px")
+        sample["lr_burst_patch"] = torch.from_numpy(burst_patch)
+        sample["burst_shifts"] = torch.from_numpy(np.asarray(sc_shifts[sel], dtype=np.float32))
+        sample["psf_sigma_lr_px"] = float(md["psf_sigma_lr_px"])
+        sample["psf_sigma_y_lr_px"] = float(sy) if sy is not None else float(md["psf_sigma_lr_px"])
+        sample["psf_angle_deg"] = float(md.get("psf_angle_deg", 0.0))
+        sample["psf_shape"] = str(md.get("psf_shape", "gaussian"))
+
     def __getitem__(self, index: int) -> dict[str, Any]:
         if index < 0:
             index = len(self) + index
@@ -522,10 +565,14 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
                 raise ValueError(
                     f"lr_obs crop shape mismatch: got {lr_obs_patch.shape}, expected {(1, p_1x, p_1x)}"
                 )
-        aug_rng = np.random.default_rng(self.seed + int(index) + self._epoch * len(self) + 8)
-        obs_patch, target_patch, edge_patch, mask_patch, lr_obs_patch = self._augment(
-            obs_patch, target_patch, edge_patch, mask_patch, lr_obs_patch, aug_rng,
-        )
+        # The unrolled solver consumes the raw burst + EXACT shifts, so it must NOT see flipped/
+        # rotated patches (the v3 generator already randomizes orientation + constellation, and
+        # augmenting here would require transforming the shift vectors — an FM-6 footgun we skip).
+        if not self.provide_burst:
+            aug_rng = np.random.default_rng(self.seed + int(index) + self._epoch * len(self) + 8)
+            obs_patch, target_patch, edge_patch, mask_patch, lr_obs_patch = self._augment(
+                obs_patch, target_patch, edge_patch, mask_patch, lr_obs_patch, aug_rng,
+            )
 
         sample = {
             "obs_features": torch.from_numpy(obs_patch.astype(np.float32, copy=False)),
@@ -535,6 +582,8 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         }
         if lr_obs_patch is not None:
             sample["lr_obs"] = torch.from_numpy(lr_obs_patch.astype(np.float32, copy=False))
+        if self.provide_burst:
+            self._add_burst_to_sample(sample, scene, index, y_lr, x_lr, p_hr)
 
         if self._need_loss_weights:
             thin_np, gap_np = compute_mask_loss_weights_np(
