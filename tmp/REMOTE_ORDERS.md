@@ -20,10 +20,10 @@
 - **Sharpness alone is NOT success.** A win = in-band split-half FRC ≥ classical TGV/MAP-TV.
 
 ## 1. Environment
-- Repo on the box; `git pull` to the latest `main`. Pool: `data/synthetic/pool_2x_v3_5k`
-  (symlink → `/mnt/d/thermal_lift_data/pool_2x_v3_5k`).
-- Run python via the project env (e.g. `uv run python ...` or the activated `.venv`). All
-  commands below are repo-root-relative.
+- Repo on the box: **`~/thermal_lift`** (`/home/ujs/thermal_lift` in WSL — moved off the slow
+  `/mnt/c` Windows mount for I/O). `cd ~/thermal_lift && git pull` to the latest `main`.
+- Pool: `data/synthetic/pool_2x_v3_5k`. Run python via the project env (`uv run python ...`).
+  All commands below are repo-root-relative.
 
 ---
 
@@ -79,21 +79,36 @@ uv run python algos/ep07_unet_sr/tests/test_gate_c_smoke.py --pool data/syntheti
 ```
 PASS bar (printed): shapes/plumbing OK, all losses+grads finite. If FAIL: STOP, paste output.
 
+## DRIZZLE — pick ONE input path (the on-the-fly drizzle is what made Gate C slow)
+The solver needs the raw `lr_burst` (DC term — already saved) regardless. The *drizzle* is only a
+warm-start/conditioning, and computing it on-the-fly per sample is slow. Two ways:
+- **(A, RECOMMENDED) Lean / no-drizzle** — `--solver-no-drizzle`. Drops the drizzle entirely: no
+  on-the-fly cost, no precompute, no extra disk. Warm-start = upsampled aligned_mean; cond = 5ch.
+  The DC term carries the multi-frame SR signal. Fastest path to a baseline.
+- **(B) Hybrid + precomputed drizzle** — keep the 8ch hybrid warm-start, but precompute the drizzle
+  once so it's a fast mmap (not on-the-fly):
+  ```
+  uv run python scripts/precompute_drizzle_variants.py --pool-dir data/synthetic/pool_2x_v3_5k \
+    --num-variants 1 --workers 14        # ~15-20 min, ~37 GB (num-variants 1 is enough for the solver)
+  ```
+  Then run WITHOUT `--solver-no-drizzle`. After precompute the dataset auto-uses the variants.
+
 ## TRAINING — K-step unrolled solver (the real run)  — RUN after Gates 0/A/B/C all PASS
 ```
 uv run python -m unet_sr.solver_train \
   --training-pool-dir data/synthetic/pool_2x_v3_5k \
-  --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 4 \
+  --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 4 --solver-no-drizzle \
   --total-steps 20000 --batch-size 4 --patch-size-hr 256 \
   --solver-m-frames 16 --solver-band-sigma 5 --solver-dc-weight 0.1 \
   --save-every 2500 --num-workers 8 --output-dir outputs/solver_v1
 ```
+(Drop `--solver-no-drizzle` to use path B. Smoke either with Gate C: add `--no-drizzle` for path A.)
 - Runs in **fp32 (no AMP)** for double-backward stability. If OOM: lower `--batch-size` /
   `--patch-size-hr` / `--unroll-steps`. Memory is dominated by the K-step double-backward.
 - **Default stop ~20K** (FM-1 cliff); checkpoints every 2500 — select in the 10K–25K window.
 - To fight the cliff, try `--solver-prior-anneal-steps 8000` (DC dominates early, prior ramps in).
 - Eval (offline, separate harness): synthetic split-half FRC + EP11/EP15 real-data; bar = in-band
-  FRC ≥ classical TGV/MAP-TV. Add the drizzle base on every eval path.
+  FRC ≥ classical TGV/MAP-TV. Add the warm-start base on every eval path.
 - NOTE: thin/gap loss-weighting is disabled for this first run (a shape-contract mismatch with
   ContourSRLoss); re-enable once the reshape is confirmed.
 

@@ -39,23 +39,26 @@ def main() -> int:
     ap.add_argument("--patch", type=int, default=128)
     ap.add_argument("--batch", type=int, default=2)
     ap.add_argument("--frames", type=int, default=12)
+    ap.add_argument("--no-drizzle", action="store_true", help="smoke the lean no-drizzle path (5ch cond)")
     args = ap.parse_args()
 
     scale = 2
+    cond_ch = 5 if args.no_drizzle else 8
+    mean_ch = 0 if args.no_drizzle else HYBRID_DRIZZLE_MEAN_CHANNEL
     ds = ThermalSRDataset(
         args.pool, patch_size_hr=args.patch, scale=scale, seed=0, patches_per_scene=8,
         max_scene_cache=4, input_mode="hybrid_drizzle2x", return_metadata=False,
-        provide_burst=True, solver_m_frames=args.frames,
+        provide_burst=True, solver_m_frames=args.frames, solver_no_drizzle=args.no_drizzle,
     )
     loader = DataLoader(ds, batch_size=args.batch, shuffle=True, num_workers=0, drop_last=True)
     print(f"Gate C on {DEVICE}: {len(ds.scene_paths)} scenes, patch={args.patch}, batch={args.batch}, "
-          f"M={args.frames}, steps={args.steps}")
+          f"M={args.frames}, no_drizzle={args.no_drizzle}, steps={args.steps}")
 
     # shape audit on the first batch
     b0 = next(iter(loader))
     p1 = args.patch // scale
     checks = {
-        "obs_features": (args.batch, 8, args.patch, args.patch),
+        "obs_features": (args.batch, cond_ch, args.patch, args.patch),
         "hr_target": (args.batch, 1, args.patch, args.patch),
         "lr_burst_patch": (args.batch, args.frames, p1, p1),
         "burst_shifts": (args.batch, args.frames, 2),
@@ -70,12 +73,11 @@ def main() -> int:
         print(f"  {k:>16}: present={k in b0}")
         shape_ok &= k in b0
 
-    solver = UnrolledSolver(n_steps=3, cond_channels=8, base_channels=32, scale=scale,
+    solver = UnrolledSolver(n_steps=3, cond_channels=cond_ch, base_channels=32, scale=scale,
                             band_highpass_sigma_lr_px=5.0).to(DEVICE).train()
     criterion = ContourSRLoss(forward_model_weight=0.0)
     mask = edge_mask(p1, p1, 8, DEVICE)
     opt = torch.optim.AdamW(solver.parameters(), lr=2e-4)
-    mean_ch = HYBRID_DRIZZLE_MEAN_CHANNEL
 
     losses, dcs, finite = [], [], True
     it = iter(loader)

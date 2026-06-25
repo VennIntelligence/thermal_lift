@@ -77,6 +77,7 @@ class TrainingConfig:
     solver_dc_rim_lr_px: int = 8
     solver_dc_weight: float = 0.1
     solver_prior_anneal_steps: int = 0
+    solver_no_drizzle: bool = False
 
     def validate(self) -> None:
         if self.device == "cpu" and self.amp:
@@ -459,6 +460,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--solver-prior-anneal-steps", type=int, default=TrainingConfig.solver_prior_anneal_steps,
                         help="Linearly ramp the structure-prior loss weight from 0->1 over N steps (0 = off; "
                              "fights the fidelity cliff by letting DC dominate early).")
+    parser.add_argument("--solver-no-drizzle", action="store_true", default=TrainingConfig.solver_no_drizzle,
+                        help="Lean solver input: drop the drizzle entirely (no on-the-fly cost, no precomputed "
+                             "variants/disk). Warm-start from upsampled aligned_mean; the DC term carries the "
+                             "multi-frame SR signal. cond becomes 5ch (vs 8ch hybrid).")
     return parser
 
 
@@ -530,6 +535,7 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         solver_dc_rim_lr_px=args.solver_dc_rim_lr_px,
         solver_dc_weight=args.solver_dc_weight,
         solver_prior_anneal_steps=args.solver_prior_anneal_steps,
+        solver_no_drizzle=args.solver_no_drizzle,
     )
     cfg.validate()
     return cfg

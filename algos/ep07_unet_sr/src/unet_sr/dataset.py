@@ -241,6 +241,7 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         shift_noise_std_px: float = 0.05,
         provide_burst: bool = False,
         solver_m_frames: int = 16,
+        solver_no_drizzle: bool = False,
     ) -> None:
         if scale <= 0:
             raise ValueError("scale must be positive")
@@ -258,6 +259,7 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         self.shift_noise_std_px = float(shift_noise_std_px)
         self.provide_burst = bool(provide_burst)
         self.solver_m_frames = int(solver_m_frames)
+        self.solver_no_drizzle = bool(solver_no_drizzle)
         if self.provide_burst and input_mode != "hybrid_drizzle2x":
             raise ValueError("provide_burst (unrolled solver) requires input_mode='hybrid_drizzle2x'")
         if self.input_mode == "hybrid_drizzle2x" and patch_size_hr % self.data_scale != 0:
@@ -347,7 +349,7 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         cached = self._cache.get(scene_index)
         if cached is not None:
             self._cache.move_to_end(scene_index)
-            if self.input_mode == "hybrid_drizzle2x":
+            if self.input_mode == "hybrid_drizzle2x" and not self.solver_no_drizzle:
                 epoch = self._epoch
                 if cached.get("_hybrid_epoch") != epoch:
                     cached["obs_features"] = self._build_hybrid_obs(
@@ -385,25 +387,31 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
                 "_obs_1x": obs,
                 "_obs_up": obs_up,
             }
-            variants = scene.get("drizzle_variants")
-            if variants is not None:
-                # float16 mmap, sliced per epoch — never fully materialised.
-                packed["_drz_variants"] = variants
-            else:
-                lr_burst = scene.get("lr_burst")
-                if lr_burst is None:
-                    raise ValueError(
-                        f"scene {scene['scene_dir']} has no drizzle_variants and no lr_burst; "
-                        "hybrid_drizzle2x requires precomputed variants "
-                        "(scripts/precompute_drizzle_variants.py) or save_lr_burst=true"
-                    )
-                # Keep the float16 mmap as-is: _select_burst casts only the
-                # sampled subset to float32, avoiding ~305 MB/scene RAM.
-                packed["_lr_burst"] = lr_burst
-                packed["_shifts"] = np.asarray(scene["shifts"], dtype=np.float32)
             epoch = self._epoch
-            packed["obs_features"] = self._build_hybrid_obs(obs_up, packed, epoch, scene_index)
-            packed["_hybrid_epoch"] = epoch
+            if self.solver_no_drizzle:
+                # Lean solver input: 5ch upsampled fused only. The DC term (raw burst) carries the
+                # multi-frame SR signal, so no drizzle is built — skips BOTH the on-the-fly scatter
+                # cost AND the precomputed-variants disk. x0 = upsampled aligned_mean (obs ch0).
+                packed["obs_features"] = obs_up
+            else:
+                variants = scene.get("drizzle_variants")
+                if variants is not None:
+                    # float16 mmap, sliced per epoch — never fully materialised.
+                    packed["_drz_variants"] = variants
+                else:
+                    lr_burst = scene.get("lr_burst")
+                    if lr_burst is None:
+                        raise ValueError(
+                            f"scene {scene['scene_dir']} has no drizzle_variants and no lr_burst; "
+                            "hybrid_drizzle2x requires precomputed variants "
+                            "(scripts/precompute_drizzle_variants.py) or save_lr_burst=true"
+                        )
+                    # Keep the float16 mmap as-is: _select_burst casts only the
+                    # sampled subset to float32, avoiding ~305 MB/scene RAM.
+                    packed["_lr_burst"] = lr_burst
+                    packed["_shifts"] = np.asarray(scene["shifts"], dtype=np.float32)
+                packed["obs_features"] = self._build_hybrid_obs(obs_up, packed, epoch, scene_index)
+                packed["_hybrid_epoch"] = epoch
             if self.provide_burst and "_lr_burst" not in packed:
                 lr_burst = scene.get("lr_burst")
                 if lr_burst is None:

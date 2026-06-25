@@ -66,10 +66,10 @@ def terminal_dc_loss(pred, burst, shifts, psf, scale, band_sigma, mask, huber_de
     return (r * r).mean()
 
 
-def build_solver(config: TrainingConfig, device: torch.device) -> UnrolledSolver:
+def build_solver(config: TrainingConfig, device: torch.device, cond_channels: int) -> UnrolledSolver:
     return UnrolledSolver(
         n_steps=config.unroll_steps,
-        cond_channels=config.in_channels,  # 8 for hybrid_drizzle2x
+        cond_channels=cond_channels,  # 8 (hybrid) or 5 (no-drizzle lean path)
         base_channels=config.base_channels,
         scale=config.scale,
         share_weights=config.solver_share_weights,
@@ -115,7 +115,12 @@ def train(config: TrainingConfig) -> Path:
         gap_boost=1.0,
         provide_burst=True,
         solver_m_frames=config.solver_m_frames,
+        solver_no_drizzle=config.solver_no_drizzle,
     )
+    # cond/warm-start channels: lean path uses 5ch upsampled fused + aligned_mean (ch0);
+    # hybrid path uses the 8ch obs + drizzle-mean (ch5).
+    cond_channels = 5 if config.solver_no_drizzle else config.in_channels
+    mean_ch = 0 if config.solver_no_drizzle else HYBRID_DRIZZLE_MEAN_CHANNEL
     sampler = SceneInterleavedSampler(
         n_scenes=len(dataset.scene_paths),
         patches_per_scene=dataset.patches_per_scene,
@@ -135,11 +140,12 @@ def train(config: TrainingConfig) -> Path:
         prefetch_factor=config.prefetch_factor if config.num_workers > 0 else None,
     )
 
-    solver = build_solver(config, device)
+    solver = build_solver(config, device, cond_channels)
     criterion = build_criterion(config)
     n_params = sum(p.numel() for p in solver.parameters())
     print(f"UnrolledSolver: K={config.unroll_steps} steps, M={config.solver_m_frames} frames, "
-          f"{n_params:,} params, band_sigma={config.solver_band_sigma}, device={device}")
+          f"{n_params:,} params, cond={cond_channels}ch, no_drizzle={config.solver_no_drizzle}, "
+          f"band_sigma={config.solver_band_sigma}, device={device}")
 
     optimizer = torch.optim.AdamW(solver.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, config.total_steps))
@@ -153,7 +159,6 @@ def train(config: TrainingConfig) -> Path:
 
     p1 = config.patch_size_hr // config.scale
     mask = edge_mask(p1, p1, config.solver_dc_rim_lr_px, device)
-    mean_ch = HYBRID_DRIZZLE_MEAN_CHANNEL
 
     solver.train()
     step = 0
