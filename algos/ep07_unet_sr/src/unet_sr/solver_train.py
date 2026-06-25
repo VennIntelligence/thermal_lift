@@ -101,6 +101,15 @@ def train(config: TrainingConfig) -> Path:
         raise ValueError("solver_train requires --unroll-steps > 0 (use train.py for the plain UNet)")
     device = torch.device(config.device if torch.cuda.is_available() or config.device == "cpu" else "cpu")
     torch.manual_seed(config.seed)
+    if device.type == "cuda":
+        # The solver runs fp32 (no AMP) for double-backward stability — which makes cuDNN
+        # autotuning + TF32 essential: otherwise the K prox-UNet convs (the dominant cost) run
+        # as unaccelerated full-fp32 on the 5090. TF32 keeps fp32 storage (double-backward safe,
+        # unlike fp16) but uses the tensor cores; shapes are fixed here so benchmark pays off.
+        # (Gate A certification uses a separate fp64 path and is unaffected.)
+        torch.backends.cudnn.benchmark = True
+        torch.backends.cuda.matmul.allow_tf32 = True
+        torch.backends.cudnn.allow_tf32 = True
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
     tb_dir = Path(config.tb_log_dir or (output_dir / "tb_logs"))
