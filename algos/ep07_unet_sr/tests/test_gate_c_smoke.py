@@ -101,7 +101,7 @@ def main() -> int:
         opt.step()
         finite &= bool(torch.isfinite(total)) and all(
             torch.isfinite(p.grad).all() for p in solver.parameters() if p.grad is not None)
-        losses.append(float(total)); dcs.append(float(dc))
+        losses.append(float(total.detach())); dcs.append(float(dc.detach()))
         if step in (0, args.steps // 2, args.steps - 1):
             print(f"  step {step:>3}: total={float(total):.4f} dc={float(dc):.5f} gnorm={gnorm:.2f}")
 
