@@ -8,6 +8,56 @@
 
 ## 变更记录
 
+### [ACL-026] 2026-06-25 — solver 架构修正:end-on-DC + 冻结 eta(把"硬 DC"真正做硬;软锚定降级为监视)
+
+> 接 ACL-025。v2(anneal 8000 + dc_weight 0.5)训练复盘 → 定位到 `unroll.py` 实现的结构缺陷,做架构级修正,而非再调权重。
+
+**问题诊断**(v2 远端 log):
+- DC 从平滑暖启地板 **0.021(step1)单调爬到 0.061(step2000)**,冲向 v1 同一高位;`eta` 0.500→0.477 继续下漏;`gnorm` 随 anneal 上升(0.17→0.52)说明梯度几乎全来自 struct、DC 项梯度可忽略。
+- **DC 升到暖启地板之上 = 幻觉签名**:平滑暖启过 A 再 highpass,残差 ≈ −highpass(burst)(地板);网络加的高频与 burst 不相关时方差叠加,DC 升过地板 → 加的是**物理不符**的高频。struct(宽容、亚像素容忍)下降的同时 DC(严格、相位敏感)上升 = 网络找了个"GT 神似但前向不符"的解。
+- **根因(unroll 实现缺陷,非加权)**:① 每轮 `DC→prox` 顺序,**prox 末位发言**,无约束残差 UNet 在 DC 步之后重新注入幻觉高频,输出 `x_K` 不被任何 DC 步修正;② **eta 可学**,优化器把 DC 步往 0 调、架构层面绕过约束;③ 软 DC loss 项本质是已证伪的 loss 侧软锚定(ACL-017/019),且 `A^T(highpass)` 梯度天生被转置上采样抹平,打不过 struct 尖锐的边缘/梯度向量梯度(`structure_boost=4`)。三者叠加 → 再调 dc_weight/anneal 都是给漏底设计打补丁。
+
+**修改内容**(`unroll.py` / `config.py` / `solver_train.py`):
+1. **end-on-DC 重排**:每轮改 `prox → DC`,循环以 DC 步收尾 → 输出 `x_K` **构造上落在数据一致方向**,prox 不再有最后发言权;struct loss 经终末 DC 步反传进 prox(autograd 双反传),把 prox 耦合到观测。
+2. **冻结 eta**(`solver_learn_eta=False` 默认):eta 改为 buffer、不进 optimizer,DC 步每次满强度开火、不可被调 0 绕过;新增 `--solver-learn-eta` 可切回可学(A/B 用)。
+3. **软 DC loss 降级为可选监视**:`solver_train` 当 `dc_weight=0` 时在 `no_grad` 下算 `dc` 仅作监视(TB `loss/dc` 仍可看),不建图、不进 loss;`>0` 时仅作弱次级正则,不再是主机制。
+4. docstring 更正:删除原"prox 只能填零空间、结构上无法覆盖观测"的过度声称(实现并不成立),改为诚实描述 end-on-DC 的保证 + "单步梯度非完整投影"的 caveat。
+
+**预期效果 / 验证次序**:
+- 终末 DC 步把输出拉回数据一致,DC 不再升过暖启地板;`eta` 恒定(TB 一条平线=冻结生效)。
+- 推荐下一轮用**纯架构**配置:`--solver-prior-anneal-steps 0 --solver-dc-weight 0`(total=struct,一致性全交给架构),盯 `loss/dc` 监视曲线是否被架构压住。
+- **先 Gate B**(单 clean 场景,确认 end-on-DC + 冻结 eta 把 DC 残差驱→~0,即架构有效)PASS 再上池子。
+- **判据**:纯架构下 DC 仍压不住 → 单步梯度太弱,升级为终末几步 **CG 硬投影**(docstring 已标 caveat 路径);DC 被压住但 struct 学不动 → 回调。
+
+**训练结果**:_(待远端;Gate B 验证架构 → 池子重启 `outputs/solver_v3_arch`,纯架构 anneal0/dcw0)_。
+
+---
+
+### [ACL-025] 2026-06-25 — solver v1 首训诊断:DC 项被欠权重无视(anneal-off + dc_weight 0.1)→ 上 prior 退火 + 抬 DC 权重
+
+> 本条是 unrolled solver(ACL-024)**首个 20K 训练**的中途诊断 + 训练策略修正。仅 CLI 旗标变更,无代码改动。
+
+**问题诊断**(远端 5K log;配置 no-drizzle / K=4 / M=12 / patch192 / batch18):
+- `struct` 正常下降:0.081(step1500)→ ~0.04(最低 0.023@4500)。监督路通。
+- **`loss/dc` 卡死在 ~0.055–0.064,不降反微升**;且 `dc(0.057) > struct(0.042)`——DC 是个**绝对量级比 struct 还大、却被无视**的量,不是可忽略噪声。
+- **`eta`(可学 DC 步长)单调下漏**:0.484 → 0.456(step1500→5000),方向是优化器在"关小"物理修正步(未塌到 0)。
+- **机制**:`total = 1.0*struct + solver_dc_weight(0.1)*dc`。AdamW 对 loss 整体缩放近似不变,真正起作用的是**权重比 struct:dc = 10:1**,struct 从 step0 满权主导 → 优化器榨干 struct、无视 DC,并顺势调小 eta。
+- **排除算子 bug**:Gate 0(hp-corr 0.999)/ Gate A(adjoint 0.0)/ **Gate B 在单 clean 场景把 DC 压到 ~0** 已认证算子+几何+数据;机器有能力降 DC。故此为**训练加权动力学**,非 FM-6 系统误差。DC 漂移=求解器在绕开物理锚点,退化成"贵的 plain UNet",违背架构反幻觉初衷。
+
+**修改内容**(无代码改动,现成旗标;**从头重启**,因 anneal 是 step0 起的 schedule,续训会错过 DC 主导早期相):
+1. `--solver-prior-anneal-steps 8000`:`total = anneal*struct + 0.5*dc`,早期 anneal≈0 → **只剩 DC** 先压数据一致性,prior 在 0–8K 线性 ramp 填零空间(正是为 FM-1 cliff 设计、ACL-024 第一条基线刻意先关的开关)。
+2. `--solver-dc-weight 0.1 → 0.5`:稳态比 10:1 → **2:1**(DC 占 33%),保证 prior ramp 满后 DC 仍是硬锚不反弹。
+3. **隔离变量**:patch192/batch18/M12/unroll4/clip 全部保持与 v1 一致;v1 5K ckpt 保留作对照。`gnorm` 持续 3–4 顶 clip=1.0 暂不动(留作下一变量)。
+
+**预期效果**:
+- DC 主导期(0–8K)`loss/dc` 明显下降(目标 0.057 → <0.03),`eta` 止跌回升。
+- prior ramp 满(8K 后)DC 维持低位不反弹。
+- **判据**:若 8K 后 DC 又爬 → 下轮 `dc_weight`→1.0;若连 0–8K 都压不动 DC → 停,提示更深问题(非纯加权)。
+
+**训练结果**:_(待远端;重启为 `outputs/solver_v2_dcanneal`,盯 0–8K 的 dc/eta 曲线)_。
+
+---
+
 ### [ACL-024] 2026-06-25 — 决策记录:不上 diffusion / 不用现成底子,承诺 unrolled solver(roadmap 落盘)
 
 > 本条是**决策记录(ADR)**,非代码变更。完整 roadmap 见 `research_log/network_upgrade_roadmap.md`。

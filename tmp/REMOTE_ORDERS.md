@@ -94,22 +94,41 @@ warm-start/conditioning, and computing it on-the-fly per sample is slow. Two way
   Then run WITHOUT `--solver-no-drizzle`. After precompute the dataset auto-uses the variants.
 
 ## TRAINING — K-step unrolled solver (the real run)  — RUN after Gates 0/A/B/C all PASS
+> **ACL-026 architecture** (current): each unroll step is `prox → DC` and the solver **ENDS on the
+> DC step**, so the output `x_K` is forward-consistent by construction; **eta is FROZEN by default**
+> (`--solver-learn-eta` to unfreeze) so the optimizer can't bypass the DC step. Anti-hallucination is
+> now **architectural**, not the (falsified) soft DC loss. History: v1 (ACL-025) and v2 both saw
+> `loss/dc` climb ABOVE the smooth warm-start floor while `struct` fell = hallucination; root cause
+> was the old `DC→prox` order (prox had the last word) + a learnable eta bleeding to 0.
+
+**Recommended first run = PURE ARCHITECTURE** (no soft DC term, no anneal — let the architecture
+enforce consistency; `loss/dc` is now just a MONITOR in TB):
 ```
 uv run python -m unet_sr.solver_train \
   --training-pool-dir data/synthetic/pool_2x_v3_5k \
   --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 4 --solver-no-drizzle \
-  --total-steps 20000 --batch-size 4 --patch-size-hr 256 \
-  --solver-m-frames 16 --solver-band-sigma 5 --solver-dc-weight 0.1 \
-  --save-every 2500 --num-workers 8 --output-dir outputs/solver_v1
+  --solver-m-frames 12 --solver-band-sigma 5 \
+  --solver-prior-anneal-steps 0 --solver-dc-weight 0 \
+  --total-steps 20000 --batch-size 18 --patch-size-hr 192 \
+  --save-every 2500 --num-workers 8 --output-dir outputs/solver_v3_arch
 ```
-(Drop `--solver-no-drizzle` to use path B. Smoke either with Gate C: add `--no-drizzle` for path A.)
+**Before the pool run, RE-RUN GATE B** — its check [4] now certifies the ACL-026 architecture: after
+overfitting the SOLVER on one clean scene with structural supervision only, the terminal DC residual
+must drop BELOW the warm-start floor (not climb above it like v1/v2), with corr>0.85 and eta frozen.
+If [4] fails (DC climbs above the floor, or eta moved), STOP: the single gradient step is too weak →
+escalate to a terminal CG projection (see the unroll.py caveat).
+- `eta` in TB should be a **flat line** (frozen working); `loss/dc` should **NOT climb above the
+  step-1 warm-start floor** (the v1/v2 failure). If it still climbs → the architecture isn't holding,
+  report before burning 20K.
 - Runs in **fp32 (no AMP)** for double-backward stability. If OOM: lower `--batch-size` /
   `--patch-size-hr` / `--unroll-steps`. Memory is dominated by the K-step double-backward.
-- **Default stop ~20K** (FM-1 cliff); checkpoints every 2500 — select in the 10K–25K window.
-- To fight the cliff, try `--solver-prior-anneal-steps 8000` (DC dominates early, prior ramps in).
+- **Hold batch constant** across all solver ablations (V9A/ACL-020 confound). **Default stop ~20K**
+  (FM-1 cliff); checkpoints every 2500 — select in the 10K–25K window.
+- If DC holds but the result is too soft, add a **small** `--solver-dc-weight 0.1` as a weak
+  regularizer (NOT the mechanism) — do not go back to the anneal-driven soft anchoring.
 - Eval (offline, separate harness): synthetic split-half FRC + EP11/EP15 real-data; bar = in-band
   FRC ≥ classical TGV/MAP-TV. Add the warm-start base on every eval path.
-- NOTE: thin/gap loss-weighting is disabled for this first run (a shape-contract mismatch with
+- NOTE: thin/gap loss-weighting is disabled for this run (a shape-contract mismatch with
   ContourSRLoss); re-enable once the reshape is confirmed.
 
 ## PARALLEL (not a training gate) — re-run EP15 at 20µm

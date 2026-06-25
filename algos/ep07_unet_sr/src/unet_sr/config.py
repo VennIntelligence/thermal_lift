@@ -74,6 +74,7 @@ class TrainingConfig:
     solver_huber_delta: float = 0.0
     solver_share_weights: bool = True
     solver_eta_init: float = 0.5
+    solver_learn_eta: bool = False  # False freezes eta (a learnable eta let the optimizer bypass the DC step, ACL-026)
     solver_dc_rim_lr_px: int = 8
     solver_dc_weight: float = 0.1
     solver_prior_anneal_steps: int = 0
@@ -452,7 +453,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--solver-share-weights", action=argparse.BooleanOptionalAction,
                         default=TrainingConfig.solver_share_weights, help="Share the prox UNet across unroll steps.")
     parser.add_argument("--solver-eta-init", type=float, default=TrainingConfig.solver_eta_init,
-                        help="Initial (learnable) DC step size.")
+                        help="DC step size (frozen by default; see --solver-learn-eta).")
+    parser.add_argument("--solver-learn-eta", action=argparse.BooleanOptionalAction,
+                        default=TrainingConfig.solver_learn_eta,
+                        help="Learn the per-step DC step size eta. Default OFF (frozen): a learnable eta "
+                             "let the optimizer drive the DC step toward 0 and bypass the constraint (ACL-026).")
     parser.add_argument("--solver-dc-rim-lr-px", type=int, default=TrainingConfig.solver_dc_rim_lr_px,
                         help="LR-px rim masked out of the DC term (patch-edge zero-padding artifact; default 8).")
     parser.add_argument("--solver-dc-weight", type=float, default=TrainingConfig.solver_dc_weight,
@@ -532,6 +537,7 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         solver_huber_delta=args.solver_huber_delta,
         solver_share_weights=args.solver_share_weights,
         solver_eta_init=args.solver_eta_init,
+        solver_learn_eta=args.solver_learn_eta,
         solver_dc_rim_lr_px=args.solver_dc_rim_lr_px,
         solver_dc_weight=args.solver_dc_weight,
         solver_prior_anneal_steps=args.solver_prior_anneal_steps,

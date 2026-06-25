@@ -5,8 +5,10 @@ cannot see: on ONE clean synthetic scene (no noise/drift/defects) it verifies
   (1) data-fitting min ||A x - y||^2 drives the DC residual toward ~0  -> the assumed shifts/
       PSF/offset really do explain the observed burst (a half-pixel/sign bug plateaus here);
   (2) the recovered x correlates with the GT field -> reconstruction is geometrically aligned;
-  (3) the full UnrolledSolver runs forward+backward with finite grads -> the unroll is trainable
-      (double-backward through the autograd DC step works).
+  (3) overfitting the full UnrolledSolver on the scene (structural supervision ONLY) is trainable
+      (finite double-backward grads) AND its end-on-DC output stays data-consistent: the terminal DC
+      residual drops BELOW the warm-start floor instead of climbing above it (the v1/v2 hallucination
+      mode), with eta frozen. This certifies the ACL-026 architecture before the pool run.
 
 Usage on the remote:  python algos/ep07_unet_sr/tests/test_gate_b_overfit.py
 Exit 0 = PASS (proceed to Gate C / smoke); nonzero = STOP, geometry/plumbing bug.
@@ -89,21 +91,47 @@ def main() -> int:
     rf = resid_rms(x)
     c = corr(x, gt)
 
-    # (3) solver forward+backward smoke (trainability / double-backward)
-    solver = UnrolledSolver(n_steps=3, cond_channels=8, base_channels=32, scale=scale,
+    # (3) ACL-026 architecture: train the SOLVER on this one clean scene with STRUCTURAL supervision
+    #     ONLY (no DC loss term — mirrors the pure-architecture pool run, dc_weight=0). cond=0 forces
+    #     reliance on the DC path. Certifies: (a) finite double-backward grads (trainable); (b) the
+    #     end-on-DC + frozen-eta output stays data-consistent — terminal DC residual drops BELOW the
+    #     warm-start floor instead of climbing above it (the v1/v2 hallucination mode); (c) eta frozen.
+    solver = UnrolledSolver(n_steps=4, cond_channels=8, base_channels=32, scale=scale,
                             band_highpass_sigma_lr_px=5.0).to(DEVICE).train()
     cond = torch.zeros(1, 8, H, W, device=DEVICE)
-    pred = solver(x0.detach(), burst, shifts, psf, cond)
-    sloss = (pred - gt).pow(2).mean()
-    sloss.backward()
-    grads_finite = all(p.grad is not None and torch.isfinite(p.grad).all()
-                       for p in solver.parameters() if p.requires_grad)
+    eta_before = torch.nn.functional.softplus(solver.eta_raw).mean().item()
+    opt2 = torch.optim.Adam(solver.parameters(), lr=2e-3)
 
-    print(f"\n[1] DC residual: {r0:.3e} -> {rf:.3e}   (drop {r0 / max(rf, 1e-30):.1f}x; want >10x)")
+    def solver_dc_corr():
+        with torch.no_grad():
+            p = solver(x0.detach(), burst, shifts, psf, cond)
+            dc = float((forward_burst(p, shifts, psf, scale) - burst).pow(2).mean().sqrt())
+            return dc, corr(p, gt)
+
+    dc_warm = float((forward_burst(x0.detach(), shifts, psf, scale) - burst).pow(2).mean().sqrt())
+    dc0, _ = solver_dc_corr()
+    grads_finite = True
+    for i in range(400):
+        opt2.zero_grad(set_to_none=True)
+        p = solver(x0.detach(), burst, shifts, psf, cond)
+        (p - gt).pow(2).mean().backward()
+        if i == 0:
+            grads_finite = all(pp.grad is not None and torch.isfinite(pp.grad).all()
+                               for pp in solver.parameters() if pp.requires_grad)
+        opt2.step()
+    dcN, cN = solver_dc_corr()
+    eta_after = torch.nn.functional.softplus(solver.eta_raw).mean().item()
+    eta_frozen = abs(eta_after - eta_before) < 1e-6
+
+    print(f"\n[1] DC residual (operator fit): {r0:.3e} -> {rf:.3e}   (drop {r0 / max(rf, 1e-30):.1f}x; want >10x)")
     print(f"[2] corr(recovered x, GT) = {c:.4f}   (want > 0.90: geometric alignment OK)")
     print(f"[3] solver fwd+bwd finite grads = {grads_finite}   (double-backward through unroll OK)")
-    ok = (rf < 0.1 * r0) and (c > 0.90) and grads_finite
-    print("\nGATE B:", "PASS — proceed to Gate C / smoke" if ok else "FAIL — STOP, geometry/plumbing bug")
+    print(f"[4] end-on-DC overfit: warm-floor={dc_warm:.3e}, solver DC {dc0:.3e} -> {dcN:.3e}, "
+          f"corr={cN:.4f}, eta_frozen={eta_frozen}")
+    print(f"    (ACL-026: want final DC < warm-floor [not climbing above like v1/v2], corr>0.85)")
+    ok = (rf < 0.1 * r0) and (c > 0.90) and grads_finite and (dcN < dc_warm) and (cN > 0.85) and eta_frozen
+    print("\nGATE B:", "PASS — operator sound + architecture enforces DC; proceed to Gate C / smoke"
+          if ok else "FAIL — STOP (geometry / plumbing / architecture bug)")
     return 0 if ok else 1
 
 

@@ -2,18 +2,25 @@
 
 This is the committed redesign direction (ACL-024 / research_log/network_upgrade_roadmap.md).
 It generalizes the V10 "residual-over-drizzle" model (which ACL-024 notes is already a 1-step
-unroll) to K steps with a HARD data-consistency (DC) step between proximal refinements:
+unroll) to K steps that ALTERNATE a learned proximal refinement with a data-consistency (DC)
+step, and crucially END ON THE DC STEP so the returned estimate is pulled back onto the data:
 
-    x_0 = drizzle warm-start
+    x_0 = drizzle / aligned-mean warm-start
     for k in 0..K-1:
-        x <- x - eta_k * A^T(A x - y)        # DC gradient step (exact A^T via autograd)
-        x <- x + prox_k([x, cond])           # learned proximal refinement (UNet)
-    return x_K
+        x <- x + prox_k([x, cond])           # learned proximal refinement (UNet, null-space prior)
+        x <- x - eta_k * A^T(A x - y)         # DC gradient step (exact A^T via autograd) — LAST
+    return x_K                                # ends on DC => forward-consistent by construction
 
-Why this beats the falsified loss-side anchoring (ACL-017/019): the DC step constrains the
-*range* of the forward operator with a HARD update every iteration, so the UNet prox can only
-fill the forward operator's null space — it structurally cannot overwrite the observations the
-way a soft forward-model loss let it (the fidelity-cliff mechanism FM-1/FM-2).
+Design history (ACL-025/026): the first implementation ran DC-then-prox, so the *prox had the
+last word* — the unconstrained residual UNet could re-inject forward-inconsistent (hallucinated)
+high-frequency AFTER the DC step, and a learnable eta let the optimizer shrink the DC step toward
+zero. Empirically the DC residual then climbed ABOVE even the smooth warm-start floor (the
+hallucination signature) while the structural loss fell. The fix: (1) reorder so each step — and
+thus the output x_K — ENDS on the DC step; (2) FREEZE eta by default (learn_eta=False) so the DC
+step cannot be bypassed. Anti-hallucination is now architectural (x_K respects the observations),
+not a soft forward-model loss term — which was independently falsified (ACL-017/019,
+forward_model_weight=0). Caveat: one gradient step is not a full projection; if the terminal DC
+residual stays high, escalate eta or add a few CG steps for an exact range projection.
 
 The forward operator A and its exact transpose A^T are certified in forward_torch.py (Gate A).
 A^T comes from autograd, so the whole unroll is end-to-end differentiable (double-backward
@@ -50,7 +57,9 @@ class UnrolledSolver(nn.Module):
         band_highpass_sigma_lr_px: >0 runs the DC term in the high-frequency band (rejects the
                        smooth per-frame drift; matches the SR band, per the data audit).
         huber_delta:   >0 uses a robust Huber DC term (hot/cold defects, stripe noise).
-        eta_init:      initial DC step size (learnable, softplus-parameterized, per step).
+        eta_init:      DC step size (softplus-parameterized, per step).
+        learn_eta:     if True, eta is a learnable Parameter; default False freezes it (a learnable
+                       eta let the optimizer bypass the DC step — ACL-026).
     """
 
     def __init__(
@@ -64,6 +73,7 @@ class UnrolledSolver(nn.Module):
         band_highpass_sigma_lr_px: float = 5.0,
         huber_delta: float = 0.0,
         eta_init: float = 0.5,
+        learn_eta: bool = False,
     ) -> None:
         super().__init__()
         if n_steps < 1:
@@ -83,8 +93,15 @@ class UnrolledSolver(nn.Module):
                 ThermalSRUNet(in_channels=in_ch, out_channels=1, base_channels=base_channels, scale=1)
                 for _ in range(self.n_steps)
             )
-        # learnable positive per-step DC step sizes
-        self.eta_raw = nn.Parameter(torch.full((self.n_steps,), _inv_softplus(eta_init)))
+        # per-step DC step sizes (softplus-parameterized, positive). FROZEN by default: a learnable
+        # eta let the optimizer drive the DC step toward 0 and bypass the consistency constraint
+        # (ACL-026). When frozen it's a buffer (moves with .to()/state_dict, receives no gradient).
+        self.learn_eta = bool(learn_eta)
+        eta_raw = torch.full((self.n_steps,), _inv_softplus(eta_init))
+        if self.learn_eta:
+            self.eta_raw = nn.Parameter(eta_raw)
+        else:
+            self.register_buffer("eta_raw", eta_raw)
 
     def _prox_net(self, k: int) -> ThermalSRUNet:
         return self.prox if self.share_weights else self.prox[k]
@@ -125,6 +142,7 @@ class UnrolledSolver(nn.Module):
         x = x0
         iters: list[torch.Tensor] = []
         for k in range(self.n_steps):
+            x = self._prox(k, x, cond)   # learned proximal step (null-space prior) — FIRST
             eta = F.softplus(self.eta_raw[k])
             g, _ = data_consistency_grad(
                 x, y_burst, shifts, psf, self.scale,
@@ -133,8 +151,7 @@ class UnrolledSolver(nn.Module):
                 huber_delta=huber,
                 create_graph=create_graph,
             )
-            x = x - eta * g            # DC gradient step (range constraint)
-            x = self._prox(k, x, cond)  # learned proximal step (null-space prior)
+            x = x - eta * g              # DC gradient step (range constraint) — LAST: x_K ends on DC
             if return_iters:
                 iters.append(x)
         return (x, iters) if return_iters else x

@@ -78,6 +78,7 @@ def build_solver(config: TrainingConfig, device: torch.device, cond_channels: in
         band_highpass_sigma_lr_px=config.solver_band_sigma,
         huber_delta=config.solver_huber_delta,
         eta_init=config.solver_eta_init,
+        learn_eta=config.solver_learn_eta,
     ).to(device)
 
 
@@ -197,10 +198,21 @@ def train(config: TrainingConfig) -> Path:
 
             pred = solver(x0, burst, shifts, psf, obs, frame_mask=mask)  # (1,1,h,w) broadcasts over B,M
             losses = criterion(pred, target, lr_observation=None, lr_obs=None, thin_weight=thin, gap_weight=gap)
-            dc = terminal_dc_loss(pred, burst, shifts, psf, config.scale, config.solver_band_sigma,
-                                  mask, config.solver_huber_delta)
+            # DC is now enforced ARCHITECTURALLY (end-on-DC + frozen eta, ACL-026). The soft DC loss
+            # term is the falsified soft forward anchoring (ACL-017/019) and is optional: when its
+            # weight is 0 we still compute `dc` under no_grad as a MONITOR (watch loss/dc in TB), with
+            # no backward graph. When >0 it acts only as a weak secondary regularizer, not the mechanism.
+            if config.solver_dc_weight > 0:
+                dc = terminal_dc_loss(pred, burst, shifts, psf, config.scale, config.solver_band_sigma,
+                                      mask, config.solver_huber_delta)
+            else:
+                with torch.no_grad():
+                    dc = terminal_dc_loss(pred, burst, shifts, psf, config.scale, config.solver_band_sigma,
+                                          mask, config.solver_huber_delta)
             anneal = 1.0 if config.solver_prior_anneal_steps <= 0 else min(1.0, step / config.solver_prior_anneal_steps)
-            total = anneal * losses["total"] + config.solver_dc_weight * dc
+            total = anneal * losses["total"]
+            if config.solver_dc_weight > 0:
+                total = total + config.solver_dc_weight * dc
 
             if not torch.isfinite(total):
                 raise FloatingPointError(f"non-finite loss at step {step}: total={total}, dc={dc}")
