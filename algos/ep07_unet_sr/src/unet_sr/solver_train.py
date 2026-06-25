@@ -25,12 +25,14 @@ from pathlib import Path
 
 import torch
 from torch.utils.data import DataLoader
+from torch.utils.tensorboard import SummaryWriter
+from tqdm import tqdm
 
 from .config import TrainingConfig, config_from_args
 from .dataset import HYBRID_DRIZZLE_MEAN_CHANNEL, SceneInterleavedSampler, ThermalSRDataset
 from .forward_torch import ScenePSF, _highpass, forward_burst
 from .losses import ContourSRLoss
-from .train import _to_device_tensor, _worker_init_fn
+from .train import _log_pred_vs_target, _to_device_tensor, _worker_init_fn
 from .unroll import UnrolledSolver
 
 
@@ -101,6 +103,10 @@ def train(config: TrainingConfig) -> Path:
     torch.manual_seed(config.seed)
     output_dir = Path(config.output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)
+    tb_dir = Path(config.tb_log_dir or (output_dir / "tb_logs"))
+    tb_dir.mkdir(parents=True, exist_ok=True)
+    writer = SummaryWriter(log_dir=str(tb_dir))
+    print(f"TensorBoard logs → {tb_dir}  (tensorboard --logdir {tb_dir})")
 
     dataset = ThermalSRDataset(
         config.training_pool_dir,
@@ -163,6 +169,9 @@ def train(config: TrainingConfig) -> Path:
     solver.train()
     step = 0
     t0 = time.monotonic()
+    # disable=None auto-disables the bar on a non-TTY (e.g. nohup > log) so the periodic
+    # progress.write() lines stay clean; on a terminal you get the live bar + ETA + postfix.
+    progress = tqdm(total=config.total_steps, desc="Solver", dynamic_ncols=True, disable=None)
     for epoch in count():
         dataset.set_epoch(epoch)
         sampler.set_epoch(epoch)
@@ -191,23 +200,39 @@ def train(config: TrainingConfig) -> Path:
             grad_norm = torch.nn.utils.clip_grad_norm_(solver.parameters(), 1.0).item()
             optimizer.step()
             scheduler.step()
+            progress.update(1)
 
             if step == 1 or step % config.log_every == 0:
                 eta = float(torch.nn.functional.softplus(solver.eta_raw.detach()).mean())
                 ms = (time.monotonic() - t0) * 1000.0 / step
-                print(f"step={step} total={float(total):.5f} struct={float(losses['total']):.5f} "
-                      f"dc={float(dc):.6f} anneal={anneal:.2f} eta={eta:.3f} gnorm={grad_norm:.2f} "
-                      f"lr={scheduler.get_last_lr()[0]:.2e} {ms:.0f}ms/step")
+                progress.set_postfix_str(
+                    f"total={float(total):.4f} dc={float(dc):.5f} eta={eta:.3f} gnorm={grad_norm:.2f}")
+                progress.write(
+                    f"step={step} total={float(total):.5f} struct={float(losses['total']):.5f} "
+                    f"dc={float(dc):.6f} anneal={anneal:.2f} eta={eta:.3f} gnorm={grad_norm:.2f} "
+                    f"lr={scheduler.get_last_lr()[0]:.2e} {ms:.0f}ms/step")
+                writer.add_scalar("loss/total", float(total), step)  # grand total = struct*anneal + w*dc
+                writer.add_scalar("loss/struct", float(losses["total"]), step)
+                writer.add_scalar("loss/dc", float(dc), step)
+                writer.add_scalar("train/anneal", anneal, step)
+                writer.add_scalar("train/eta", eta, step)
+                writer.add_scalar("train/grad_norm", grad_norm, step)
+                writer.add_scalar("train/lr", scheduler.get_last_lr()[0], step)
+                writer.add_scalar("train/ms_per_step", ms, step)
+            if config.tb_image_every > 0 and step % config.tb_image_every == 0:
+                _log_pred_vs_target(writer, pred, target, step)
             if step % config.save_every == 0:
                 ckpt = output_dir / f"solver_step_{step:06d}.pt"
                 torch.save({"step": step, "model_state_dict": solver.state_dict(),
                             "config": vars(config)}, ckpt)
-                print(f"saved {ckpt}")
+                progress.write(f"saved {ckpt}")
             if step >= config.total_steps:
                 break
         if step >= config.total_steps:
             break
 
+    progress.close()
+    writer.close()
     final = output_dir / "solver_final.pt"
     torch.save({"step": step, "model_state_dict": solver.state_dict(), "config": vars(config)}, final)
     print(f"saved {final}")
