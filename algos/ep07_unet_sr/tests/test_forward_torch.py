@@ -96,7 +96,7 @@ def check_adjoint_identity() -> float:
     ip_lr = (Au * v).sum()                          # <A u, v>
     (ATv,) = torch.autograd.grad(ip_lr, u)          # A^T v
     ip_hr = (u * ATv).sum()                         # <u, A^T v>
-    rel = float((ip_lr - ip_hr).abs() / ip_lr.abs().clamp_min(1e-30))
+    rel = float(((ip_lr - ip_hr).abs() / ip_lr.abs().clamp_min(1e-30)).detach())
     # also exercise the DC-grad entry point (Huber + highpass) to ensure it builds a graph
     g, r = data_consistency_grad(
         u.detach().requires_grad_(True), v.detach() * 0 + Au.detach(), s, psf, scale,

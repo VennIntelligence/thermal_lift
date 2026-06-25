@@ -186,20 +186,28 @@ def _blur_one(img: torch.Tensor, psf: ScenePSF, b: int, scale: int) -> torch.Ten
     return img if kernel is None else _blur_kernel2d(img, kernel)
 
 
+def _compute_dtype(dtype: torch.dtype) -> torch.dtype:
+    """Upcast half precision to fp32 for AMP safety (ACL-011 fp16 Gaussian NaNs), but PRESERVE
+    fp64 so the operator can be certified at double precision (Gate A linearity/adjoint)."""
+    return torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
+
+
 def forward_burst(x_hr: torch.Tensor, shifts: torch.Tensor, psf: ScenePSF, scale: int) -> torch.Tensor:
     """A x:  (B,1,H,W) HR  ->  (B,N,h,w) LR burst, replicating physical_block_average per scene.
 
-    Computed in fp32 for AMP safety (the project hit fp16 Gaussian NaNs, ACL-011).
+    Computes in fp32 for half-precision inputs (AMP safety) and in the input dtype otherwise
+    (so fp64 inputs stay fp64 for tight certification).
     """
     if x_hr.ndim != 4 or x_hr.shape[1] != 1:
         raise ValueError(f"x_hr must be (B,1,H,W); got {tuple(x_hr.shape)}")
     B = x_hr.shape[0]
     in_dtype = x_hr.dtype
-    x32 = x_hr.float()
+    cdt = _compute_dtype(in_dtype)
+    xc = x_hr.to(cdt)
     outs = []
     for b in range(B):
-        blurred = _blur_one(x32[b, 0], psf, b, scale)
-        outs.append(block_average_shifted(blurred, shifts[b].float(), scale))
+        blurred = _blur_one(xc[b, 0], psf, b, scale)
+        outs.append(block_average_shifted(blurred, shifts[b].to(cdt), scale))
     return torch.stack(outs, 0).to(in_dtype)
 
 
@@ -209,12 +217,14 @@ def _highpass(t: torch.Tensor, sigma_lr_px: float) -> torch.Tensor:
     if sigma_lr_px <= 0:
         return t
     B, N, h, w = t.shape
-    k = gaussian_kernel1d(sigma_lr_px, device=t.device, dtype=torch.float32)
+    in_dtype = t.dtype
+    cdt = _compute_dtype(in_dtype)
+    k = gaussian_kernel1d(sigma_lr_px, device=t.device, dtype=cdt)
     r = k.numel() // 2
-    x = t.reshape(B * N, 1, h, w).float()
+    x = t.reshape(B * N, 1, h, w).to(cdt)
     lo = F.conv2d(F.pad(x, (0, 0, r, r), mode="reflect"), k.view(1, 1, -1, 1))
     lo = F.conv2d(F.pad(lo, (r, r, 0, 0), mode="reflect"), k.view(1, 1, 1, -1))
-    return (x - lo).reshape(B, N, h, w).to(t.dtype)
+    return (x - lo).reshape(B, N, h, w).to(in_dtype)
 
 
 def data_consistency_grad(
