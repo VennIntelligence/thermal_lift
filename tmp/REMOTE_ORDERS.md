@@ -56,16 +56,21 @@ every downstream step would inherit a systematic error.
 
 ---
 
-## [PENDING — awaiting next code drop from local: `unroll.py` + dataset plumbing + train integration]
+## GATE B — single-scene overfit  ✅ RUNNABLE NOW (`unroll.py` landed)
+End-to-end FM-6 catch that Gate A (operator-only) cannot see: on ONE clean synthetic scene,
+data-fitting `min ||A x - y||^2` must drive the DC residual toward ~0 and recover a GT-aligned
+image; plus the full `UnrolledSolver` runs forward+backward with finite grads.
+```
+uv run python algos/ep07_unet_sr/tests/test_gate_b_overfit.py
+```
+PASS bar (printed): DC residual drops `>10x`, `corr(recovered x, GT) > 0.90`, solver grads finite.
+If the residual plateaus or corr is low: a half-pixel/sign/PSF bug — STOP, paste output.
 
-The following stages need the unrolled-solver training code, which the local agent is writing
-next. Specs are given so you know what's coming; do NOT attempt to run them until the code lands
-and this file is updated.
+> Run GATES 0, A, B now and report. They need only the code already pushed (no dataset plumbing).
 
-## GATE B — single-scene overfit (minutes, GPU)
-Overfit the K-step solver to ONE clean synthetic scene (no noise/drift/defects). The DC residual
-must drive ≈ 0. If it cannot, there is a geometry/adjoint/plumbing bug — STOP. This is the
-end-to-end FM-6 catch that Gate A (operator-only) cannot see.
+---
+
+## [PENDING — awaiting next code drop: dataset plumbing (burst+shifts+psf into the sample) + train integration]
 
 ## GATE C — smoke (50–100 steps on the real pool)
 Finite loss, no NaNs, prediction/target/observation visually aligned (no half-pixel shift),
