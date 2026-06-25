@@ -11,7 +11,7 @@ data-consistency term ||A x_K - y||^2 in the SR band, with an ~8 LR-px patch-edg
 be late-annealed (0->1 over N steps) so DC dominates early and the prior fills the null space
 later — directly targeting the fidelity cliff (FM-1).
 
-Usage (see tmp/REMOTE_ORDERS.md):
+Usage (see docs/REMOTE_ORDERS.md):
     uv run python -m unet_sr.solver_train --training-pool-dir data/synthetic/pool_2x_v3_5k \
         --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 4 --total-steps 20000 \
         --batch-size 4 --patch-size-hr 256 --output-dir outputs/solver_v1
