@@ -459,6 +459,8 @@ def train(config: TrainingConfig) -> Path:
                             "eval_real "
                             + " ".join(f"{key}={value:.6g}" for key, value in eval_metrics.items())
                         )
+                    if device.type == "cuda":
+                        torch.cuda.empty_cache()
                 if step >= config.total_steps:
                     break
 
@@ -487,6 +489,8 @@ def train(config: TrainingConfig) -> Path:
             step=config.total_steps,
             device=device,
         )
+        if device.type == "cuda":
+            torch.cuda.empty_cache()
         if writer is not None:
             writer.close()
     elif writer is not None:
