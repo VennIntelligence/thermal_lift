@@ -125,7 +125,7 @@ class UnrolledSolver(nn.Module):
         """Run the K-step solver.
 
         Args:
-            x0:      (B,1,H,W) warm-start HR estimate (the drizzle mean, hybrid ch5).
+            x0:      (B,1,H,W) warm-start HR estimate (aligned mean or hybrid ch5 anchor).
             y_burst: (B,M,h,w) observed LR burst (the SAVED burst; FIXED M frames).
             shifts:  (B,M,2) the SAVED per-frame shifts in LR px (must match the burst).
             psf:     per-sample ScenePSF (from scene metadata: shape/sigma/sigma_y/angle).

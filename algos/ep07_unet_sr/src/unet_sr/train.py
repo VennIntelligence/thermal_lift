@@ -307,7 +307,7 @@ def train(config: TrainingConfig) -> Path:
         if config.residual_mode == "drizzle2x":
             print(
                 "Residual-over-observation mode: "
-                f"pred = hybrid ch{HYBRID_DRIZZLE_MEAN_CHANNEL} drizzle mean + model delta; "
+                f"pred = hybrid ch{HYBRID_DRIZZLE_MEAN_CHANNEL} phase-bin anchor + model delta; "
                 f"L1(delta) weight={config.residual_penalty_weight:g}"
             )
 

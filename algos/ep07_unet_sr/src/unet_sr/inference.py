@@ -7,7 +7,7 @@ import math
 import numpy as np
 import torch
 
-from tcforge.classical_sr import drizzle_features
+from tcforge.classical_sr import phase_bin_drizzle
 from tcforge.fusion import fuse_burst_to_features
 
 from .dataset import HYBRID_DRIZZLE_MEAN_CHANNEL
@@ -151,8 +151,8 @@ def infer_from_burst(
     to it.
 
     When *input_mode* is ``"hybrid_drizzle2x"``, 5ch fused features are
-    upsampled to 2x and concatenated with 3ch scatter drizzle at 2x,
-    yielding an 8ch input at 2x grid.  The model operates at scale=1
+    upsampled to 2x and concatenated with 4ch phase-bin drizzle at 2x,
+    yielding a 9ch input at 2x grid.  The model operates at scale=1
     (direct prediction, optionally with residual_channel=5 for V10).
     """
 
@@ -160,7 +160,7 @@ def infer_from_burst(
         from scipy.ndimage import zoom
         features_1x = fuse_burst_to_features(lr_burst, shifts, sigma_bg=sigma_bg)
         features_up = zoom(features_1x, (1, scale, scale), order=1).astype(np.float32)
-        drz = drizzle_features(lr_burst, shifts, scale=scale, kernel="bilinear")
+        drz = phase_bin_drizzle(lr_burst, shifts, scale=scale, n_bins=4)
         features = np.concatenate([features_up, drz], axis=0)
         return infer_full_frame(
             model,

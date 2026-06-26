@@ -275,12 +275,12 @@ def test_contour_sr_loss_rejects_2x_hybrid_channel_as_lr_observation() -> None:
 
 
 def test_hybrid_contour_sr_loss_finite_under_cuda_amp() -> None:
-    """V9C: 8ch hybrid input + legal lr_obs forward anchor is finite under CUDA AMP."""
+    """V9C: 9ch hybrid input + legal lr_obs forward anchor is finite under CUDA AMP."""
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     if device.type != "cuda":
         pytest.skip("CUDA required for hybrid AMP regression test")
 
-    model = ThermalSRUNet(in_channels=8, out_channels=1, base_channels=16, scale=1).to(device)
+    model = ThermalSRUNet(in_channels=9, out_channels=1, base_channels=16, scale=1).to(device)
     loss = ContourSRLoss(
         grad_vector_weight=0.15,
         forward_model_weight=0.1,
@@ -289,7 +289,7 @@ def test_hybrid_contour_sr_loss_finite_under_cuda_amp() -> None:
     )
     optimizer = torch.optim.AdamW(model.parameters(), lr=1e-4)
     scaler = GradScaler(enabled=True)
-    obs = torch.randn(2, 8, 64, 64, device=device)
+    obs = torch.randn(2, 9, 64, 64, device=device)
     target = torch.randn(2, 1, 64, 64, device=device)
     lr_obs = torch.randn(2, 1, 32, 32, device=device)
 

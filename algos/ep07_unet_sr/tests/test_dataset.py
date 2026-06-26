@@ -32,6 +32,9 @@ def _make_pool(tmp_path: Path, *, scale: int = 4, with_burst: bool = False) -> P
     shifts = np.random.default_rng(42).uniform(-0.5, 0.5, (n_frames, 2)).astype(np.float32)
     lr_burst = (np.ones((n_frames, lr_h, lr_w), dtype=np.float32) * 20.0
                 + np.random.default_rng(42).normal(0, 0.07, (n_frames, lr_h, lr_w)).astype(np.float32)) if with_burst else None
+    phase_bin_drizzle = None
+    if with_burst:
+        phase_bin_drizzle = _phase_bin_drizzle_fixture(lr_h, lr_w, scale=scale)
     save_scene_compact(
         pool / "scene_0000",
         hr_mask=mask,
@@ -39,6 +42,8 @@ def _make_pool(tmp_path: Path, *, scale: int = 4, with_burst: bool = False) -> P
         obs_features=obs,
         shifts=shifts,
         lr_burst=lr_burst,
+        phase_bin_drizzle=phase_bin_drizzle,
+        compress_burst=False,
         metadata={
             "scene_id": "scene_0000",
             "seed": 123,
@@ -60,6 +65,15 @@ def _make_pool(tmp_path: Path, *, scale: int = 4, with_burst: bool = False) -> P
     )
     _write_manifest_generic(pool, scale=scale, n_frames=n_frames)
     return pool
+
+
+def _phase_bin_drizzle_fixture(lr_h: int = 8, lr_w: int = 10, *, scale: int = 2, n_bins: int = 4) -> np.ndarray:
+    """Synthetic precomputed phase-bin drizzle with distinct bin/channel content."""
+    yy, xx = np.mgrid[: lr_h * scale, : lr_w * scale].astype(np.float32)
+    bins = np.empty((n_bins, lr_h * scale, lr_w * scale), dtype=np.float32)
+    for k in range(n_bins):
+        bins[k] = 30.0 + k + yy * 0.01 + xx * 0.001
+    return bins
 
 
 def _write_manifest_generic(pool: Path, *, scale: int = 4, n_frames: int = 3) -> None:
@@ -175,7 +189,7 @@ def test_dataset_skips_loss_weights_when_boost_disabled(tmp_path: Path) -> None:
 
 
 def test_hybrid_dataset_sample_shape(tmp_path: Path) -> None:
-    """V9A: hybrid_drizzle2x produces 8ch obs at 2x grid."""
+    """V9A: hybrid_drizzle2x produces 9ch obs at 2x grid."""
     pool = _make_pool(tmp_path, scale=2, with_burst=True)
     dataset = ThermalSRDataset(
         pool, patch_size_hr=8, scale=2, seed=5,
@@ -183,7 +197,7 @@ def test_hybrid_dataset_sample_shape(tmp_path: Path) -> None:
     )
     sample = dataset[0]
 
-    assert sample["obs_features"].shape == (8, 8, 8)
+    assert sample["obs_features"].shape == (9, 8, 8)
     assert sample["hr_target"].shape == (1, 8, 8)
     assert sample["hr_edge"].shape == (1, 8, 8)
     assert sample["hr_mask"].shape == (1, 8, 8)
@@ -200,13 +214,13 @@ def test_hybrid_dataset_augment_sync(tmp_path: Path) -> None:
     )
     s0 = dataset[0]
     s1 = dataset[1]
-    assert s0["obs_features"].shape[0] == 8
-    assert s1["obs_features"].shape[0] == 8
+    assert s0["obs_features"].shape[0] == 9
+    assert s1["obs_features"].shape[0] == 9
     assert s0["obs_features"].shape[1:] == s0["hr_target"].shape[1:]
 
 
-def test_hybrid_burst_subset_reproducible(tmp_path: Path) -> None:
-    """V9A: burst subset selection is deterministic for same epoch/scene."""
+def test_hybrid_phase_bin_features_reproducible(tmp_path: Path) -> None:
+    """V9A: precomputed phase-bin features are deterministic for same epoch/scene."""
     pool = _make_pool(tmp_path, scale=2, with_burst=True)
     dataset = ThermalSRDataset(
         pool, patch_size_hr=8, scale=2, seed=99,
@@ -218,15 +232,18 @@ def test_hybrid_burst_subset_reproducible(tmp_path: Path) -> None:
     assert np.allclose(s1["obs_features"].numpy(), s2["obs_features"].numpy())
 
 
-def test_hybrid_burst_min_frames_enforced(tmp_path: Path) -> None:
-    """V9A: min_burst_frames lower bound is respected."""
+def test_hybrid_provide_burst_attaches_solver_inputs(tmp_path: Path) -> None:
+    """V9 solver path: provide_burst attaches a fixed-size raw burst patch."""
     pool = _make_pool(tmp_path, scale=2, with_burst=True)
     dataset = ThermalSRDataset(
         pool, patch_size_hr=8, scale=2, seed=5,
         patches_per_scene=2, input_mode="hybrid_drizzle2x",
-        min_burst_frames=35,
+        provide_burst=True, solver_m_frames=12,
     )
-    _ = dataset[0]
+    sample = dataset[0]
+
+    assert sample["lr_burst_patch"].shape == (12, 4, 4)
+    assert sample["burst_shifts"].shape == (12, 2)
 
 
 def test_lr_mode_unchanged_with_input_mode_default(tmp_path: Path) -> None:
@@ -243,15 +260,12 @@ def test_lr_mode_unchanged_with_input_mode_default(tmp_path: Path) -> None:
     assert "lr_obs" not in s_explicit
 
 
-def _write_drizzle_variants(pool: Path, *, num_variants: int = 4, scale: int = 2) -> np.ndarray:
-    """Write a synthetic drizzle_variants file with distinct per-variant content."""
+def _write_phase_bin_drizzle(pool: Path, *, scale: int = 2) -> np.ndarray:
+    """Overwrite the synthetic precomputed phase-bin drizzle artifact."""
     lr_h, lr_w = 8, 10
-    variants = np.zeros((num_variants, 3, lr_h * scale, lr_w * scale), dtype=np.float16)
-    for k in range(num_variants):
-        variants[k, 0] = 20.0 + k  # distinct mean channel per variant
-        variants[k, 1] = 1.0
-    np.save(pool / "scene_0000" / f"drizzle_variants_{scale}x.npy", variants)
-    return variants
+    phase_bins = _phase_bin_drizzle_fixture(lr_h, lr_w, scale=scale).astype(np.float16)
+    np.save(pool / "scene_0000" / "phase_bin_drizzle_2x.npy", phase_bins)
+    return phase_bins
 
 
 def _augment_chw_like_dataset(
@@ -319,40 +333,37 @@ def test_hybrid_crop_origin_forces_even_2x_grid(tmp_path: Path) -> None:
     assert all(y % 2 == 0 and x % 2 == 0 for y, x in origins)
 
 
-def test_hybrid_dataset_uses_precomputed_variants(tmp_path: Path) -> None:
-    """V9A: precomputed drizzle variants are preferred over on-the-fly burst drizzle."""
+def test_hybrid_dataset_uses_precomputed_phase_bin_drizzle(tmp_path: Path) -> None:
+    """V9A: precomputed phase-bin drizzle is concatenated after fused 2x features."""
     pool = _make_pool(tmp_path, scale=2, with_burst=True)
-    variants = _write_drizzle_variants(pool)
+    phase_bins = _write_phase_bin_drizzle(pool)
     dataset = ThermalSRDataset(
         pool, patch_size_hr=8, scale=2, seed=5,
         patches_per_scene=2, input_mode="hybrid_drizzle2x",
     )
     scene = dataset._load_cached(0)
 
-    assert "_drz_variants" in scene
     assert "_lr_burst" not in scene
-    drz = scene["obs_features"][5:]  # channels 5-7 = drizzle
-    matches = [np.allclose(drz, variants[k].astype(np.float32)) for k in range(len(variants))]
-    assert sum(matches) == 1
+    np.testing.assert_allclose(scene["obs_features"][5:], phase_bins.astype(np.float32), rtol=0, atol=0)
 
 
-def test_hybrid_variants_work_without_lr_burst(tmp_path: Path) -> None:
-    """V9A: with variants present, lr_burst.npy is no longer required."""
+def test_hybrid_phase_bins_work_without_lr_burst(tmp_path: Path) -> None:
+    """V9A: with precomputed phase bins present, raw burst storage is optional."""
     pool = _make_pool(tmp_path, scale=2, with_burst=True)
-    _write_drizzle_variants(pool)
+    _write_phase_bin_drizzle(pool)
     (pool / "scene_0000" / "lr_burst.npy").unlink()
     dataset = ThermalSRDataset(
         pool, patch_size_hr=8, scale=2, seed=5,
         patches_per_scene=2, input_mode="hybrid_drizzle2x",
     )
     sample = dataset[0]
-    assert sample["obs_features"].shape == (8, 8, 8)
+    assert sample["obs_features"].shape == (9, 8, 8)
 
 
-def test_hybrid_variants_selection_deterministic_per_epoch(tmp_path: Path) -> None:
-    """V9A: variant choice is reproducible for the same (seed, epoch, scene)."""
+def test_hybrid_phase_bins_deterministic_per_epoch(tmp_path: Path) -> None:
+    """V9A: precomputed phase-bin conditioning is reproducible for the same epoch."""
     pool = _make_pool(tmp_path, scale=2, with_burst=True)
-    _write_drizzle_variants(pool)
+    _write_phase_bin_drizzle(pool)
     dataset = ThermalSRDataset(
         pool, patch_size_hr=8, scale=2, seed=99,
         patches_per_scene=2, input_mode="hybrid_drizzle2x",
@@ -363,19 +374,20 @@ def test_hybrid_variants_selection_deterministic_per_epoch(tmp_path: Path) -> No
     assert np.allclose(s1["obs_features"].numpy(), s2["obs_features"].numpy())
 
 
-def test_hybrid_burst_fallback_keeps_mmap_dtype(tmp_path: Path) -> None:
-    """V9A OOM fix: burst fallback must not materialise float32 full burst in cache."""
+def test_hybrid_provide_burst_keeps_mmap_dtype(tmp_path: Path) -> None:
+    """V9 solver OOM fix: raw burst must stay memmapped until patch extraction."""
     pool = _make_pool(tmp_path, scale=2, with_burst=True)
     dataset = ThermalSRDataset(
         pool, patch_size_hr=8, scale=2, seed=5,
         patches_per_scene=2, input_mode="hybrid_drizzle2x",
+        provide_burst=True,
     )
     scene = dataset._load_cached(0)
     assert scene["_lr_burst"].dtype == np.float16
 
 
-def test_hybrid_dataset_epoch_changes_burst(tmp_path: Path) -> None:
-    """V9A: changing epoch produces different burst augmentation."""
+def test_hybrid_dataset_epoch_changes_crop_or_augmentation(tmp_path: Path) -> None:
+    """V9A: changing epoch diversifies the sampled hybrid patch."""
     pool = _make_pool(tmp_path, scale=2, with_burst=True)
     dataset = ThermalSRDataset(
         pool, patch_size_hr=8, scale=2, seed=5,

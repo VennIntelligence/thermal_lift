@@ -8,6 +8,36 @@
 
 ## 变更记录
 
+### [ACL-028] 2026-06-26 — 修复 hybrid real_eval 推理仍生成 8ch 输入导致 9ch 模型崩溃
+
+**问题诊断**:
+- ACL-023/027 后训练数据集的 `input_mode="hybrid_drizzle2x"` 已固定为 9ch: `5 fused↑2x + 4 phase-bin drizzle@2x`。
+- 但 `infer_from_burst()` 的真实数据评估路径仍按旧 V9A contract 拼接 `5 fused↑2x + 3 scatter drizzle@2x`，在 checkpoint real_eval 时向 9ch 模型输入 8ch tensor，触发 `expected input ... to have 9 channels, but got 8 channels instead`。
+- 该问题只影响推理/real_eval 入口，训练 batch 本身已经读取预计算 `phase_bin_drizzle_2x.npy`。
+
+**修改内容**:
+1. `inference.py`: hybrid 推理路径改用 `tcforge.classical_sr.phase_bin_drizzle(..., n_bins=4)`，与训练 dataset 的 9ch phase-bin contract 对齐。
+2. `tests/test_inference.py`: hybrid inference 回归测试新增 9ch 检查，避免只用输出 shape 掩盖输入通道错误。
+3. `config.py` / `solver_train.py`: 更新 CLI help 和注释中的旧 8ch/3ch scatter 说法。
+4. `tests/test_dataset.py`: 测试 fixture 使用 `phase_bin_drizzle_2x.npy`，覆盖默认 hybrid 与 `provide_burst=True` solver 路径。
+
+**预期效果**:
+- `train.py` 在 `save_every` / `real_eval` 节点不再因 8ch/9ch 不匹配中断。
+- 真实数据 TensorBoard/PNG 推理输入与合成训练输入保持同一通道语义。
+- 风险: real-data eval 仍需现场从 raw burst 计算 phase-bin drizzle；这会比旧 3ch scatter 略有计算成本，但只发生在 checkpoint eval。
+
+**推荐参数**: 保持 ACL-027 命令不变；若只想快速越过训练节点，可临时加 `--real-eval-frame-limit 48` 降低 eval 成本。
+
+**训练结果**: _(训练后填写)_
+- 输出目录: `outputs/v10_v4_acl027`
+- 视觉效果:
+- 关键指标:
+- 结论:
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/inference.py`, `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/solver_train.py`, `algos/ep07_unet_sr/src/unet_sr/unroll.py`, `algos/ep07_unet_sr/tests/test_inference.py`, `algos/ep07_unet_sr/tests/test_dataset.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`
+
+---
+
 ### [ACL-027] 2026-06-26 — Loss/评价指标重设计:thin/gap 线先验 → 几何无关 boundary 权重 + 等温 flatness;评测改用 held-out 合成 GT(out_of_band 取代 raw_control_corr)
 
 **问题诊断**:

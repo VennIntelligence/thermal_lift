@@ -39,8 +39,19 @@ def test_infer_from_burst_fuses_before_inference() -> None:
 
 
 class IdentityRefine(torch.nn.Module):
-    """8ch → 1ch identity: returns mean of first channel."""
+    """Cch → 1ch identity: returns first channel."""
     def forward(self, x: torch.Tensor) -> torch.Tensor:
+        return x[:, :1]
+
+
+class RequireChannels(torch.nn.Module):
+    def __init__(self, channels: int) -> None:
+        super().__init__()
+        self.channels = channels
+
+    def forward(self, x: torch.Tensor) -> torch.Tensor:
+        if x.shape[1] != self.channels:
+            raise RuntimeError(f"expected {self.channels} channels, got {x.shape[1]}")
         return x[:, :1]
 
 
@@ -51,7 +62,7 @@ class ZeroRefine(torch.nn.Module):
 
 def test_infer_from_burst_hybrid_drizzle2x_shape() -> None:
     """V9A: hybrid_drizzle2x inference produces correct HR output shape."""
-    model = IdentityRefine()
+    model = RequireChannels(9)
     burst = np.ones((40, 8, 10), dtype=np.float32) * 21.0
     shifts = np.random.default_rng(42).uniform(-0.3, 0.3, (40, 2)).astype(np.float32)
 

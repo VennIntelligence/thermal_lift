@@ -338,8 +338,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=TrainingConfig.input_mode,
         choices=["lr", "hybrid_drizzle2x"],
         help="Input mode: 'lr' (5ch 1x obs, default) or 'hybrid_drizzle2x' "
-             "(8ch 2x: 5ch fused↑2x + 3ch scatter drizzle@2x). "
-             "Hybrid requires training pool with lr_burst.npy.",
+             "(9ch 2x: 5ch fused↑2x + 4ch precomputed phase-bin drizzle@2x). "
+             "Hybrid requires training pool with phase_bin_drizzle_2x.npy.",
     )
     parser.add_argument("--lr-warmup-steps", type=int, default=TrainingConfig.lr_warmup_steps,
                         help="Linear LR warmup from 0 to target LR over this many steps (default: 500).")
@@ -391,7 +391,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=TrainingConfig.residual_mode,
         choices=["none", "drizzle2x"],
         help="Observation residual parameterization. 'drizzle2x' predicts a delta over hybrid ch5 "
-             "(drizzle mean @2x) and requires --input-mode hybrid_drizzle2x --scale 2.",
+             "(first phase-bin channel @2x) and requires --input-mode hybrid_drizzle2x --scale 2.",
     )
     parser.add_argument(
         "--residual-penalty-weight",
@@ -514,7 +514,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--solver-no-drizzle", action="store_true", default=TrainingConfig.solver_no_drizzle,
                         help="Lean solver input: drop the drizzle entirely (no on-the-fly cost, no precomputed "
                              "variants/disk). Warm-start from upsampled aligned_mean; the DC term carries the "
-                             "multi-frame SR signal. cond becomes 5ch (vs 8ch hybrid).")
+                             "multi-frame SR signal. cond becomes 5ch (vs 9ch hybrid).")
     return parser
 
 

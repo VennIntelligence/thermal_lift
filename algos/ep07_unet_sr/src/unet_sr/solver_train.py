@@ -139,7 +139,7 @@ def train(config: TrainingConfig) -> Path:
         solver_no_drizzle=config.solver_no_drizzle,
     )
     # cond/warm-start channels: lean path uses 5ch upsampled fused + aligned_mean (ch0);
-    # hybrid path uses the 8ch obs + drizzle-mean (ch5).
+    # hybrid path uses 9ch obs and warm-starts from the first phase-bin channel (ch5).
     cond_channels = 5 if config.solver_no_drizzle else config.in_channels
     mean_ch = 0 if config.solver_no_drizzle else HYBRID_DRIZZLE_MEAN_CHANNEL
     sampler = SceneInterleavedSampler(
