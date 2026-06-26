@@ -244,3 +244,37 @@ EP01 已确认：必须按真实采集顺序 `acquisition_order`（由文件 mti
 | 噪声底 | 0.0724°C | 中等 | 相邻坐标差分法 |
 | Session 分类 | 采集顺序 3 个温度段，主扫描 session=2 | 高（EP01 已验证） | 已按 `acquisition_order` 检测 |
 | 缺失数据 | 3 个坐标 | 高（EP01 已验证） | 文件存在性检查 |
+
+---
+
+## 7. 合成训练池 scene 文件布局 (synthetic training pool)
+
+> 以上 1–6 节描述的是**真实采集数据**(`data/data_raw/`)。本节描述用于训练的**合成池**,由
+> `scripts/generate_training_pool.py` + `configs/synthetic/pool_2x_*.json` 生成。当前最新 = **v4**
+> (`configs/synthetic/pool_2x_v4_defects.json` → `data/synthetic/pool_2x_v4_5k`,5000 场景):含不规则
+> 缺陷(孔/断角/边缘断片/裂纹)+ 近等温温度 + 真实化场噪声(vignette + 列条纹 FPN + 颗粒)。建模心得
+> 与对真实数据的标定见 `research_log/synthetic_data_realism.md`。
+
+每个 `scene_XXXX/` 目录是 "compact" 格式(`tcforge.storage.{save,load}_scene_compact`):
+
+| 文件 | 形状 | dtype | 角色 | 用途 |
+|------|------|-------|------|------|
+| `obs_features_1x.npz` | (5, 480, 640) | f16 | **网络输入(基)** | 多帧融合 5 通道:对齐均值 / 中值 / 覆盖度 / 方差 / 高通融合。dataset 升采样到 2× 当输入前 5ch |
+| `phase_bin_drizzle_2x.npy` | (4, 960, 1280) | f16 | **网络输入(drizzle)** | 按 4 个亚像素相位 bin 各 drizzle 一次,显式暴露相位;hybrid 输入的后 4ch(共 **9ch**) |
+| `hr_temperature_2x.npy` | (960, 1280) | f16 | **GT 监督目标** | v4 真实 HR 温度场(与 burst 一致),网络要恢复的目标。**优先读盘,不再在线重建**(v4 起) |
+| `hr_mask_4x.png` | 960×1280 | u8 | GT 辅助 | HR 结构掩膜(含缺陷),loss 做结构/细线加权 + 审计 |
+| `hr_edge_4x.png` | 960×1280 | u8 | GT 辅助 | HR 边缘图,ContourSRLoss 边缘项加权 |
+| `lr_burst.npy` | (M, 480, 640) | f16 | **solver 专用** | 原始多帧观测;solver 硬 DC 项 `‖A·pred − burst‖` 用 |
+| `shifts.npy` | (M, 2) | f32 | solver / drizzle | 每帧亚像素位移(前向算子 A、drizzle 用) |
+| `metadata.json` | — | — | 元数据 | PSF / 温度 / 缺陷计数 / 难度 / 噪声 等逐场景参数 |
+
+`M` = 每场景帧数,`randint[24, 96]`。
+
+> **命名坑(易误导)**:`hr_mask_4x.png` / `hr_edge_4x.png` 的 **`_4x` 是历史遗留误名**——内容实际是
+> **2× HR(960×1280)**,源于项目早期 4× SR 时代,后改 2× 未改文件名。`hr_temperature_2x` /
+> `phase_bin_drizzle_2x` 的 `_2x` 命名是正确的。
+
+**按"谁用"归类**:
+- **V10 plain U-Net / solver-hybrid 输入** = `obs_features`(5ch↑2×) + `phase_bin_drizzle`(4ch) = **9ch**;
+  GT = `hr_temperature`(+ `hr_mask`/`hr_edge` 做 loss 加权)。**全部读盘预计算,无在线 drizzle**。
+- **solver** 额外需 `lr_burst` + `shifts`(硬 DC 项);**no-drizzle 精简路**只用 5ch `obs_features`,不读 phase_bin。
