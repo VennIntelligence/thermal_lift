@@ -298,7 +298,7 @@ def train(config: TrainingConfig) -> Path:
         if config.residual:
             print(f"Residual mode: {config.in_channels}ch@{config.scale}x input → model(scale=1) → residual + classical_sr")
         if config.input_mode == "hybrid_drizzle2x":
-            print(f"Hybrid drizzle 2x mode: {config.in_channels}ch@2x input (5ch fused↑2x + 3ch drizzle@2x) → model(scale=1) → direct predict")
+            print(f"Hybrid drizzle 2x mode: {config.in_channels}ch@2x input (5ch fused↑2x + {config.phase_bin_channels}ch phase-bin drizzle@2x) → model(scale=1) → direct predict")
         if config.residual_mode == "drizzle2x":
             print(
                 "Residual-over-observation mode: "

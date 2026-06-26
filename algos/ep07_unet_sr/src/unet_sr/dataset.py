@@ -349,14 +349,7 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         cached = self._cache.get(scene_index)
         if cached is not None:
             self._cache.move_to_end(scene_index)
-            if self.input_mode == "hybrid_drizzle2x" and not self.solver_no_drizzle:
-                epoch = self._epoch
-                if cached.get("_hybrid_epoch") != epoch:
-                    cached["obs_features"] = self._build_hybrid_obs(
-                        cached["_obs_up"], cached, epoch, scene_index,
-                    )
-                    cached["_hybrid_epoch"] = epoch
-            return cached
+            return cached   # obs_features is static now (precomputed phase-bin drizzle); no per-epoch rebuild
 
         scene = load_scene_compact(self.scene_paths[scene_index])
         metadata = scene["metadata"]
@@ -365,7 +358,12 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
             raise ValueError(f"scene {scene['scene_dir']} scale={scene_scale}, expected {self.data_scale}")
 
         obs = np.asarray(scene["obs_features"], dtype=np.float32)
-        hr_target = _reconstruct_target(scene)
+        # Prefer the precomputed HR temperature GT saved at generation (exact, matches the burst);
+        # fall back to on-the-fly reconstruction only for legacy pools without it.
+        if "hr_temperature" in scene:
+            hr_target = np.asarray(scene["hr_temperature"], dtype=np.float32)
+        else:
+            hr_target = _reconstruct_target(scene)
         hr_edge = np.asarray(scene["hr_edge"], dtype=np.float32)
         if obs.ndim != 3:
             raise ValueError(f"obs_features must have shape (C,H,W), got {obs.shape}")
@@ -387,31 +385,22 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
                 "_obs_1x": obs,
                 "_obs_up": obs_up,
             }
-            epoch = self._epoch
             if self.solver_no_drizzle:
                 # Lean solver input: 5ch upsampled fused only. The DC term (raw burst) carries the
-                # multi-frame SR signal, so no drizzle is built — skips BOTH the on-the-fly scatter
-                # cost AND the precomputed-variants disk. x0 = upsampled aligned_mean (obs ch0).
+                # multi-frame SR signal, so no drizzle is built. x0 = upsampled aligned_mean (obs ch0).
                 packed["obs_features"] = obs_up
             else:
-                variants = scene.get("drizzle_variants")
-                if variants is not None:
-                    # float16 mmap, sliced per epoch — never fully materialised.
-                    packed["_drz_variants"] = variants
-                else:
-                    lr_burst = scene.get("lr_burst")
-                    if lr_burst is None:
-                        raise ValueError(
-                            f"scene {scene['scene_dir']} has no drizzle_variants and no lr_burst; "
-                            "hybrid_drizzle2x requires precomputed variants "
-                            "(scripts/precompute_drizzle_variants.py) or save_lr_burst=true"
-                        )
-                    # Keep the float16 mmap as-is: _select_burst casts only the
-                    # sampled subset to float32, avoiding ~305 MB/scene RAM.
-                    packed["_lr_burst"] = lr_burst
-                    packed["_shifts"] = np.asarray(scene["shifts"], dtype=np.float32)
-                packed["obs_features"] = self._build_hybrid_obs(obs_up, packed, epoch, scene_index)
-                packed["_hybrid_epoch"] = epoch
+                # Hybrid input: 5ch fused↑2x + the PRECOMPUTED phase-bin drizzle (n_bins ch @2x, read
+                # from disk — no on-the-fly scatter, no drizzle_variants). cond = 5 + n_bins.
+                pbd = scene.get("phase_bin_drizzle")
+                if pbd is None:
+                    raise ValueError(
+                        f"scene {scene['scene_dir']} has no phase_bin_drizzle_2x.npy; hybrid_drizzle2x "
+                        "now reads the precomputed phase-bin drizzle (features.phase_bin_drizzle.enabled "
+                        "at generation)."
+                    )
+                packed["obs_features"] = np.concatenate(
+                    [obs_up, np.asarray(pbd, dtype=np.float32)], axis=0)
             if self.provide_burst and "_lr_burst" not in packed:
                 lr_burst = scene.get("lr_burst")
                 if lr_burst is None:

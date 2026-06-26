@@ -193,8 +193,6 @@ def _require_storage_contract(config: dict[str, Any]) -> None:
     storage = dict(config.get("storage", {}))
     if storage.get("format") != "compact":
         raise ValueError("training pool storage.format must be 'compact'")
-    if storage.get("save_hr_temperature", False):
-        raise ValueError("training pool config must not save HR temperature")
 
 
 def _n_frames_range(config: dict[str, Any]) -> tuple[int, int]:
@@ -651,6 +649,7 @@ def _generate_one_scene(
             else None
         ),
         phase_bin_drizzle=phase_bin_drizzle_stack,
+        hr_temperature=(hr_temperature if bool(storage_cfg.get("save_hr_temperature", False)) else None),
         compress_burst=bool(storage_cfg.get("compress_burst", True)),
     )
     return {

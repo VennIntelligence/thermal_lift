@@ -30,9 +30,10 @@ def save_scene_compact(
     classical_sr: np.ndarray | None = None,
     lr_burst: np.ndarray | None = None,
     phase_bin_drizzle: np.ndarray | None = None,
+    hr_temperature: np.ndarray | None = None,
     compress_burst: bool = True,
 ) -> Path:
-    """Save one compact scene without HR temperature arrays.
+    """Save one compact scene (optionally with the HR temperature GT array).
 
     If *classical_sr* is provided it is saved as ``classical_sr_{scale}x.npy``
     alongside the standard compact files. If *lr_burst* is provided it is
@@ -81,6 +82,13 @@ def save_scene_compact(
         if not np.isfinite(pbd).all():
             raise ValueError("phase_bin_drizzle contains NaN or Inf")
         np.save(root / "phase_bin_drizzle_2x.npy", pbd)
+    if hr_temperature is not None:
+        hrt = np.asarray(hr_temperature, dtype=np.float16)
+        if hrt.ndim != 2:
+            raise ValueError("hr_temperature must be 2D (H_hr, W_hr)")
+        if not np.isfinite(hrt).all():
+            raise ValueError("hr_temperature contains NaN or Inf")
+        np.save(root / "hr_temperature_2x.npy", hrt)
     (root / "metadata.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     return root
 
@@ -128,6 +136,9 @@ def load_scene_compact(scene_dir: str | Path) -> dict[str, Any]:
     pbd_path = root / "phase_bin_drizzle_2x.npy"
     if pbd_path.exists():
         result["phase_bin_drizzle"] = np.load(pbd_path, mmap_mode="r")
+    hrt_path = root / "hr_temperature_2x.npy"
+    if hrt_path.exists():
+        result["hr_temperature"] = np.load(hrt_path, mmap_mode="r")
     drizzle_variants_path = root / f"drizzle_variants_{scale}x.npy"
     if drizzle_variants_path.exists():
         result["drizzle_variants"] = np.load(drizzle_variants_path, mmap_mode="r")

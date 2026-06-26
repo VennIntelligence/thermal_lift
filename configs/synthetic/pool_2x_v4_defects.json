@@ -97,7 +97,7 @@
     "save_lr_burst": true,
     "burst_dtype": "float16",
     "compress_burst": false,
-    "save_hr_temperature": false
+    "save_hr_temperature": true
   },
   "obs_features_channels": ["aligned_mean", "aligned_median", "coverage", "variance", "highpass_fused"]
 }

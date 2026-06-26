@@ -13,6 +13,7 @@ class TrainingConfig:
     output_dir: str = "outputs/ep07_unet_sr"
     scale: int = 4
     in_channels: int = 5
+    phase_bin_channels: int = 4  # hybrid drizzle input = 5 fused↑2x + this many precomputed phase-bin ch
     out_channels: int = 1
     base_channels: int = 64
     hr_upsampler: str = "bilinear"
@@ -176,9 +177,11 @@ class TrainingConfig:
                 "so the dataset can supply a legal 1x lr_obs patch for 2x→1x forward consistency."
             )
         if self.input_mode == "hybrid_drizzle2x":
+            hybrid_ch = 5 + int(self.phase_bin_channels)
             if self.in_channels == 5:
-                self.in_channels = 8
-                print("Hybrid drizzle 2x mode: auto-set in_channels 5 → 8 (5 fused↑2x + 3 drizzle@2x)")
+                self.in_channels = hybrid_ch
+                print(f"Hybrid drizzle 2x mode: auto-set in_channels 5 → {hybrid_ch} "
+                      f"(5 fused↑2x + {self.phase_bin_channels} precomputed phase-bin drizzle@2x)")
         if self.lr_warmup_steps < 0:
             raise ValueError("lr_warmup_steps must be >= 0")
         if self.patches_per_scene <= 0:
