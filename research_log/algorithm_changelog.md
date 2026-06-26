@@ -14,15 +14,18 @@
 - ACL-023/027 后训练数据集的 `input_mode="hybrid_drizzle2x"` 已固定为 9ch: `5 fused↑2x + 4 phase-bin drizzle@2x`。
 - 但 `infer_from_burst()` 的真实数据评估路径仍按旧 V9A contract 拼接 `5 fused↑2x + 3 scatter drizzle@2x`，在 checkpoint real_eval 时向 9ch 模型输入 8ch tensor，触发 `expected input ... to have 9 channels, but got 8 channels instead`。
 - 该问题只影响推理/real_eval 入口，训练 batch 本身已经读取预计算 `phase_bin_drizzle_2x.npy`。
+- 同轮检查发现 solver held-out synth eval 在 `torch.no_grad()` 下调用 unrolled DC step 时，内部 `autograd.grad(A^T(Ax-y))` 无局部梯度图，会在第一个 synth-eval 节点崩溃。
 
 **修改内容**:
 1. `inference.py`: hybrid 推理路径改用 `tcforge.classical_sr.phase_bin_drizzle(..., n_bins=4)`，与训练 dataset 的 9ch phase-bin contract 对齐。
 2. `tests/test_inference.py`: hybrid inference 回归测试新增 9ch 检查，避免只用输出 shape 掩盖输入通道错误。
-3. `config.py` / `solver_train.py`: 更新 CLI help 和注释中的旧 8ch/3ch scatter 说法。
-4. `tests/test_dataset.py`: 测试 fixture 使用 `phase_bin_drizzle_2x.npy`，覆盖默认 hybrid 与 `provide_burst=True` solver 路径。
+3. `forward_torch.py`: `data_consistency_grad()` 内部用 `torch.enable_grad()` 包住局部 DC 梯度计算，使 solver eval/no_grad 路径仍能计算 Aᵀ(Ax-y)，但外层不保留参数梯度。
+4. `config.py` / `solver_train.py`: 更新 CLI help 和注释中的旧 8ch/3ch scatter 说法。
+5. `tests/test_dataset.py` / `tests/test_forward_torch.py`: 测试 fixture 使用 `phase_bin_drizzle_2x.npy`，并新增 no_grad 下 DC-grad 回归测试。
 
 **预期效果**:
 - `train.py` 在 `save_every` / `real_eval` 节点不再因 8ch/9ch 不匹配中断。
+- `solver_train.py` 在 `synth_eval_every` 节点不再因 no_grad 禁用 DC 内部 autograd 而中断。
 - 真实数据 TensorBoard/PNG 推理输入与合成训练输入保持同一通道语义。
 - 风险: real-data eval 仍需现场从 raw burst 计算 phase-bin drizzle；这会比旧 3ch scatter 略有计算成本，但只发生在 checkpoint eval。
 
@@ -34,7 +37,7 @@
 - 关键指标:
 - 结论:
 
-**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/inference.py`, `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/solver_train.py`, `algos/ep07_unet_sr/src/unet_sr/unroll.py`, `algos/ep07_unet_sr/tests/test_inference.py`, `algos/ep07_unet_sr/tests/test_dataset.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/inference.py`, `algos/ep07_unet_sr/src/unet_sr/forward_torch.py`, `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/solver_train.py`, `algos/ep07_unet_sr/src/unet_sr/unroll.py`, `algos/ep07_unet_sr/tests/test_inference.py`, `algos/ep07_unet_sr/tests/test_dataset.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`, `algos/ep07_unet_sr/tests/test_forward_torch.py`
 
 ---
 

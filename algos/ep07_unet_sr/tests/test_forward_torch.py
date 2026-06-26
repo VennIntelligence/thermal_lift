@@ -106,6 +106,32 @@ def check_adjoint_identity() -> float:
     return rel
 
 
+def test_data_consistency_grad_works_inside_no_grad() -> None:
+    """Solver eval runs under no_grad, but its DC step still needs local A^T gradients."""
+    scale = 2
+    psf = _scene_psf(0.3, "gaussian", None, 0.0)
+    x = torch.randn(1, 1, 32, 48, dtype=DT, device=DEVICE)
+    shifts = torch.empty(1, 4, 2, dtype=DT, device=DEVICE).uniform_(-1, 1)
+    y = forward_burst(x, shifts, psf, scale).detach()
+
+    with torch.no_grad():
+        g, r = data_consistency_grad(
+            x,
+            y,
+            shifts,
+            psf,
+            scale,
+            band_highpass_sigma_lr_px=0.0,
+            huber_delta=None,
+            create_graph=False,
+        )
+
+    assert g.shape == x.shape
+    assert r.shape == y.shape
+    assert torch.isfinite(g).all()
+    assert torch.isfinite(r).all()
+
+
 def main() -> int:
     print(f"Gate A on {DEVICE} (dtype={DT}) — certify torch forward operator A")
     fwd = check_forward_parity()

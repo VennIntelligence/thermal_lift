@@ -49,8 +49,9 @@ class UnrolledSolver(nn.Module):
 
     Args:
         n_steps:       K, number of unroll iterations (3-8 typical).
-        cond_channels: channels of the conditioning tensor fed to each prox (e.g. 8 for the
-                       hybrid_drizzle2x obs: 5 fused↑2x + 3 drizzle@2x).
+        cond_channels: channels of the conditioning tensor fed to each prox (5 for
+                       solver_no_drizzle, or 9 for hybrid_drizzle2x: 5 fused↑2x
+                       + 4 phase-bin drizzle@2x).
         base_channels: UNet width for the prox net(s).
         scale:         SR factor (2).
         share_weights: one prox net reused across steps (data-efficient, default) vs per-step.
@@ -66,7 +67,7 @@ class UnrolledSolver(nn.Module):
         self,
         *,
         n_steps: int = 4,
-        cond_channels: int = 8,
+        cond_channels: int = 9,
         base_channels: int = 64,
         scale: int = 2,
         share_weights: bool = True,

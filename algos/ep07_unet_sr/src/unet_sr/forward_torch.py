@@ -252,17 +252,21 @@ def data_consistency_grad(
         band_highpass_sigma_lr_px: >0 restricts DC to the high-frequency band (rejects drift).
         huber_delta: if set, use a Huber data term (robust to hot/cold defects, stripe noise).
     """
-    x = x_hr if x_hr.requires_grad else x_hr.requires_grad_(True)
-    Ax = forward_burst(x, shifts, psf, scale)
-    r = Ax - y_burst
-    if band_highpass_sigma_lr_px > 0:
-        r = _highpass(r, band_highpass_sigma_lr_px)
-    if frame_mask is not None:
-        r = r * frame_mask
-    if huber_delta is None or huber_delta <= 0:
-        loss = 0.5 * (r * r).sum()
-    else:
-        a = r.abs()
-        loss = torch.where(a <= huber_delta, 0.5 * r * r, huber_delta * (a - 0.5 * huber_delta)).sum()
-    (g,) = torch.autograd.grad(loss, x, create_graph=create_graph)
+    # This function is also used inside eval/inference wrappers decorated with
+    # torch.no_grad().  A^T(Ax-y) still needs a local graph w.r.t. x, even when
+    # the caller does not want parameter gradients.
+    with torch.enable_grad():
+        x = x_hr if x_hr.requires_grad else x_hr.requires_grad_(True)
+        Ax = forward_burst(x, shifts, psf, scale)
+        r = Ax - y_burst
+        if band_highpass_sigma_lr_px > 0:
+            r = _highpass(r, band_highpass_sigma_lr_px)
+        if frame_mask is not None:
+            r = r * frame_mask
+        if huber_delta is None or huber_delta <= 0:
+            loss = 0.5 * (r * r).sum()
+        else:
+            a = r.abs()
+            loss = torch.where(a <= huber_delta, 0.5 * r * r, huber_delta * (a - 0.5 * huber_delta)).sum()
+        (g,) = torch.autograd.grad(loss, x, create_graph=create_graph)
     return g, r.detach()
