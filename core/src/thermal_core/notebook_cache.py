@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import shutil
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
@@ -26,6 +27,13 @@ def figure_path(output_dir: Path, name: str) -> Path:
 
 def missing_artifacts(output_dir: Path, names: Iterable[str]) -> list[str]:
     return [name for name in names if not (output_dir / name).exists()]
+
+
+def clear_output_dir(output_dir: Path) -> None:
+    """Remove a cache output directory before a forced rebuild."""
+
+    if output_dir.exists():
+        shutil.rmtree(output_dir)
 
 
 def require_artifacts(

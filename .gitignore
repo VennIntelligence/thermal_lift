@@ -27,6 +27,9 @@ outputs/
 algos/*/outputs/
 *.zip
 
+# Root-level reports are legacy/generated scratch. Formal reports live in paper/reports/.
+reports/
+
 # ===== 临时工作区 / 草稿（不入 Git） =====
 tmp/
 todos/

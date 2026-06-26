@@ -268,7 +268,7 @@ def build_ep01_cache(
     root = _project_root(project_root)
     data_dir = (data_dir or root / "data" / "data_raw" / "infrared_avi").resolve()
     output_dir = (output_dir or root / "output" / "ep01_data_processing").resolve()
-    report_dir = (report_dir or root / "reports" / "ep01_data_processing").resolve()
+    report_dir = (report_dir or root / "paper" / "reports" / "ep01_data_processing").resolve()
     if force:
         clear_output_dir(output_dir)
     output_dir.mkdir(parents=True, exist_ok=True)

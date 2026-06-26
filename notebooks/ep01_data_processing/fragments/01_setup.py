@@ -37,7 +37,7 @@ while not (PROJECT_ROOT / "AGENTS.md").exists() and PROJECT_ROOT != PROJECT_ROOT
     PROJECT_ROOT = PROJECT_ROOT.parent
 
 OUTPUT_DIR = PROJECT_ROOT / "output" / "ep01_data_processing"
-REPORT_DIR = PROJECT_ROOT / "reports" / "ep01_data_processing"
+REPORT_DIR = PROJECT_ROOT / "paper" / "reports" / "ep01_data_processing"
 
 setup_academic_style()
 cache = load_ep01_cache(project_root=PROJECT_ROOT, output_dir=OUTPUT_DIR)
