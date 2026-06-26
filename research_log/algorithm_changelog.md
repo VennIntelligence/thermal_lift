@@ -8,6 +8,50 @@
 
 ## 变更记录
 
+### [ACL-029] 2026-06-27 — solver_train 接入 V10 同款 checkpoint real-eval/PNG 自动出图
+
+**问题诊断**:
+- V10/plain-UNet 训练入口在每个 checkpoint 自动运行 `real_eval`，写 TensorBoard `eval_real/*` 并保存 `eval_real/unet_step*_center_zoom3x_temperature.png`，可直接观察真实主 session 上的演化。
+- `solver_train.py` 只保存 `solver_step_*.pt` 和 held-out synthetic 指标，未接入真实数据自动出图；当前 `outputs/solver_v4_acl027` 训练到 5K 只能看合成指标，缺少和 V10 对齐的真实温度图演化。
+- solver 不能直接复用 `maybe_log_real_eval(model=solver)`：普通推理只调用 `model(features)`，而 `UnrolledSolver.forward()` 需要 `x0, lr_burst, shifts, ScenePSF, cond, frame_mask`。
+
+**修改内容**:
+1. `real_eval.py` 新增 `infer_solver_from_burst()`：真实主 session 上构建与训练一致的 solver condition，`solver_no_drizzle=True` 时为 `5 fused↑2x`，否则为 `5 fused↑2x + 4 phase-bin drizzle@2x`；`x0` 分别取 ch0 / ch5。
+2. `real_eval.py` 新增 `maybe_log_solver_real_eval()`：复用 EP11-style center-zoom 温度图、highpass TensorBoard panel、`out_of_band_ratio` / `artifact_score` 标量，并保存 `eval_real/solver_step*_center_zoom3x_temperature.png`。
+3. solver real-eval 的 DC burst 使用确定性均匀子集，帧数为 `--solver-m-frames`，避免每个 tile 对 248 帧全量做 K-step DC 造成 checkpoint eval 过慢。
+4. 真实数据无合成 scene 的 per-scene PSF metadata，因此 solver real-eval 明确使用配置标量 `forward_model_psf_sigma` 的 Gaussian PSF 作为监控假设；该输出用于 checkpoint 视觉演化/质量门控，不作为物理 GT。
+5. `solver_train.py` 在 `save_every` 和 final 节点调用 solver real-eval，和 V10 一样自动写 TensorBoard/PNG；新增启动时 real-eval cadence 打印。
+6. `tests/test_real_eval.py` 增加 solver adapter 回归测试，覆盖 5ch no-drizzle 与 9ch hybrid contract，以及 deterministic `solver_m_frames` 子集。
+
+**预期效果**:
+- solver 训练在 checkpoint 处自动生产真实主 session center-zoom 温度 PNG，可直接和 V10 的演化图对齐检查。
+- 避免 old 8ch hybrid eval 回退；测试固定 9ch contract。
+- 风险: solver real-eval 比 plain UNet 显著更慢，尤其 `patch_size_hr=192 / overlap=128` 会产生较多 tile；必要时用 `--real-eval-every` 降低频率或 `--real-eval-frame-limit` 做快速 smoke。
+
+**推荐参数**:
+```bash
+uv run python -m unet_sr.solver_train \
+  --training-pool-dir ../../data/synthetic/pool_2x_v4_5k \
+  --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 4 \
+  --solver-no-drizzle --solver-m-frames 12 --solver-band-sigma 5 \
+  --solver-prior-anneal-steps 0 --solver-dc-weight 0 \
+  --boundary-boost 4.0 --flatness-weight 0.0 \
+  --synth-eval-holdout 200 --synth-eval-every 2500 \
+  --total-steps 20000 --batch-size 16 --patch-size-hr 192 \
+  --save-every 2500 --log-every 1000 --num-workers 16 \
+  --output-dir outputs/solver_v4_acl027
+```
+
+**训练结果**: _(训练后填写)_
+- 输出目录: `outputs/solver_v4_acl027`
+- 视觉效果:
+- 关键指标:
+- 结论:
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/real_eval.py`, `algos/ep07_unet_sr/src/unet_sr/solver_train.py`, `algos/ep07_unet_sr/tests/test_real_eval.py`
+
+---
+
 ### [ACL-028] 2026-06-26 — 修复 hybrid real_eval 推理仍生成 8ch 输入导致 9ch 模型崩溃
 
 **问题诊断**:

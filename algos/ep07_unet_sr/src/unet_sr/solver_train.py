@@ -32,6 +32,7 @@ from .config import TrainingConfig, config_from_args
 from .dataset import HYBRID_DRIZZLE_MEAN_CHANNEL, SceneInterleavedSampler, ThermalSRDataset
 from .forward_torch import ScenePSF, _highpass, forward_burst
 from .losses import ContourSRLoss
+from .real_eval import RealEvalConfig, maybe_log_solver_real_eval
 from .synth_eval import SynthEvalConfig, build_eval_loader, maybe_log_synth_eval
 from .train import _log_pred_vs_target, _to_device_tensor, _worker_init_fn
 from .unroll import UnrolledSolver
@@ -120,6 +121,27 @@ def train(config: TrainingConfig) -> Path:
     tb_dir.mkdir(parents=True, exist_ok=True)
     writer = SummaryWriter(log_dir=str(tb_dir))
     print(f"TensorBoard logs → {tb_dir}  (tensorboard --logdir {tb_dir})")
+    real_eval_cfg = RealEvalConfig(
+        enabled=config.real_eval_enabled,
+        every=config.real_eval_every,
+        frame_limit=config.real_eval_frame_limit,
+        alignment_method=config.real_eval_alignment_method,
+        baseline_hr=config.real_eval_baseline_hr,
+        center_fraction=config.real_eval_center_fraction,
+        zoom=config.real_eval_zoom,
+        overlap=config.real_eval_overlap,
+        highpass_sigma=config.highpass_sigma,
+        output_dir=str(output_dir),
+        save_png=True,
+    )
+    if real_eval_cfg.enabled:
+        print(
+            "Real-data solver eval: "
+            f"every={real_eval_cfg.every or config.save_every} steps, "
+            f"frames={real_eval_cfg.frame_limit}, "
+            f"DC frames={config.solver_m_frames}, "
+            f"SR={config.scale}x, display zoom={real_eval_cfg.zoom:g}x center ROI"
+        )
 
     dataset = ThermalSRDataset(
         config.training_pool_dir,
@@ -273,6 +295,21 @@ def train(config: TrainingConfig) -> Path:
                 torch.save({"step": step, "model_state_dict": solver.state_dict(),
                             "config": vars(config)}, ckpt)
                 progress.write(f"saved {ckpt}")
+                real_metrics = maybe_log_solver_real_eval(
+                    writer,
+                    solver=solver,
+                    config=real_eval_cfg,
+                    training_config=config,
+                    step=step,
+                    device=device,
+                )
+                if real_metrics is not None:
+                    progress.write(
+                        "eval_real "
+                        + " ".join(f"{key}={value:.6g}" for key, value in real_metrics.items())
+                    )
+                if device.type == "cuda":
+                    torch.cuda.empty_cache()
             if synth_loader is not None:
                 sm = maybe_log_synth_eval(
                     writer, model=solver, loader=synth_loader, forward_fn=_solver_forward,
@@ -285,10 +322,18 @@ def train(config: TrainingConfig) -> Path:
             break
 
     progress.close()
-    writer.close()
     final = output_dir / "solver_final.pt"
     torch.save({"step": step, "model_state_dict": solver.state_dict(), "config": vars(config)}, final)
     print(f"saved {final}")
+    maybe_log_solver_real_eval(
+        writer,
+        solver=solver,
+        config=real_eval_cfg,
+        training_config=config,
+        step=step,
+        device=device,
+    )
+    writer.close()
     return final
 
 
