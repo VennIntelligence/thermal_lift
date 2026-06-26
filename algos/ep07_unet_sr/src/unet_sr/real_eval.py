@@ -18,6 +18,7 @@ from torch.utils.tensorboard import SummaryWriter
 
 from .dataset import HYBRID_DRIZZLE_MEAN_CHANNEL
 from .inference import infer_from_burst
+from .metrics import out_of_band_ratio
 
 
 @dataclass(frozen=True)
@@ -241,10 +242,6 @@ def maybe_log_real_eval(
         model.train()
 
     unet_hp = highpass_preprocess(unet_temp, sigma_bg=sigma_bg)
-    _, _, bicubic_upsample = _import_ep06_common()
-
-    raw_control_temp = bicubic_upsample(np.nanmean(raw_frames, axis=0), scale=scale)
-    raw_control_hp = highpass_preprocess(raw_control_temp, sigma_bg=sigma_bg)
 
     baseline_path = Path(config.baseline_hr) if config.baseline_hr else _default_baseline_hr()
     baseline_hp = np.load(baseline_path).astype(np.float32, copy=False) if baseline_path.exists() else None
@@ -264,8 +261,14 @@ def maybe_log_real_eval(
 
     writer.add_image("eval_real/highpass_center_zoom", highpass_rgb, step)
     writer.add_image("eval_real/temperature_center_zoom", temp_rgb, step)
+    # out_of_band_ratio (GT-free, PSF-free) is the headline artifact/hallucination
+    # monitor on real data — it replaces raw_control_corr, which correlated the
+    # clean output against a bicubic blur and so rewarded *not* restoring.
+    oob = out_of_band_ratio(unet_temp, scale=scale)
+    writer.add_scalar("eval_real/out_of_band_ratio", oob, step)
+    # artifact_score retained only as a secondary FM-1 cliff monitor: a relative
+    # jump across checkpoints flags beading onset (it cannot tell SR from artifact).
     writer.add_scalar("eval_real/artifact_score", artifact_score(unet_hp, scale=scale), step)
-    writer.add_scalar("eval_real/raw_control_corr", pearson_finite(unet_hp, raw_control_hp), step)
     writer.add_scalar("eval_real/frame_limit", float(config.frame_limit), step)
     writer.flush()
 
@@ -284,8 +287,8 @@ def maybe_log_real_eval(
         print(f"Saved EP11-style temperature figure: {temp_png}")
 
     return {
+        "out_of_band_ratio": oob,
         "artifact_score": artifact_score(unet_hp, scale=scale),
-        "raw_control_corr": pearson_finite(unet_hp, raw_control_hp),
     }
 
 

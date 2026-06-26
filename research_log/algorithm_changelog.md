@@ -8,6 +8,38 @@
 
 ## 变更记录
 
+### [ACL-027] 2026-06-26 — Loss/评价指标重设计:thin/gap 线先验 → 几何无关 boundary 权重 + 等温 flatness;评测改用 held-out 合成 GT(out_of_band 取代 raw_control_corr)
+
+**问题诊断**:
+- 旧 loss/指标过度针对早期"完美矩形/细线"几何:`thin_boost=6 / gap_boost=4` 本质是直线探测器先验,在 v4 缺陷数据(孔/裂纹/断角,均 >pitch)上要么无意义要么帮倒忙(过度加权裂纹细发丝、欠加权大孔边界)。
+- `real_eval` 的 `artifact_score` / `raw_control_corr` 拿"干净输出"与"退化原图(bicubic of raw mean)"对比:输出越干净越偏离参照 → 分数反而越差("但凡生成更干净的图,分数反而降低")。
+- 结构性错位:有 GT 的合成集反而不记保真指标,没 GT 的真实集才记(被迫用"和退化图比"的代理)—— 正好反了。
+
+**修改内容**:
+1. `mask_weights.compute_boundary_weight_np`:`1 + boost·exp(-(dist/τ)²)`,从 mask 边界距离场算 —— 几何无关地强调每种边界(芯片外缘/孔壁/裂纹壁/缺口);细线=处处贴边界、窄缝=两侧贴边界,均作为同一距离场的特例自然涌现;对比无关 → 低 ΔT(hard/stress)缺陷也照样加权。替换 thin/gap(`--boundary-boost/--boundary-tau-px`)。
+2. `ContourSRLoss`:thin/gap → 单一 `boundary_weight`(驱动 highpass + grad_vector);mse 回归全局 DC 锚;新增 `flatness` 项(在 GT 平坦处罚 `‖∇pred‖`,用对比归一化的 target 梯度做软掩膜,不与真实边界打架),编码近等温先验(默认关,v4 用)。
+3. `metrics.py`(新,纯 numpy):`out_of_band_ratio`(GT-free/PSF-free,pitch 截止频率以上的谱能量=幻觉/珠串,本地验证 smooth/mid=0、Nyquist=1)、`psnr`、`region_rmse`(体内温度=等温保真)、`boundary_f1`(缺陷/边界保真:填孔↓recall、造边↓precision,本地验证填孔 recall 1.0→0.85)。
+4. `real_eval`:删 `raw_control_corr`,改记 `out_of_band_ratio`;`artifact_score` 降级为 FM-1 cliff 监视器(只看跨 checkpoint 的相对跳变)。
+5. `synth_eval.py`(新)+ 数据集 held-out 尾切片(`holdout_tail/holdout_role`,scene 目录数字序,训练自动排除尾部,零泄漏):有 GT 的合成集上记 `eval_synth/{psnr,region_rmse,boundary_f1,out_of_band_ratio}`,经 forward_fn 闭包同时接入 train.py(plain UNet)与 solver_train.py(unrolled solver)。
+
+**预期效果**:
+- 指标不再奖励"像退化图";真正的保真(区内 RMSE、缺陷 F1)与幻觉(带外能量)被分别诚实量化。
+- 边界强调对新缺陷几何通用;线先验的经验作为特例保留。
+- 风险:boundary/flatness 权重需调;`boundary_f1` 的梯度阈值是相对百分位 → 跨 run 看趋势,不看绝对值。
+
+**预期效果验证(本地 CPU)**: boundary 权重(每种边界→5.0、内部→1.0、细线全程加权)、4 个指标、config 解析/校验全部本地通过;9 个 src + 3 个 test 文件 py_compile 通过;torch 部分(loss/dataset/synth_eval forward)留远端 pytest。
+
+**推荐参数**: `--boundary-boost 4.0 --flatness-weight 0.0 --synth-eval-holdout 200 --synth-eval-every 2500`(第一跑 flatness 关;下一跑 `--flatness-weight 0.05` 做 A/B,用 eval_synth 判增益)
+
+**训练结果**: _(训练后填写)_
+- 输出目录: `outputs/v10_v4_acl027`(V10 baseline)/ `outputs/solver_v4_acl027`(solver)
+- 关键指标: eval_synth/region_rmse↓, boundary_f1↑, eval_real/out_of_band_ratio 平
+- 结论:
+
+**涉及文件**: mask_weights.py, losses.py, metrics.py(新), real_eval.py, synth_eval.py(新), dataset.py, config.py, solver_train.py, train.py; tests: test_model_losses / test_dataset / test_config; docs/REMOTE_ORDERS.md
+
+---
+
 ### [ACL-026] 2026-06-25 — solver 架构修正:end-on-DC + 冻结 eta(把"硬 DC"真正做硬;软锚定降级为监视)
 
 > 接 ACL-025。v2(anneal 8000 + dc_weight 0.5)训练复盘 → 定位到 `unroll.py` 实现的结构缺陷,做架构级修正,而非再调权重。

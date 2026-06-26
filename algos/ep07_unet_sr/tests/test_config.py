@@ -14,17 +14,17 @@ def test_config_parses_pixelshuffle_head_args() -> None:
             "pixelshuffle",
             "--hr-res-blocks",
             "1",
-            "--thin-boost",
+            "--boundary-boost",
             "3.0",
-            "--gap-boost",
-            "2.0",
+            "--flatness-weight",
+            "0.05",
         ]
     )
 
     assert cfg.hr_upsampler == "pixelshuffle"
     assert cfg.hr_res_blocks == 1
-    assert cfg.thin_boost == 3.0
-    assert cfg.gap_boost == 2.0
+    assert cfg.boundary_boost == 3.0
+    assert cfg.flatness_weight == 0.05
 
 
 def test_config_parses_forward_model_band_args() -> None:
@@ -34,7 +34,7 @@ def test_config_parses_forward_model_band_args() -> None:
         "--forward-model-band", "highpass",
         "--forward-model-band-sigma", "3.0",
         "--forward-model-weight", "0.1",
-        "--thin-boost", "3.0", "--gap-boost", "2.0",
+        "--boundary-boost", "3.0",
     ])
     assert cfg.forward_model_band == "highpass"
     assert cfg.forward_model_band_sigma == 3.0
@@ -45,28 +45,28 @@ def test_config_forward_model_band_default_is_full() -> None:
     """V9B: default band is 'full' for backward compatibility."""
     cfg = config_from_args([
         "--training-pool-dir", "dummy_pool",
-        "--thin-boost", "3.0", "--gap-boost", "2.0",
+        "--boundary-boost", "3.0",
     ])
     assert cfg.forward_model_band == "full"
     assert cfg.forward_model_band_sigma == 5.0
 
 
 def test_config_parses_hybrid_drizzle2x_input_mode() -> None:
-    """V9A: input_mode='hybrid_drizzle2x' auto-sets in_channels=8."""
+    """V9A: input_mode='hybrid_drizzle2x' auto-sets in_channels=9 (5 fused + 4 phase-bin)."""
     cfg = config_from_args([
         "--training-pool-dir", "dummy_pool",
         "--input-mode", "hybrid_drizzle2x",
-        "--thin-boost", "3.0", "--gap-boost", "2.0",
+        "--boundary-boost", "3.0",
     ])
     assert cfg.input_mode == "hybrid_drizzle2x"
-    assert cfg.in_channels == 8
+    assert cfg.in_channels == 9
 
 
 def test_config_input_mode_default_is_lr() -> None:
     """V9A: default input_mode is 'lr' for backward compatibility."""
     cfg = config_from_args([
         "--training-pool-dir", "dummy_pool",
-        "--thin-boost", "3.0", "--gap-boost", "2.0",
+        "--boundary-boost", "3.0",
     ])
     assert cfg.input_mode == "lr"
     assert cfg.in_channels == 5
@@ -80,11 +80,11 @@ def test_config_allows_hybrid_with_forward_model_at_scale_2() -> None:
         "--scale", "2",
         "--forward-model-weight", "0.1",
         "--forward-model-band", "highpass",
-        "--thin-boost", "3.0", "--gap-boost", "2.0",
+        "--boundary-boost", "3.0",
     ])
 
     assert cfg.input_mode == "hybrid_drizzle2x"
-    assert cfg.in_channels == 8
+    assert cfg.in_channels == 9
     assert cfg.forward_model_weight == 0.1
 
 
@@ -95,7 +95,7 @@ def test_config_rejects_hybrid_forward_model_without_2x_geometry() -> None:
             "--training-pool-dir", "dummy_pool",
             "--input-mode", "hybrid_drizzle2x",
             "--forward-model-weight", "0.1",
-            "--thin-boost", "3.0", "--gap-boost", "2.0",
+            "--boundary-boost", "3.0",
         ])
 
 
@@ -106,13 +106,13 @@ def test_config_allows_drizzle2x_residual_mode() -> None:
         "--scale", "2",
         "--residual-mode", "drizzle2x",
         "--residual-penalty-weight", "0.25",
-        "--thin-boost", "3.0", "--gap-boost", "2.0",
+        "--boundary-boost", "3.0",
     ])
 
     assert cfg.residual_mode == "drizzle2x"
     assert cfg.residual_penalty_weight == 0.25
     assert cfg.input_mode == "hybrid_drizzle2x"
-    assert cfg.in_channels == 8
+    assert cfg.in_channels == 9
 
 
 def test_config_rejects_drizzle2x_residual_without_hybrid_input() -> None:
@@ -121,7 +121,7 @@ def test_config_rejects_drizzle2x_residual_without_hybrid_input() -> None:
             "--training-pool-dir", "dummy_pool",
             "--scale", "2",
             "--residual-mode", "drizzle2x",
-            "--thin-boost", "3.0", "--gap-boost", "2.0",
+            "--boundary-boost", "3.0",
         ])
 
 
@@ -131,7 +131,7 @@ def test_config_rejects_drizzle2x_residual_without_scale_2() -> None:
             "--training-pool-dir", "dummy_pool",
             "--input-mode", "hybrid_drizzle2x",
             "--residual-mode", "drizzle2x",
-            "--thin-boost", "3.0", "--gap-boost", "2.0",
+            "--boundary-boost", "3.0",
         ])
 
 
@@ -143,7 +143,7 @@ def test_config_rejects_drizzle2x_residual_with_forward_model() -> None:
             "--scale", "2",
             "--residual-mode", "drizzle2x",
             "--forward-model-weight", "0.1",
-            "--thin-boost", "3.0", "--gap-boost", "2.0",
+            "--boundary-boost", "3.0",
         ])
 
 
@@ -155,5 +155,5 @@ def test_config_rejects_drizzle2x_residual_with_legacy_residual() -> None:
             "--scale", "2",
             "--residual-mode", "drizzle2x",
             "--residual",
-            "--thin-boost", "3.0", "--gap-boost", "2.0",
+            "--boundary-boost", "3.0",
         ])

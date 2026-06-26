@@ -93,6 +93,30 @@ warm-start/conditioning, and computing it on-the-fly per sample is slow. Two way
   ```
   Then run WITHOUT `--solver-no-drizzle`. After precompute the dataset auto-uses the variants.
 
+## TRAINING — V10 baseline (plain UNet) on v4 + ACL-027 loss/metrics  — the headline run
+> ACL-027 reworks the loss + eval for the v4 defect data. **Loss**: the thin/gap line priors are
+> replaced by one geometry-agnostic `boundary_weight` (chip outline + hole/crack/notch rims,
+> contrast-independent) + an optional isothermal `flatness` term (OFF here; A/B next). **Eval**: a
+> held-out synthetic GT split now reports the metrics we actually care about —
+> `eval_synth/{psnr, region_rmse, boundary_f1, out_of_band_ratio}` — and on real data
+> `eval_real/out_of_band_ratio` (PSF-free) **replaces the deleted `raw_control_corr`**, which had
+> correlated the clean output against a bicubic blur and so rewarded *not* restoring.
+```
+uv run python -m unet_sr.train \
+  --training-pool-dir data/synthetic/pool_2x_v4_5k \
+  --input-mode hybrid_drizzle2x --scale 2 --loss-type contour_sr \
+  --boundary-boost 4.0 --flatness-weight 0.0 \
+  --synth-eval-holdout 200 --synth-eval-every 2500 \
+  --total-steps 50000 --batch-size 24 --patch-size-hr 256 \
+  --num-workers 12 --save-every 2500 --output-dir outputs/v10_v4_acl027
+```
+- `in_channels` auto = 9 (5 fused↑2x + 4 phase-bin drizzle); both inputs are precomputed on disk.
+- Headline tracking: `eval_synth/region_rmse`↓ and `eval_synth/boundary_f1`↑ (real objective, vs GT);
+  `eval_real/out_of_band_ratio` should stay **flat** — a jump = beading / FM-1 cliff onset.
+- **A/B the isothermal prior next**: same command with `--flatness-weight 0.05`; compare eval_synth.
+- The 200-scene tail is auto-excluded from training (no leakage). Tune batch/patch/workers to the GPU;
+  real_eval stays on (needs the real frames + ep10 baseline).
+
 ## TRAINING — K-step unrolled solver (the real run)  — RUN after Gates 0/A/B/C all PASS
 > **ACL-026 architecture** (current): each unroll step is `prox → DC` and the solver **ENDS on the
 > DC step**, so the output `x_K` is forward-consistent by construction; **eta is FROZEN by default**
@@ -105,12 +129,14 @@ warm-start/conditioning, and computing it on-the-fly per sample is slow. Two way
 enforce consistency; `loss/dc` is now just a MONITOR in TB):
 ```
 uv run python -m unet_sr.solver_train \
-  --training-pool-dir data/synthetic/pool_2x_v3_5k \
+  --training-pool-dir data/synthetic/pool_2x_v4_5k \
   --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 4 --solver-no-drizzle \
   --solver-m-frames 12 --solver-band-sigma 5 \
   --solver-prior-anneal-steps 0 --solver-dc-weight 0 \
+  --boundary-boost 4.0 --flatness-weight 0.0 \
+  --synth-eval-holdout 200 --synth-eval-every 2500 \
   --total-steps 20000 --batch-size 18 --patch-size-hr 192 \
-  --save-every 2500 --num-workers 8 --output-dir outputs/solver_v3_arch
+  --save-every 2500 --num-workers 8 --output-dir outputs/solver_v4_acl027
 ```
 **Before the pool run, RE-RUN GATE B** — its check [4] now certifies the ACL-026 architecture: after
 overfitting the SOLVER on one clean scene with structural supervision only, the terminal DC residual
@@ -128,8 +154,10 @@ escalate to a terminal CG projection (see the unroll.py caveat).
   regularizer (NOT the mechanism) — do not go back to the anneal-driven soft anchoring.
 - Eval (offline, separate harness): synthetic split-half FRC + EP11/EP15 real-data; bar = in-band
   FRC ≥ classical TGV/MAP-TV. Add the warm-start base on every eval path.
-- NOTE: thin/gap loss-weighting is disabled for this run (a shape-contract mismatch with
-  ContourSRLoss); re-enable once the reshape is confirmed.
+- ACL-027: thin/gap line priors are REPLACED by the geometry-agnostic `--boundary-boost` (enabled
+  here at 4.0; covers chip outline + hole/crack/notch rims, contrast-independent). `--flatness-weight`
+  (isothermal prior) is OFF for this first run — A/B it next. The solver path now also logs the
+  held-out `eval_synth/*` GT metrics (the headline) the same way as V10.
 
 ## PARALLEL (not a training gate) — re-run EP15 at 20µm
 Re-derive the authoritative real-data recoverable band at the recalibrated pitch; needed before

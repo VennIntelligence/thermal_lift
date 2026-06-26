@@ -16,7 +16,7 @@ from tcforge.classical_sr import drizzle_features
 from tcforge.reconstruct import reconstruct_hr_temperature
 from tcforge.storage import load_scene_compact
 
-from .mask_weights import compute_mask_loss_weights_np
+from .mask_weights import compute_boundary_weight_np
 
 
 HYBRID_DRIZZLE_MEAN_CHANNEL = 5
@@ -234,9 +234,10 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         residual: bool = False,
         input_mode: str = "lr",
         return_metadata: bool = True,
-        thin_boost: float = 1.0,
-        gap_boost: float = 1.0,
-        loss_weight_max_width_px: int = 3,
+        boundary_boost: float = 0.0,
+        boundary_tau_px: float = 2.5,
+        holdout_tail: int = 0,
+        holdout_role: str = "train",
         min_burst_frames: int = 30,
         shift_noise_std_px: float = 0.05,
         provide_burst: bool = False,
@@ -270,6 +271,19 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
             raise ValueError("patch_size_hr must be positive and divisible by effective scale")
 
         self.scene_paths = _scene_paths(training_pool_dir)
+        # Held-out GT eval split: scene dirs sort numerically (scene_0000..), so a
+        # fixed tail slice is a stable, leak-free held-out set. Training takes the
+        # head; synth_eval takes the same tail (holdout_role="eval").
+        if int(holdout_tail) > 0:
+            n_scenes = len(self.scene_paths)
+            if int(holdout_tail) >= n_scenes:
+                raise ValueError(f"holdout_tail={holdout_tail} must be < scene count {n_scenes}")
+            if holdout_role == "eval":
+                self.scene_paths = self.scene_paths[-int(holdout_tail):]
+            elif holdout_role == "train":
+                self.scene_paths = self.scene_paths[: -int(holdout_tail)]
+            else:
+                raise ValueError(f"holdout_role must be 'train' or 'eval', got {holdout_role!r}")
         self.patch_size_hr = int(patch_size_hr)
         self.patch_size_lr = int(patch_size_hr // effective_scale)
         self.scale = effective_scale
@@ -277,10 +291,9 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         self.patches_per_scene = int(patches_per_scene)
         self.max_scene_cache = int(max_scene_cache)
         self.return_metadata = bool(return_metadata)
-        self.thin_boost = float(thin_boost)
-        self.gap_boost = float(gap_boost)
-        self.loss_weight_max_width_px = int(loss_weight_max_width_px)
-        self._need_loss_weights = self.thin_boost > 1.0 or self.gap_boost > 1.0
+        self.boundary_boost = float(boundary_boost)
+        self.boundary_tau_px = float(boundary_tau_px)
+        self._need_loss_weights = self.boundary_boost > 0.0
         self._cache: OrderedDict[int, dict[str, Any]] = OrderedDict()
         self._shared_epoch = mp.Value("i", 0)
 
@@ -583,16 +596,13 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
             self._add_burst_to_sample(sample, scene, index, y_lr, x_lr, p_hr)
 
         if self._need_loss_weights:
-            thin_np, gap_np = compute_mask_loss_weights_np(
+            boundary_np = compute_boundary_weight_np(
                 mask_patch,
-                thin_boost=self.thin_boost,
-                gap_boost=self.gap_boost,
-                max_width_px=self.loss_weight_max_width_px,
+                boundary_boost=self.boundary_boost,
+                tau_px=self.boundary_tau_px,
             )
-            if thin_np is not None:
-                sample["thin_weight"] = torch.from_numpy(thin_np.astype(np.float32, copy=False))
-            if gap_np is not None:
-                sample["gap_weight"] = torch.from_numpy(gap_np.astype(np.float32, copy=False))
+            if boundary_np is not None:
+                sample["boundary_weight"] = torch.from_numpy(boundary_np.astype(np.float32, copy=False))
 
         if self.return_metadata:
             metadata = scene["metadata"]

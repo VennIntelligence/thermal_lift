@@ -57,7 +57,7 @@ def grad_vector_loss(
     pred: torch.Tensor,
     target: torch.Tensor,
     structure_boost: float = 4.0,
-    thin_weight: torch.Tensor | None = None,
+    boundary_weight: torch.Tensor | None = None,
 ) -> torch.Tensor:
     """Gradient vector matching loss.
 
@@ -88,10 +88,10 @@ def grad_vector_loss(
     mag_max = target_mag.amax(dim=(-2, -1), keepdim=True).clamp_min(1e-8)
     mag_norm = target_mag / mag_max  # [0, 1]
     weight_map = 1.0 + structure_boost * mag_norm
-    if thin_weight is not None:
-        if thin_weight.shape != target.shape:
-            raise ValueError(f"thin_weight shape mismatch: {thin_weight.shape} vs {target.shape}")
-        weight_map = weight_map * thin_weight.to(dtype=weight_map.dtype)
+    if boundary_weight is not None:
+        if boundary_weight.shape != target.shape:
+            raise ValueError(f"boundary_weight shape mismatch: {boundary_weight.shape} vs {target.shape}")
+        weight_map = weight_map * boundary_weight.to(dtype=weight_map.dtype)
 
     return (vec_error * weight_map).mean()
 
@@ -342,22 +342,29 @@ def forward_model_loss(
 class ContourSRLoss(nn.Module):
     """Loss for contour-level SR: focuses on structure/edge reconstruction.
 
-    Strips DC background via highpass and weights structure pixels by a
-    **gradient-based continuous weight map** derived from the target's Sobel
-    gradient magnitude.
+    Strips DC background via highpass and weights structure pixels by the
+    product of two complementary maps: a **signal-gradient weight** from the
+    target's Sobel magnitude (where thermal contrast lives) and an optional
+    **geometry boundary weight** passed in from the mask (where physical edges
+    live, contrast-independently — see ``mask_weights.compute_boundary_weight_np``).
+    The boundary weight replaces the old thin-structure / narrow-gap masks,
+    which baked in a perfect-line / perfect-rectangle prior unsuited to the v4
+    defect data (holes, cracks, broken edges).
 
     Components
     ----------
-    mse            : MSE on raw pred vs target — anchors DC / gap temperatures.
-    highpass L1    : L1 on highpass(pred) vs highpass(target), gradient-weighted.
+    mse            : MSE on raw pred vs target — global DC / temperature anchor.
+    highpass L1    : L1 on highpass(pred) vs highpass(target), structure×boundary
+                     weighted.
     Sobel edge mag : L1 on gradient magnitude (multi-scale: 1× + 2×-downsampled).
     SSIM           : structural similarity (secondary).
     grad_vector    : Full Sobel gradient *vector* (gx, gy) matching, weighted by
-                     target gradient magnitude.  Compared to magnitude-only edge
-                     loss, this additionally catches:
-                       - thickening (gradient direction shifts)
-                       - merging    (inter-structure gradients vanish)
-                       - disconnection (intra-structure gradients vanish)
+                     target gradient magnitude.  Catches thickening (direction
+                     shifts), merging (inter-structure gradients vanish), and
+                     disconnection (intra-structure gradients vanish).
+    flatness       : Penalises |grad(pred)| where the GT is flat (isothermal
+                     interiors + background); encodes the near-isothermal prior.
+                     Default off (weight 0); enable for v4 data.
     laplacian /
     forward_model  : Optional hybrid terms kept disabled by default and enabled
                      explicitly for v6/v8-style experiments.
@@ -373,6 +380,8 @@ class ContourSRLoss(nn.Module):
         structure_boost: float = 4.0,
         edge_coarse_weight: float = 0.25,
         grad_vector_weight: float = 0.3,
+        flatness_weight: float = 0.0,
+        flatness_tau: float = 0.25,
         laplacian_weight: float = 0.0,
         forward_model_weight: float = 0.0,
         forward_model_psf_sigma: float = 1.0,
@@ -390,6 +399,7 @@ class ContourSRLoss(nn.Module):
             ("structure_boost", structure_boost),
             ("edge_coarse_weight", edge_coarse_weight),
             ("grad_vector_weight", grad_vector_weight),
+            ("flatness_weight", flatness_weight),
             ("laplacian_weight", laplacian_weight),
             ("forward_model_weight", forward_model_weight),
             ("forward_model_psf_sigma", forward_model_psf_sigma),
@@ -397,6 +407,8 @@ class ContourSRLoss(nn.Module):
         ]:
             if val < 0:
                 raise ValueError(f"{name} must be >= 0")
+        if float(flatness_tau) <= 0:
+            raise ValueError("flatness_tau must be > 0")
         if int(forward_model_scale) <= 0:
             raise ValueError("forward_model_scale must be > 0")
         if forward_model_band not in ("full", "highpass"):
@@ -409,6 +421,8 @@ class ContourSRLoss(nn.Module):
         self.structure_boost = float(structure_boost)
         self.edge_coarse_weight = float(edge_coarse_weight)
         self.grad_vector_weight = float(grad_vector_weight)
+        self.flatness_weight = float(flatness_weight)
+        self.flatness_tau = float(flatness_tau)
         self.laplacian_weight = float(laplacian_weight)
         self.forward_model_weight = float(forward_model_weight)
         self.forward_model_psf_sigma = float(forward_model_psf_sigma)
@@ -422,36 +436,28 @@ class ContourSRLoss(nn.Module):
         target: torch.Tensor,
         lr_observation: torch.Tensor | None = None,
         lr_obs: torch.Tensor | None = None,
-        thin_weight: torch.Tensor | None = None,
-        gap_weight: torch.Tensor | None = None,
+        boundary_weight: torch.Tensor | None = None,
     ) -> dict[str, torch.Tensor]:
         if pred.shape != target.shape:
             raise ValueError(f"pred/target shape mismatch: {pred.shape} vs {target.shape}")
-        if thin_weight is not None and thin_weight.shape != target.shape:
-            raise ValueError(f"thin_weight shape mismatch: {thin_weight.shape} vs {target.shape}")
-        if gap_weight is not None and gap_weight.shape != target.shape:
-            raise ValueError(f"gap_weight shape mismatch: {gap_weight.shape} vs {target.shape}")
+        if boundary_weight is not None and boundary_weight.shape != target.shape:
+            raise ValueError(f"boundary_weight shape mismatch: {boundary_weight.shape} vs {target.shape}")
 
-        # ---- MSE on raw prediction — anchor DC + protect gaps ----
-        mse_error = (pred - target).square()
-        if gap_weight is not None:
-            mse_error = mse_error * gap_weight.to(dtype=mse_error.dtype)
-        mse_loss = mse_error.mean()
+        # ---- MSE on raw prediction — global DC / temperature-level anchor ----
+        mse_loss = (pred - target).square().mean()
 
         # ---- Highpass: strip smooth DC background ----
         pred_hp = pred - gaussian_blur_2d(pred, self.highpass_sigma)
         target_hp = target - gaussian_blur_2d(target, self.highpass_sigma)
 
-        # ---- Gradient-based structure weight (from target) ----
+        # ---- Structure weight: signal-gradient (target) × geometry boundary ----
         hp_error = torch.abs(pred_hp - target_hp)
         target_edges = sobel_edges(target)
         edge_max = target_edges.amax(dim=(-2, -1), keepdim=True).clamp_min(1e-8)
         edge_norm = target_edges / edge_max
         weight_map = 1.0 + self.structure_boost * edge_norm
-        if thin_weight is not None:
-            weight_map = weight_map * thin_weight.to(dtype=weight_map.dtype)
-        if gap_weight is not None:
-            weight_map = weight_map * gap_weight.to(dtype=weight_map.dtype)
+        if boundary_weight is not None:
+            weight_map = weight_map * boundary_weight.to(dtype=weight_map.dtype)
         hp_loss = (hp_error * weight_map).mean()
 
         # ---- Multi-scale Sobel edge magnitude loss ----
@@ -473,7 +479,17 @@ class ContourSRLoss(nn.Module):
         # ---- Gradient vector matching ----
         gv_loss = pred.new_tensor(0.0)
         if self.grad_vector_weight > 0:
-            gv_loss = grad_vector_loss(pred, target, self.structure_boost, thin_weight=thin_weight)
+            gv_loss = grad_vector_loss(pred, target, self.structure_boost, boundary_weight=boundary_weight)
+
+        # ---- Isothermal flatness: suppress predicted texture where GT is flat ----
+        # Penalise |grad(pred)| weighted by a soft "is-flat" mask from the TARGET
+        # gradient (~1 in isothermal interiors & background, ->0 on real edges).
+        # edge_norm is contrast-normalised, so this never fights a true boundary
+        # even at tiny ΔT; it counters the structure-weighting's neglect of flats.
+        flat_loss = pred.new_tensor(0.0)
+        if self.flatness_weight > 0:
+            flat_mask = torch.exp(-((edge_norm / self.flatness_tau) ** 2))
+            flat_loss = (sobel_edges(pred) * flat_mask).mean()
 
         # ---- Optional hybrid terms from v6_physics ----
         lap_loss = pred.new_tensor(0.0)
@@ -501,6 +517,7 @@ class ContourSRLoss(nn.Module):
             + self.edge_weight * edge_loss
             + self.ssim_weight * ssim_loss
             + self.grad_vector_weight * gv_loss
+            + self.flatness_weight * flat_loss
             + self.laplacian_weight * lap_loss
             + self.forward_model_weight * fm_loss
         )
@@ -512,6 +529,8 @@ class ContourSRLoss(nn.Module):
             "ssim": ssim_loss,
             "grad_vector": gv_loss,
         }
+        if self.flatness_weight > 0:
+            out["flatness"] = flat_loss
         if self.laplacian_weight > 0:
             out["laplacian"] = lap_loss
         if self.forward_model_weight > 0:

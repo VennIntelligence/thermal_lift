@@ -82,6 +82,70 @@ def compute_mask_loss_weights_np(
     return thin, gap
 
 
+def _support_boundary(binary: np.ndarray) -> np.ndarray:
+    """4-neighbour morphological boundary of a binary support mask.
+
+    A pixel is on the boundary if the support label differs across any of its
+    four edges.  This fires identically on an outer contour, a hole rim, a
+    crack wall, or a notch edge — no assumption about line-like geometry.
+    """
+
+    edge = np.zeros_like(binary, dtype=bool)
+    diff_v = binary[:-1, :] != binary[1:, :]
+    diff_h = binary[:, :-1] != binary[:, 1:]
+    edge[:-1, :] |= diff_v
+    edge[1:, :] |= diff_v
+    edge[:, :-1] |= diff_h
+    edge[:, 1:] |= diff_h
+    return edge
+
+
+def compute_boundary_weight_np(
+    hr_mask: np.ndarray,
+    *,
+    boundary_boost: float,
+    tau_px: float = 2.5,
+) -> np.ndarray | None:
+    """Geometry-agnostic boundary-emphasis loss weight for one HR patch.
+
+    Replaces the thin-structure / narrow-gap masks (which encoded a
+    perfect-line / perfect-rectangle prior).  Builds a single continuous
+    multiplier from the *distance to the nearest support boundary*::
+
+        w = 1 + boundary_boost * exp(-(dist / tau_px) ** 2)
+
+    so that *every* structural edge — outer chip contour, hole rim, crack
+    wall, notch — is emphasised uniformly, and the weight decays to 1 in flat
+    interiors and background.  The old special cases fall out for free:
+
+    - **Thin structures**: every pixel sits within ``tau_px`` of a boundary,
+      so the whole sliver is boosted (no width threshold, no line detector).
+    - **Narrow gaps / cracks**: background pixels flanked by support are close
+      to two boundaries, so they are boosted too.
+
+    Unlike a gradient-of-signal weight, this is **contrast-independent**: it
+    boosts a faint low-ΔT defect edge exactly as much as a high-contrast one,
+    which matters for the hard/stress difficulty tiers.
+
+    Returns ``(1, H, W)`` float32, or ``None`` when ``boundary_boost <= 0``
+    (caller treats a missing weight as uniform).
+    """
+
+    if float(boundary_boost) <= 0.0:
+        return None
+    mask_2d = _as_mask_2d(hr_mask)
+    binary = mask_2d >= 0.5
+    # A patch fully inside one body (all support) or fully background has no
+    # boundary; emphasise nothing rather than dividing by an empty distance map.
+    if not binary.any() or binary.all():
+        return np.ones((1, *mask_2d.shape), dtype=np.float32)
+    boundary = _support_boundary(binary)
+    dist = ndimage.distance_transform_edt(~boundary)
+    prox = np.exp(-((dist / float(tau_px)) ** 2))
+    weight = (1.0 + float(boundary_boost) * prox)[None]
+    return weight.astype(np.float32, copy=False)
+
+
 def compute_mask_loss_weights(
     hr_mask: torch.Tensor,
     *,

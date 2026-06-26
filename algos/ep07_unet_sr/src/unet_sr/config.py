@@ -33,8 +33,10 @@ class TrainingConfig:
     mse_loss_weight: float = 0.2
     edge_coarse_weight: float = 0.25
     grad_vector_weight: float = 0.3
-    thin_boost: float = 6.0
-    gap_boost: float = 4.0
+    boundary_boost: float = 4.0
+    boundary_tau_px: float = 2.5
+    flatness_weight: float = 0.0
+    flatness_tau: float = 0.25
     laplacian_weight: float = 0.0
     forward_model_weight: float = 0.0
     forward_model_psf_sigma: float = 0.5
@@ -68,6 +70,14 @@ class TrainingConfig:
     real_eval_center_fraction: float = 1.0 / 3.0
     real_eval_zoom: float = 3.0
     real_eval_overlap: int = 128
+    # --- Held-out synthetic GT eval (PSNR / region-RMSE / defect boundary-F1 /
+    # out-of-band). Eval scenes are a fixed tail of the pool, excluded from
+    # training (no leakage). synth_eval_holdout=0 disables it. ---
+    synth_eval_enabled: bool = True
+    synth_eval_every: int = 0
+    synth_eval_holdout: int = 0
+    synth_eval_patches_per_scene: int = 2
+    synth_eval_max_patches: int = 128
     # --- Physics-constrained unrolled solver (unroll_steps=0 keeps the plain UNet) ---
     unroll_steps: int = 0
     solver_m_frames: int = 16
@@ -146,10 +156,14 @@ class TrainingConfig:
             raise ValueError("edge_coarse_weight must be >= 0")
         if self.grad_vector_weight < 0:
             raise ValueError("grad_vector_weight must be >= 0")
-        if not (1.0 <= self.thin_boost < 10.0):
-            raise ValueError("thin_boost must satisfy 1 <= thin_boost < 10")
-        if not (1.0 <= self.gap_boost < 10.0):
-            raise ValueError("gap_boost must satisfy 1 <= gap_boost < 10")
+        if not (0.0 <= self.boundary_boost < 10.0):
+            raise ValueError("boundary_boost must satisfy 0 <= boundary_boost < 10")
+        if self.boundary_tau_px <= 0:
+            raise ValueError("boundary_tau_px must be > 0")
+        if self.flatness_weight < 0:
+            raise ValueError("flatness_weight must be >= 0")
+        if self.flatness_tau <= 0:
+            raise ValueError("flatness_tau must be > 0")
         if self.laplacian_weight < 0:
             raise ValueError("laplacian_weight must be >= 0")
         if self.forward_model_weight < 0:
@@ -224,6 +238,14 @@ class TrainingConfig:
             raise ValueError("real_eval_zoom must be positive")
         if self.real_eval_overlap < 0 or self.real_eval_overlap >= self.patch_size_hr:
             raise ValueError("real_eval_overlap must satisfy 0 <= overlap < patch_size_hr")
+        if self.synth_eval_every < 0:
+            raise ValueError("synth_eval_every must be >= 0")
+        if self.synth_eval_holdout < 0:
+            raise ValueError("synth_eval_holdout must be >= 0")
+        if self.synth_eval_patches_per_scene <= 0:
+            raise ValueError("synth_eval_patches_per_scene must be > 0")
+        if self.synth_eval_max_patches <= 0:
+            raise ValueError("synth_eval_max_patches must be > 0")
         if not self.tb_log_dir:
             self.tb_log_dir = str(Path(self.output_dir) / "tb_logs")
         if self.tb_image_every < 0:
@@ -276,12 +298,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--grad-vector-weight", type=float, default=TrainingConfig.grad_vector_weight,
                         help="Full Sobel gradient vector (gx,gy) matching loss: catches thickening, "
                              "merging, disconnection via direction+magnitude (default: 0.3).")
-    parser.add_argument("--thin-boost", type=float, default=TrainingConfig.thin_boost,
-                        help="Multiplier for <=3 HR px structure pixels in highpass/grad-vector loss "
-                             "(default: 6.0; use 1.0 to disable).")
-    parser.add_argument("--gap-boost", type=float, default=TrainingConfig.gap_boost,
-                        help="Multiplier for <=3 HR px narrow background gaps in MSE/highpass loss "
-                             "(default: 4.0; use 1.0 to disable).")
+    parser.add_argument("--boundary-boost", type=float, default=TrainingConfig.boundary_boost,
+                        help="Geometry-agnostic boundary emphasis: pixels within boundary_tau_px of any "
+                             "mask edge (chip outline, hole rim, crack wall, notch) get up to "
+                             "(1 + boundary_boost)x weight in highpass/grad-vector loss. Replaces the old "
+                             "thin/gap line priors (default: 4.0; use 0.0 to disable).")
+    parser.add_argument("--boundary-tau-px", type=float, default=TrainingConfig.boundary_tau_px,
+                        help="Gaussian falloff (HR px) of the boundary-emphasis weight (default: 2.5).")
+    parser.add_argument("--flatness-weight", type=float, default=TrainingConfig.flatness_weight,
+                        help="Isothermal-flatness loss: penalises |grad(pred)| where the GT is flat "
+                             "(interiors + background). Encodes the near-isothermal prior "
+                             "(default: 0.0, disabled; enable for v4 data).")
+    parser.add_argument("--flatness-tau", type=float, default=TrainingConfig.flatness_tau,
+                        help="Normalised target-gradient scale below which flatness is enforced (default: 0.25).")
     parser.add_argument("--laplacian-weight", type=float, default=TrainingConfig.laplacian_weight,
                         help="Asymmetric Laplacian sharpness loss: penalises pred being blurrier "
                              "than target, preventing thin-line thickening (default: 0.0, disabled).")
@@ -444,6 +473,20 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=TrainingConfig.real_eval_overlap,
         help="Tiled inference overlap for real eval.",
     )
+    # --- Held-out synthetic GT eval ---
+    parser.add_argument("--synth-eval", action=argparse.BooleanOptionalAction,
+                        default=TrainingConfig.synth_eval_enabled, dest="synth_eval_enabled",
+                        help="Held-out synthetic GT eval (PSNR/region-RMSE/boundary-F1/out-of-band). Default ON.")
+    parser.add_argument("--synth-eval-every", type=int, default=TrainingConfig.synth_eval_every,
+                        help="Steps between synthetic GT evals (0 = use --save-every).")
+    parser.add_argument("--synth-eval-holdout", type=int, default=TrainingConfig.synth_eval_holdout,
+                        help="Tail scenes held out from training for GT eval. 0 disables; "
+                             "~200 recommended for the 5k v4 pool.")
+    parser.add_argument("--synth-eval-patches-per-scene", type=int,
+                        default=TrainingConfig.synth_eval_patches_per_scene,
+                        help="Deterministic eval patches drawn per held-out scene (default 2).")
+    parser.add_argument("--synth-eval-max-patches", type=int, default=TrainingConfig.synth_eval_max_patches,
+                        help="Cap on total eval patches per eval pass (default 128).")
     # --- Unrolled solver (used by solver_train.py / test_gate_c_smoke.py) ---
     parser.add_argument("--unroll-steps", type=int, default=TrainingConfig.unroll_steps,
                         help="K unroll iterations (0 = plain UNet; >0 enables the physics-constrained solver).")
@@ -499,8 +542,10 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         mse_loss_weight=args.mse_loss_weight,
         edge_coarse_weight=args.edge_coarse_weight,
         grad_vector_weight=args.grad_vector_weight,
-        thin_boost=args.thin_boost,
-        gap_boost=args.gap_boost,
+        boundary_boost=args.boundary_boost,
+        boundary_tau_px=args.boundary_tau_px,
+        flatness_weight=args.flatness_weight,
+        flatness_tau=args.flatness_tau,
         laplacian_weight=args.laplacian_weight,
         forward_model_weight=args.forward_model_weight,
         forward_model_psf_sigma=args.forward_model_psf_sigma,
@@ -534,6 +579,11 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         real_eval_center_fraction=args.real_eval_center_fraction,
         real_eval_zoom=args.real_eval_zoom,
         real_eval_overlap=args.real_eval_overlap,
+        synth_eval_enabled=args.synth_eval_enabled,
+        synth_eval_every=args.synth_eval_every,
+        synth_eval_holdout=args.synth_eval_holdout,
+        synth_eval_patches_per_scene=args.synth_eval_patches_per_scene,
+        synth_eval_max_patches=args.synth_eval_max_patches,
         unroll_steps=args.unroll_steps,
         solver_m_frames=args.solver_m_frames,
         solver_band_sigma=args.solver_band_sigma,

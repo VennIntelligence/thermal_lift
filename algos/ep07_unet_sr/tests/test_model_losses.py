@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import numpy as np
 import pytest
 import torch
 import torch.nn as nn
@@ -7,7 +8,7 @@ from torch.amp import GradScaler, autocast
 
 from unet_sr.losses import ContourSRLoss, ThermalSRLoss, forward_model_loss, sobel_edges
 from unet_sr.model import ThermalSRUNet
-from unet_sr.mask_weights import compute_mask_loss_weights
+from unet_sr.mask_weights import compute_boundary_weight_np
 from unet_sr.train import _delta_l1_penalty
 
 
@@ -54,16 +55,14 @@ def test_thermal_sr_loss_is_finite() -> None:
     assert pred.grad is not None
 
 
-def test_contour_sr_loss_accepts_optional_thin_and_gap_weights() -> None:
+def test_contour_sr_loss_accepts_optional_boundary_weight() -> None:
     loss = ContourSRLoss()
     pred = torch.randn(2, 1, 32, 32, requires_grad=True)
     target = torch.randn(2, 1, 32, 32)
-    thin = torch.ones_like(target)
-    gap = torch.ones_like(target)
-    thin[:, :, 12:14, 12:20] = 6.0
-    gap[:, :, 20:22, 8:24] = 4.0
+    boundary = torch.ones_like(target)
+    boundary[:, :, 12:14, 12:20] = 5.0
 
-    values = loss(pred, target, thin_weight=thin, gap_weight=gap)
+    values = loss(pred, target, boundary_weight=boundary)
     values["total"].backward()
 
     assert set(values) == {"total", "mse", "highpass", "edge", "ssim", "grad_vector"}
@@ -71,14 +70,14 @@ def test_contour_sr_loss_accepts_optional_thin_and_gap_weights() -> None:
     assert pred.grad is not None
 
 
-def test_contour_sr_loss_all_one_weights_match_default_behavior() -> None:
+def test_contour_sr_loss_all_one_weight_matches_default_behavior() -> None:
     loss = ContourSRLoss()
     pred = torch.randn(1, 1, 24, 24)
     target = torch.randn(1, 1, 24, 24)
     ones = torch.ones_like(target)
 
     base = loss(pred, target)
-    weighted = loss(pred, target, thin_weight=ones, gap_weight=ones)
+    weighted = loss(pred, target, boundary_weight=ones)
 
     for key in base:
         assert torch.allclose(base[key], weighted[key])
@@ -90,8 +89,8 @@ def test_contour_sr_loss_weight_shape_mismatch_raises() -> None:
     target = torch.randn(1, 1, 16, 16)
     bad = torch.ones(1, 1, 8, 8)
 
-    with pytest.raises(ValueError, match="thin_weight shape mismatch"):
-        loss(pred, target, thin_weight=bad)
+    with pytest.raises(ValueError, match="boundary_weight shape mismatch"):
+        loss(pred, target, boundary_weight=bad)
 
 
 def test_residual_penalty_increases_with_delta_magnitude() -> None:
@@ -109,21 +108,38 @@ def test_residual_penalty_increases_with_delta_magnitude() -> None:
     assert large_total > small_total
 
 
-def test_mask_loss_weights_boost_thin_structures_and_narrow_gaps() -> None:
-    mask = torch.zeros(1, 1, 16, 16)
-    mask[:, :, 4:12, 4:6] = 1.0
-    mask[:, :, 4:12, 9:11] = 1.0
-    mask[:, :, 7:8, 4:11] = 1.0
+def test_boundary_weight_emphasises_every_edge_type() -> None:
+    mask = np.zeros((24, 24), dtype=np.float32)
+    mask[4:20, 4:20] = 1.0                              # a solid block
+    yy, xx = np.mgrid[0:24, 0:24]
+    mask[(yy - 12) ** 2 + (xx - 12) ** 2 <= 4] = 0.0    # a hole carved inside it
 
-    thin_weight, gap_weight = compute_mask_loss_weights(mask, thin_boost=6.0, gap_boost=4.0)
+    w = compute_boundary_weight_np(mask, boundary_boost=4.0, tau_px=2.5)
 
-    assert thin_weight is not None
-    assert gap_weight is not None
-    assert float(thin_weight.max()) == 6.0
-    assert float(gap_weight.max()) == 4.0
-    assert float(thin_weight[0, 0, 7, 5]) == 6.0
-    assert float(gap_weight[0, 0, 6, 7]) == 4.0
-    assert float(gap_weight[0, 0, 0, 0]) == 1.0
+    assert w is not None
+    assert w.shape == (1, 24, 24)
+    assert abs(float(w.max()) - 5.0) < 1e-4             # on a boundary -> 1 + boost
+    assert 1.0 <= float(w.min()) < 1.1                  # decays to ~1 away from edges
+    assert float(w[0, 4, 12]) > 4.0                     # outer block edge boosted
+    assert float(w[0, 12, 9]) > 3.0                     # hole rim boosted
+    # disabled boost -> None; degenerate (all-support / all-bg) patch -> uniform 1
+    assert compute_boundary_weight_np(mask, boundary_boost=0.0) is None
+    assert np.allclose(compute_boundary_weight_np(np.ones((8, 8), np.float32), boundary_boost=4.0), 1.0)
+
+
+def test_contour_sr_loss_flatness_term_activates_and_is_finite() -> None:
+    loss = ContourSRLoss(flatness_weight=0.1)
+    pred = torch.randn(1, 1, 24, 24, requires_grad=True)
+    target = torch.zeros(1, 1, 24, 24)        # mostly-flat GT -> flatness fully active
+    target[:, :, 8:16, 8:16] = 1.0            # one block so a real edge exists too
+
+    values = loss(pred, target)
+    values["total"].backward()
+
+    assert "flatness" in values
+    assert torch.isfinite(values["flatness"])
+    assert float(values["flatness"]) > 0.0    # random pred has gradient in flat regions
+    assert pred.grad is not None
 
 
 def test_contour_sr_loss_finite_under_cuda_amp() -> None:

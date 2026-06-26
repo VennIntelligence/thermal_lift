@@ -25,6 +25,7 @@ from .dataset import HYBRID_DRIZZLE_MEAN_CHANNEL, ThermalSRDataset, SceneInterle
 from .losses import ContourSRLoss, ThermalSRLoss
 from .model import ThermalSRUNet
 from .real_eval import RealEvalConfig, maybe_log_real_eval
+from .synth_eval import SynthEvalConfig, build_eval_loader, maybe_log_synth_eval
 
 
 def _set_seed(seed: int) -> None:
@@ -194,13 +195,15 @@ def train(config: TrainingConfig) -> Path:
         residual=config.residual,
         input_mode=config.input_mode,
         return_metadata=False,
-        thin_boost=config.thin_boost,
-        gap_boost=config.gap_boost,
+        boundary_boost=config.boundary_boost,
+        boundary_tau_px=config.boundary_tau_px,
+        holdout_tail=config.synth_eval_holdout,  # exclude the GT-eval tail from training (no leakage)
+        holdout_role="train",
     )
-    if is_main and (config.thin_boost > 1.0 or config.gap_boost > 1.0):
+    if is_main and config.boundary_boost > 0.0:
         print(
-            "Thin/gap loss weights precomputed in DataLoader workers "
-            f"(thin_boost={config.thin_boost:g}, gap_boost={config.gap_boost:g})"
+            "Boundary-emphasis loss weights precomputed in DataLoader workers "
+            f"(boundary_boost={config.boundary_boost:g}, tau_px={config.boundary_tau_px:g})"
         )
     sampler = SceneInterleavedSampler(
         n_scenes=len(dataset.scene_paths),
@@ -251,6 +254,8 @@ def train(config: TrainingConfig) -> Path:
             structure_boost=config.structure_boost,
             edge_coarse_weight=config.edge_coarse_weight,
             grad_vector_weight=config.grad_vector_weight,
+            flatness_weight=config.flatness_weight,
+            flatness_tau=config.flatness_tau,
             laplacian_weight=config.laplacian_weight,
             forward_model_weight=config.forward_model_weight,
             forward_model_psf_sigma=config.forward_model_psf_sigma,
@@ -306,6 +311,31 @@ def train(config: TrainingConfig) -> Path:
                 f"L1(delta) weight={config.residual_penalty_weight:g}"
             )
 
+    # --- Held-out synthetic GT eval (PSNR / region-RMSE / defect boundary-F1 / out-of-band) ---
+    synth_eval_cfg = SynthEvalConfig(
+        enabled=config.synth_eval_enabled, every=config.synth_eval_every,
+        holdout_tail=config.synth_eval_holdout, patches_per_scene=config.synth_eval_patches_per_scene,
+        max_patches=config.synth_eval_max_patches, batch_size=config.batch_size,
+    )
+    synth_loader = None
+    if is_main and synth_eval_cfg.enabled and synth_eval_cfg.holdout_tail > 0:
+        synth_loader = build_eval_loader(
+            config, synth_eval_cfg, input_mode=config.input_mode, provide_burst=False,
+            solver_m_frames=config.solver_m_frames, solver_no_drizzle=config.solver_no_drizzle,
+        )
+        print(f"Synthetic held-out eval: {synth_eval_cfg.holdout_tail} tail scenes, "
+              f"<= {synth_eval_cfg.max_patches} patches every "
+              f"{synth_eval_cfg.every or config.save_every} steps")
+
+    def _unet_forward(batch: dict, dev: torch.device) -> torch.Tensor:
+        obs_e = _to_device_tensor(batch["obs_features"], device=dev, channels_last=config.channels_last)
+        pred_e = _unwrap_model(model)(obs_e)
+        if config.residual:
+            pred_e = obs_e[:, -1:, :, :] + pred_e
+        elif config.residual_mode == "drizzle2x":
+            pred_e = obs_e[:, HYBRID_DRIZZLE_MEAN_CHANNEL : HYBRID_DRIZZLE_MEAN_CHANNEL + 1, :, :] + pred_e
+        return pred_e
+
     model.train()
     progress = tqdm(
         total=config.total_steps,
@@ -327,16 +357,11 @@ def train(config: TrainingConfig) -> Path:
                 step += 1
                 obs = _to_device_tensor(batch["obs_features"], device=device, channels_last=config.channels_last)
                 target = _to_device_tensor(batch["hr_target"], device=device, channels_last=config.channels_last)
-                thin_weight = gap_weight = None
-                if isinstance(criterion, ContourSRLoss):
-                    if "thin_weight" in batch:
-                        thin_weight = _to_device_tensor(
-                            batch["thin_weight"], device=device, channels_last=config.channels_last,
-                        )
-                    if "gap_weight" in batch:
-                        gap_weight = _to_device_tensor(
-                            batch["gap_weight"], device=device, channels_last=config.channels_last,
-                        )
+                boundary_weight = None
+                if isinstance(criterion, ContourSRLoss) and "boundary_weight" in batch:
+                    boundary_weight = _to_device_tensor(
+                        batch["boundary_weight"], device=device, channels_last=config.channels_last,
+                    )
 
                 delta_stats: tuple[torch.Tensor, torch.Tensor] | None = None
                 with autocast(device_type=device.type, dtype=torch.float16, enabled=use_amp):
@@ -367,8 +392,7 @@ def train(config: TrainingConfig) -> Path:
                             target,
                             lr_observation=lr_mean,
                             lr_obs=lr_obs,
-                            thin_weight=thin_weight,
-                            gap_weight=gap_weight,
+                            boundary_weight=boundary_weight,
                         )
                     else:
                         edge = _to_device_tensor(batch["hr_edge"], device=device, channels_last=config.channels_last)
@@ -458,6 +482,21 @@ def train(config: TrainingConfig) -> Path:
                         print(
                             "eval_real "
                             + " ".join(f"{key}={value:.6g}" for key, value in eval_metrics.items())
+                        )
+                    synth_metrics = maybe_log_synth_eval(
+                        writer,
+                        model=_unwrap_model(model),
+                        loader=synth_loader,
+                        forward_fn=_unet_forward,
+                        eval_config=synth_eval_cfg,
+                        training_config=config,
+                        step=step,
+                        device=device,
+                    )
+                    if synth_metrics is not None and is_main:
+                        print(
+                            "eval_synth "
+                            + " ".join(f"{key}={value:.4g}" for key, value in synth_metrics.items())
                         )
                     if device.type == "cuda":
                         torch.cuda.empty_cache()

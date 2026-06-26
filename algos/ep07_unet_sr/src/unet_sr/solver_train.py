@@ -32,6 +32,7 @@ from .config import TrainingConfig, config_from_args
 from .dataset import HYBRID_DRIZZLE_MEAN_CHANNEL, SceneInterleavedSampler, ThermalSRDataset
 from .forward_torch import ScenePSF, _highpass, forward_burst
 from .losses import ContourSRLoss
+from .synth_eval import SynthEvalConfig, build_eval_loader, maybe_log_synth_eval
 from .train import _log_pred_vs_target, _to_device_tensor, _worker_init_fn
 from .unroll import UnrolledSolver
 
@@ -92,6 +93,8 @@ def build_criterion(config: TrainingConfig) -> ContourSRLoss:
         structure_boost=config.structure_boost,
         edge_coarse_weight=config.edge_coarse_weight,
         grad_vector_weight=config.grad_vector_weight,
+        flatness_weight=config.flatness_weight,
+        flatness_tau=config.flatness_tau,
         laplacian_weight=config.laplacian_weight,
         forward_model_weight=0.0,  # hard DC replaces the (falsified) soft forward-model loss
     )
@@ -127,8 +130,10 @@ def train(config: TrainingConfig) -> Path:
         max_scene_cache=config.max_scene_cache,
         input_mode="hybrid_drizzle2x",
         return_metadata=False,
-        thin_boost=1.0,  # thin/gap loss-weighting disabled for the solver's first run (shape contract)
-        gap_boost=1.0,
+        boundary_boost=config.boundary_boost,  # geometry-agnostic edge emphasis (chip/hole/crack/notch)
+        boundary_tau_px=config.boundary_tau_px,
+        holdout_tail=config.synth_eval_holdout,  # exclude the GT-eval tail from training (no leakage)
+        holdout_role="train",
         provide_burst=True,
         solver_m_frames=config.solver_m_frames,
         solver_no_drizzle=config.solver_no_drizzle,
@@ -176,6 +181,28 @@ def train(config: TrainingConfig) -> Path:
     p1 = config.patch_size_hr // config.scale
     mask = edge_mask(p1, p1, config.solver_dc_rim_lr_px, device)
 
+    # Held-out synthetic GT eval (PSNR / region-RMSE / defect boundary-F1 / out-of-band).
+    synth_eval_cfg = SynthEvalConfig(
+        enabled=config.synth_eval_enabled, every=config.synth_eval_every,
+        holdout_tail=config.synth_eval_holdout, patches_per_scene=config.synth_eval_patches_per_scene,
+        max_patches=config.synth_eval_max_patches, batch_size=config.batch_size,
+    )
+    synth_loader = None
+    if synth_eval_cfg.enabled and synth_eval_cfg.holdout_tail > 0:
+        synth_loader = build_eval_loader(
+            config, synth_eval_cfg, input_mode="hybrid_drizzle2x", provide_burst=True,
+            solver_m_frames=config.solver_m_frames, solver_no_drizzle=config.solver_no_drizzle,
+        )
+        print(f"Synthetic held-out eval: {synth_eval_cfg.holdout_tail} tail scenes, "
+              f"<= {synth_eval_cfg.max_patches} patches every "
+              f"{synth_eval_cfg.every or config.save_every} steps")
+
+    def _solver_forward(batch: dict, dev: torch.device) -> torch.Tensor:
+        obs_e = _to_device_tensor(batch["obs_features"], device=dev, channels_last=False)
+        x0_e = obs_e[:, mean_ch : mean_ch + 1]
+        return solver(x0_e, batch["lr_burst_patch"].to(dev), batch["burst_shifts"].to(dev),
+                      build_scene_psf(batch, dev), obs_e, frame_mask=mask)
+
     solver.train()
     step = 0
     t0 = time.monotonic()
@@ -193,11 +220,10 @@ def train(config: TrainingConfig) -> Path:
             shifts = batch["burst_shifts"].to(device)
             psf = build_scene_psf(batch, device)
             x0 = obs[:, mean_ch : mean_ch + 1]
-            thin = batch["thin_weight"].to(device) if "thin_weight" in batch else None
-            gap = batch["gap_weight"].to(device) if "gap_weight" in batch else None
+            boundary = batch["boundary_weight"].to(device) if "boundary_weight" in batch else None
 
             pred = solver(x0, burst, shifts, psf, obs, frame_mask=mask)  # (1,1,h,w) broadcasts over B,M
-            losses = criterion(pred, target, lr_observation=None, lr_obs=None, thin_weight=thin, gap_weight=gap)
+            losses = criterion(pred, target, lr_observation=None, lr_obs=None, boundary_weight=boundary)
             # DC is now enforced ARCHITECTURALLY (end-on-DC + frozen eta, ACL-026). The soft DC loss
             # term is the falsified soft forward anchoring (ACL-017/019) and is optional: when its
             # weight is 0 we still compute `dc` under no_grad as a MONITOR (watch loss/dc in TB), with
@@ -247,6 +273,12 @@ def train(config: TrainingConfig) -> Path:
                 torch.save({"step": step, "model_state_dict": solver.state_dict(),
                             "config": vars(config)}, ckpt)
                 progress.write(f"saved {ckpt}")
+            if synth_loader is not None:
+                sm = maybe_log_synth_eval(
+                    writer, model=solver, loader=synth_loader, forward_fn=_solver_forward,
+                    eval_config=synth_eval_cfg, training_config=config, step=step, device=device)
+                if sm is not None:
+                    progress.write("eval_synth " + " ".join(f"{k}={v:.4g}" for k, v in sm.items()))
             if step >= config.total_steps:
                 break
         if step >= config.total_steps:

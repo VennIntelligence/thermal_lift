@@ -151,19 +151,16 @@ def test_dataset_precomputes_loss_weights_in_sample_when_boost_enabled(tmp_path:
         seed=5,
         patches_per_scene=2,
         return_metadata=False,
-        thin_boost=6.0,
-        gap_boost=4.0,
+        boundary_boost=4.0,
     )
     sample = dataset[0]
 
-    assert sample["thin_weight"].shape == (1, 16, 16)
-    assert sample["gap_weight"].shape == (1, 16, 16)
-    assert float(sample["thin_weight"].max()) >= 1.0
-    assert float(sample["gap_weight"].max()) >= 1.0
+    assert sample["boundary_weight"].shape == (1, 16, 16)
+    assert float(sample["boundary_weight"].max()) >= 1.0
+    assert float(sample["boundary_weight"].min()) >= 1.0
 
     batch = next(iter(DataLoader(dataset, batch_size=2, num_workers=0)))
-    assert batch["thin_weight"].shape == (2, 1, 16, 16)
-    assert batch["gap_weight"].shape == (2, 1, 16, 16)
+    assert batch["boundary_weight"].shape == (2, 1, 16, 16)
 
 
 def test_dataset_skips_loss_weights_when_boost_disabled(tmp_path: Path) -> None:
@@ -171,8 +168,7 @@ def test_dataset_skips_loss_weights_when_boost_disabled(tmp_path: Path) -> None:
     dataset = ThermalSRDataset(pool, patch_size_hr=16, scale=4, seed=5, patches_per_scene=1)
     sample = dataset[0]
 
-    assert "thin_weight" not in sample
-    assert "gap_weight" not in sample
+    assert "boundary_weight" not in sample
 
 
 # --- V9A hybrid_drizzle2x tests ---
