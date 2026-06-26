@@ -43,6 +43,7 @@ from tcforge import (  # noqa: E402
     shift_and_add,
 )
 from tcforge import shifts as shift_module  # noqa: E402
+from tcforge import realism as _realism  # noqa: E402  (defects / isothermal temp / field noise)
 
 
 DEFAULT_CONFIG = PROJECT_ROOT / "configs" / "synthetic" / "training_pool_4x.json"
@@ -399,14 +400,33 @@ def _generate_one_scene(
         ssaa_factor=ssaa_factor,
         inscribe_disc=inscribe_disc,
     )
-    hr_temperature = render_temperature_field(
-        hr_mask,
-        t_bg_c=t_bg_c,
-        delta_t_c=delta_t_c,
-        low_freq_amplitude_c=low_freq_amplitude_c,
-        low_freq_sigma_px=low_freq_sigma_px,
-        seed=low_freq_seed,
-    )
+    # Realism (synthetic_data_realism.md): inject irregular defects (holes / broken edges /
+    # cracks), all > pitch so they stay recoverable. Per-scene severity randomizes counts.
+    defects_cfg = dict(config.get("defects", {}))
+    if defects_cfg.get("enabled", False):
+        defect_params = {k: v for k, v in defects_cfg.items() if k != "enabled"}
+        hr_mask, defect_meta = _realism.apply_defects(hr_mask, rng, **defect_params)
+        geo_meta["defects"] = defect_meta
+    # Temperature: 'isothermal' = connected metal ~one level (real chips are ~isothermal);
+    # legacy 'standard' = 2-level coverage field.
+    if str(config.get("temperature_model", "standard")) == "isothermal":
+        iso_cfg = dict(config.get("temperature_isothermal", {}))
+        hr_temperature = _realism.render_isothermal_field(
+            hr_mask, rng, t_bg_c=t_bg_c, delta_t_c=delta_t_c,
+            level_min=float(iso_cfg.get("level_min", 0.82)),
+            edge_sigma=float(iso_cfg.get("edge_sigma", 1.4)),
+            low_freq_amplitude_c=low_freq_amplitude_c,
+            low_freq_sigma_px=low_freq_sigma_px,
+        )
+    else:
+        hr_temperature = render_temperature_field(
+            hr_mask,
+            t_bg_c=t_bg_c,
+            delta_t_c=delta_t_c,
+            low_freq_amplitude_c=low_freq_amplitude_c,
+            low_freq_sigma_px=low_freq_sigma_px,
+            seed=low_freq_seed,
+        )
     hr_edge = edge_map(hr_mask >= 0.5, edge_width_px=2)
 
     # Per-scene random shift constellation (v3): generate in-worker from the
@@ -455,18 +475,29 @@ def _generate_one_scene(
             else _uniform_range(rng, noise_cfg.get("stripe_sigma_c"), "noise_model.stripe_sigma_c")
         ),
     }
-    lr_burst = add_noise(
-        lr_burst,
-        noise_sigma_c=noise_sigma_c,
-        seed=plan.seed + 1000,
-        noise_model=noise_model,
-        fpn_sigma_px=float(noise_params_resolved["fpn_sigma_px"]),
-        stripe_sigma_c=(
-            None
-            if noise_params_resolved["stripe_sigma_c"] is None
-            else float(noise_params_resolved["stripe_sigma_c"])
-        ),
-    )
+    if noise_model == "field_vignette_stripe":
+        # Realism noise: smooth vignette + smooth column-stripe FPN (fixed across the burst)
+        # + per-frame fine grain (synthetic_data_realism.md). Matches the real IR frames.
+        lr_burst = _realism.field_noise_burst(
+            lr_burst, rng,
+            vignette_c=_uniform_range(rng, noise_cfg.get("vignette_c", 0.13), "noise_model.vignette_c"),
+            stripe_c=_uniform_range(rng, noise_cfg.get("stripe_c", 0.028), "noise_model.stripe_c"),
+            stripe_col_sigma=noise_cfg.get("stripe_col_sigma", [2.5, 5.0]),
+            grain_c=_uniform_range(rng, noise_cfg.get("grain_c", 0.10), "noise_model.grain_c"),
+        )
+    else:
+        lr_burst = add_noise(
+            lr_burst,
+            noise_sigma_c=noise_sigma_c,
+            seed=plan.seed + 1000,
+            noise_model=noise_model,
+            fpn_sigma_px=float(noise_params_resolved["fpn_sigma_px"]),
+            stripe_sigma_c=(
+                None
+                if noise_params_resolved["stripe_sigma_c"] is None
+                else float(noise_params_resolved["stripe_sigma_c"])
+            ),
+        )
 
     drift_params = dict(config.get("drift_parameters", {}))
     drift_params_resolved = {
