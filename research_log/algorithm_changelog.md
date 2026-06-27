@@ -8,6 +8,41 @@
 
 ## 变更记录
 
+### [ACL-030] 2026-06-27 — 诊断"保真好/无幻觉/但很糊":blur 在 GT 不在 loss → v5 把 GT edge_sigma 1.4→0.8
+
+**问题诊断**:
+- v4 训出的 V10/solver 在真实数据上:保真好、无珠串幻觉,但糊、无细节。怀疑 loss 坏了。
+- 实测远端 checkpoint 真实温度图的 `out_of_band_ratio`(ACL-027 新指标):V10 5K→40K、solver 2.5K→20K **全程死平 ≈0.00001**,p99 梯度也死平 —— 不是越训越糊,而是一上来就顶到天花板、再训无用。
+- 直接量 v4 GT 本身(edge_sigma=1.4):`out_of_band(GT)=0.00008`,与模型真实输出 0.00001 同量级、都≈0。**即使完美模型精确复制该 GT 也是糊的 —— 天花板是 GT,不是模型/loss。**
+- 根因:edge_sigma=1.4 把等温场边缘高斯糊到 ~36µm = 20µm pitch 的 1.8 倍,GT 里根本没有 SR 带细节可学。概念错误:**真实感(模糊)属于观测/前向**(PSF 已经把 GT→观测模糊了),**清晰属于 GT**;再给 GT 叠 edge_sigma 是双重模糊、抹掉学习目标 → 模型学成"别锐化"(≈恒等),迁移到真实数据就是糊。
+
+**修改内容**:
+1. 新增 `configs/synthetic/pool_2x_v5_sharp.json`:除 `temperature_isothermal.edge_sigma` 1.4→0.8 外与 v4 完全相同(seed 保持 940940 → 受控 A/B,同几何只变 GT 锐度;output_dir `data/synthetic/pool_2x_v5_5k`)。`edge_sigma` 本就是 config 旋钮,无需改代码。
+2. 本地用 `render_isothermal_field` + `metrics.out_of_band_ratio` 实测 GT 的 SR 带能量随 edge_sigma 变化(下表),确认 0.8 把可恢复细节抬 ~40×。
+3. `docs/REMOTE_ORDERS.md` 增 "DATA REGEN — v5 sharp GT" 段:先 300-scene smoke 重生 + 短训确认 `eval_synth/out_of_band_ratio` 抬离 ~0,再全量重生;V10/solver 训练池改指向 v5。
+
+**edge_sigma → GT 的 out_of_band(本地实测,2x grid)**:
+
+| edge_sigma | out_of_band(GT) | 说明 |
+|---|---|---|
+| 1.4 (v4) | 0.00008 | ≈ 模型真实输出 0.00001 = 没细节 |
+| 1.0 | 0.00110 | 14× |
+| **0.8 (v5)** | **0.00324** | **40×;边缘≈1 pitch = 可恢复极限** |
+| 0.6 | 0.00967 | 120×(逼近 sub-pitch,谨慎) |
+
+**预期效果**:
+- GT 带回可恢复的 SR 带细节,模型这才有"模糊 obs → 锐 GT"的去卷积可学,真实输出变锐。
+- **不要降到 ~0.6 以下**:GT 比 pitch 还细 → 模型只能幻觉去够 → 珠串/FM-1 回归(老版本死法 = ACL-023 诚实天花板)。0.8 = 诚实的最锐。
+- 风险/待验:真实输出(0.00001)比 v4 GT(0.00008)还低 → 真实观测可能比合成 obs 还糊;GT 修锐后若合成 obs 的 PSF 比真实窄,真实迁移仍受限 —— 单独验 obs-PSF 真实性。loss 侧可选 `asymmetric_laplacian_weight~0.05`(只罚比 GT 糊,GT 锐之后才有意义)。
+
+**训练结果**: _(训练后填写)_
+- smoke: `outputs/v5_smoke`(看 eval_synth/out_of_band 是否抬离 0)
+- 全量: `outputs/v10_v5_sharp` / `outputs/solver_v5_sharp`
+
+**涉及文件**: configs/synthetic/pool_2x_v5_sharp.json(新), docs/REMOTE_ORDERS.md;无代码改动(edge_sigma 为既有 config 旋钮)
+
+---
+
 ### [ACL-029] 2026-06-27 — solver_train 接入 V10 同款 checkpoint real-eval/PNG 自动出图
 
 **问题诊断**:

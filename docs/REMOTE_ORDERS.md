@@ -93,7 +93,40 @@ warm-start/conditioning, and computing it on-the-fly per sample is slow. Two way
   ```
   Then run WITHOUT `--solver-no-drizzle`. After precompute the dataset auto-uses the variants.
 
-## TRAINING — V10 baseline (plain UNet) on v4 + ACL-027 loss/metrics  — the headline run
+## DATA REGEN — v5 sharp GT (ACL-030)  — DO THIS FIRST; the v4 blur was in the TARGET, not the loss
+> ACL-030: the v4 GT (`edge_sigma=1.4`) carried ~zero super-resolution-band energy —
+> `out_of_band(GT)=0.00008`, matching the trained model's real-data output `0.00001`. The model
+> faithfully reproduced a detail-free target → "good fidelity, no hallucination, but blurry / no
+> detail". **The loss is fine.** v5 sharpens the GT to `edge_sigma=0.8` (edges at ~1 pitch = the
+> recoverable limit; ~40× more SR-band detail). Do **NOT** go below ~0.6 — sub-pitch GT detail can't
+> be recovered honestly and re-invites the FM-1 beading of the old aggressive runs. Realism/blur
+> belongs in the forward path (PSF); sharpness belongs in the GT. seed kept = v4 → controlled A/B.
+> `edge_sigma` is a config knob (`pool_2x_v5_sharp.json`), no code change.
+
+```
+# (a) SMOKE first — 300 scenes, ~minutes — cheap proof before the overnight full regen
+uv run --with tqdm python scripts/generate_training_pool.py \
+  --config configs/synthetic/pool_2x_v5_sharp.json \
+  --num-scenes 300 --output-dir data/synthetic/pool_2x_v5_smoke_300 --workers 14
+
+# short V10 train on the smoke pool — watch eval_synth/out_of_band_ratio LIFT off ~0
+uv run python -m unet_sr.train \
+  --training-pool-dir data/synthetic/pool_2x_v5_smoke_300 \
+  --input-mode hybrid_drizzle2x --scale 2 --loss-type contour_sr \
+  --boundary-boost 4.0 --flatness-weight 0.0 \
+  --synth-eval-holdout 48 --synth-eval-every 1000 \
+  --total-steps 5000 --batch-size 24 --patch-size-hr 256 \
+  --num-workers 12 --save-every 1000 --no-real-eval --output-dir outputs/v5_smoke
+# PASS bar: eval_synth/out_of_band_ratio rises from ~0 toward the GT's ~0.003, region_rmse stays
+# low, and the center-zoom temperature visibly sharpens. If it does NOT lift → STOP and report
+# (the model isn't picking up the new band; then it's an obs-PSF / capacity issue, not the GT).
+
+# (b) FULL regen — 5000 scenes, overnight — ONLY after the smoke confirms
+uv run --with tqdm python scripts/generate_training_pool.py \
+  --config configs/synthetic/pool_2x_v5_sharp.json --workers 14
+```
+
+## TRAINING — V10 baseline (plain UNet) on v5 + ACL-027 loss/metrics  — the headline run
 > ACL-027 reworks the loss + eval for the v4 defect data. **Loss**: the thin/gap line priors are
 > replaced by one geometry-agnostic `boundary_weight` (chip outline + hole/crack/notch rims,
 > contrast-independent) + an optional isothermal `flatness` term (OFF here; A/B next). **Eval**: a
@@ -103,12 +136,12 @@ warm-start/conditioning, and computing it on-the-fly per sample is slow. Two way
 > correlated the clean output against a bicubic blur and so rewarded *not* restoring.
 ```
 uv run python -m unet_sr.train \
-  --training-pool-dir data/synthetic/pool_2x_v4_5k \
+  --training-pool-dir data/synthetic/pool_2x_v5_5k \
   --input-mode hybrid_drizzle2x --scale 2 --loss-type contour_sr \
   --boundary-boost 4.0 --flatness-weight 0.0 \
   --synth-eval-holdout 200 --synth-eval-every 2500 \
   --total-steps 50000 --batch-size 24 --patch-size-hr 256 \
-  --num-workers 12 --save-every 2500 --output-dir outputs/v10_v4_acl027
+  --num-workers 12 --save-every 2500 --output-dir outputs/v10_v5_sharp
 ```
 - `in_channels` auto = 9 (5 fused↑2x + 4 phase-bin drizzle); both inputs are precomputed on disk.
 - Headline tracking: `eval_synth/region_rmse`↓ and `eval_synth/boundary_f1`↑ (real objective, vs GT);
@@ -129,14 +162,14 @@ uv run python -m unet_sr.train \
 enforce consistency; `loss/dc` is now just a MONITOR in TB):
 ```
 uv run python -m unet_sr.solver_train \
-  --training-pool-dir data/synthetic/pool_2x_v4_5k \
+  --training-pool-dir data/synthetic/pool_2x_v5_5k \
   --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 4 --solver-no-drizzle \
   --solver-m-frames 12 --solver-band-sigma 5 \
   --solver-prior-anneal-steps 0 --solver-dc-weight 0 \
   --boundary-boost 4.0 --flatness-weight 0.0 \
   --synth-eval-holdout 200 --synth-eval-every 2500 \
   --total-steps 20000 --batch-size 18 --patch-size-hr 192 \
-  --save-every 2500 --num-workers 8 --output-dir outputs/solver_v4_acl027
+  --save-every 2500 --num-workers 8 --output-dir outputs/solver_v5_sharp
 ```
 **Before the pool run, RE-RUN GATE B** — its check [4] now certifies the ACL-026 architecture: after
 overfitting the SOLVER on one clean scene with structural supervision only, the terminal DC residual
