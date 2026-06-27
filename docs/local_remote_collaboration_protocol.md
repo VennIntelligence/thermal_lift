@@ -8,6 +8,8 @@
 - Remote SSH entry: `Administrator@100.98.99.29`
 - Remote WSL user: `ujs`
 - Remote project path: `~/thermal_lift` (`/home/ujs/thermal_lift` in WSL; moved off the slow `/mnt/c` Windows mount for I/O speed)
+- Analysis host drop entry: `ujs@100.118.98.78`
+- Analysis host project path: `/Users/ujs/mycode/thermal_lift`
 - Code remote: `git@github-venn:VennIntelligence/thermal_lift.git`
 
 ## Division Of Labor
@@ -71,6 +73,38 @@
 
 当前远端 SSH 默认 shell 可能影响非交互式 `rsync`/`sftp`。在修复前，优先使用 GitHub 或交互式 SSH 执行明确命令。
 
+### Local-to-Analysis-Host Drops
+
+本地 Codex 可以主动向分析主机投放小型实验包，用于让远端/分析环境快速查看最近实验状态。该动作是**投放(drop)**，不是同步(sync)。
+
+允许投放的内容：
+
+- 少量 checkpoint 渲染图，例如每个 run 选 5 个阶段的 center-zoom PNG。
+- 对应的小型数值数组，例如压缩 `.npz` 温度图、CSV/JSON manifest、关键指标摘要。
+- 简短 README，说明来源 commit、checkpoint 列表、渲染参数和使用限制。
+
+禁止投放或同步的内容：
+
+- 不投放完整 `data/`、完整 `output/`、完整 `outputs/`。
+- 不投放训练 checkpoint、`.pt/.pth` 权重、venv 或缓存目录。
+- 不使用 `rsync --delete`、目录镜像或任何会删除/覆盖远端 `output/` 的同步命令。
+
+推荐远端落点：
+
+```text
+/Users/ujs/mycode/thermal_lift/remote_inbox/<YYYYMMDD>_<topic>/
+```
+
+示例：
+
+```bash
+ssh ujs@100.118.98.78 'mkdir -p /Users/ujs/mycode/thermal_lift/remote_inbox/20260627_checkpoint_evolution'
+scp -r output/remote_drop/20260627_checkpoint_evolution/* \
+  ujs@100.118.98.78:/Users/ujs/mycode/thermal_lift/remote_inbox/20260627_checkpoint_evolution/
+```
+
+SSH 免输密码应通过公钥完成：本地生成/复用 SSH key，并用 `ssh-copy-id` 安装公钥到分析主机。不要把密码写入仓库、脚本、README、shell alias 或长期保存的明文配置。
+
 ## Git Rules
 
 - 本地 remote 使用 `git@github-venn:VennIntelligence/thermal_lift.git`。
@@ -97,4 +131,3 @@
 - 失败、跳过或仍需人工判断的事项。
 
 本地 Codex 接手后，应先确认这些信息，再决定是否拉取结果、更新文档、提交代码或生成下一份 `tmp/*.md` 远端提示词。
-
