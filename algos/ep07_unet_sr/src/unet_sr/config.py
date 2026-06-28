@@ -90,6 +90,13 @@ class TrainingConfig:
     solver_dc_weight: float = 0.1
     solver_prior_anneal_steps: int = 0
     solver_no_drizzle: bool = False
+    # Warm-start source for x0 in the hybrid (9ch) path. "phasebin" seeds x0 from the first
+    # phase-bin drizzle channel (ch5) — the historical default, but it carries the phase-bin
+    # coverage waffle (a 2-HR-px = 1-pitch checkerboard on flat background; ACL-032). "aligned_mean"
+    # seeds x0 from the smooth fused aligned-mean (ch0) instead while KEEPING all 9 cond channels,
+    # so the prox still sees the phase bins but the warm-start is de-waffled. No effect under
+    # --solver-no-drizzle (that path already warm-starts from ch0).
+    solver_warmstart: str = "phasebin"
 
     def validate(self) -> None:
         if self.device == "cpu" and self.amp:
@@ -185,6 +192,8 @@ class TrainingConfig:
                 raise ValueError("unroll_steps>0 requires --scale 2")
             if self.solver_m_frames < 1:
                 raise ValueError("solver_m_frames must be >= 1")
+            if self.solver_warmstart not in ("phasebin", "aligned_mean"):
+                raise ValueError("solver_warmstart must be 'phasebin' or 'aligned_mean'")
         if self.input_mode == "hybrid_drizzle2x" and self.forward_model_weight > 0 and self.scale != 2:
             raise ValueError(
                 "input_mode='hybrid_drizzle2x' with forward_model_weight > 0 requires --scale 2 "
@@ -515,6 +524,11 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Lean solver input: drop the drizzle entirely (no on-the-fly cost, no precomputed "
                              "variants/disk). Warm-start from upsampled aligned_mean; the DC term carries the "
                              "multi-frame SR signal. cond becomes 5ch (vs 9ch hybrid).")
+    parser.add_argument("--solver-warmstart", choices=("phasebin", "aligned_mean"),
+                        default=TrainingConfig.solver_warmstart,
+                        help="Hybrid (9ch) warm-start source for x0: 'phasebin' = first phase-bin drizzle "
+                             "channel (ch5, default, carries the 2px coverage waffle); 'aligned_mean' = smooth "
+                             "fused aligned-mean (ch0), de-waffled, keeps all 9 cond channels (ACL-032).")
     return parser
 
 
@@ -595,6 +609,7 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         solver_dc_weight=args.solver_dc_weight,
         solver_prior_anneal_steps=args.solver_prior_anneal_steps,
         solver_no_drizzle=args.solver_no_drizzle,
+        solver_warmstart=args.solver_warmstart,
     )
     cfg.validate()
     return cfg

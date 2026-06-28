@@ -8,6 +8,29 @@
 
 ## 变更记录
 
+### [ACL-032] 2026-06-29 — 去波纹暖启动(de-waffle x0) + 真实数据物理一致性指标(dc_resid)
+
+**问题诊断**:
+- v5 hybrid solver(`solver_v5_sharp`)真实图视觉很强(线直、几乎无幻觉),但暗背景有一层很淡的 ~2 HR-px 周期棋盘格(深网格 + 浅方格,无硬边界)。
+- 根因(读代码确认,非 loss 问题):hybrid 9ch 路径的暖启动 `x0 = obs[ch5] = phase_bin_drizzle[0]`。phase-bin drizzle 把每帧按亚像素相位分到 4 个 bin、各自 drizzle 到 2x 网格;平坦背景相位覆盖不均时,每个 2x2 块的 4 个子位置来自不同帧子集 → 2-HR-px(=1 pitch=20µm)的覆盖"波纹"。该波纹在 step 5000 就已存在(因为它在 `x0` 里),DC 步是带限(highpass σ5)且平坦区 `Aᵀ(Ax−y)≈0`、整片 MSE(0.2)又被高幅值芯片主导 → 平坦区无锚,波纹被原样保留。prox UNet 用 bilinear interpolate 上采样(`model.py`),**排除转置卷积棋盘伪影**。
+- 评测反演:plain UNet(v10)synth 指标(psnr 38.8 / boundary_f1 0.865)反而高于 solver(36.2 / 0.771),但真实图更差(串珠 + 背景絮状物)。说明 synth PSNR/boundary_f1 奖励"拟合合成 GT 生成器",与真实质量反相关,**不能用来选 solver 超参**。缺一个无 GT 的真实物理判据。
+
+**修改内容**:
+1. `config.py`:新增 `--solver-warmstart {phasebin,aligned_mean}`(默认 `phasebin`=保持旧行为)。`aligned_mean` 把 hybrid 路径的 `x0` 从 ch5(波纹相位 bin)换成 ch0(平滑 fused aligned_mean),**保留全部 9 个 cond 通道**(prox 仍看得到相位 bin),只是种子去波纹。`--solver-no-drizzle` 下无效(该路径本就从 ch0 暖启动)。
+2. `solver_train.py` / `real_eval.py`:`mean_ch` 按 warmstart 解析(`0 if no_drizzle or warmstart==aligned_mean else 5`),训练与真实推理两端一致。
+3. `real_eval.py`:新增真实数据物理一致性指标 `eval_real/dc_resid_band` 与 `eval_real/dc_resid_full` —— 把整帧重建回代认证前向算子 `‖A(x)−y‖`,用**留出帧**(不在 DC 子集里,避免自洽)+ `solver.dc_residual_rms()`。这是唯一 grounded 在物理、而非合成生成器上的真实判据(注意真实 PSF 是单高斯 σ0.5、被错配,故只作**相对**比较)。失败时 try/except 跳过,不中断隔夜训练。
+4. `scripts/diagnose_drizzle_waffle.py`(新,numpy/scipy-only,零 GPU):对池场景 FFT 对比 ch0(aligned_mean)/ ch5(phasebin x0)/ GT 的 out_of_band 与 Nyquist `grid_score`,证明波纹只在 ch5、ch0 干净,并可出平坦 ROI montage PNG。
+
+**预期效果**:
+- `--solver-warmstart aligned_mean`:背景棋盘格在源头消失(种子去波纹),线条直度/细节不受影响(由 DC + cond 驱动,而非种子)。
+- `--solver-no-drizzle`:作为最干净的对照(全程无 phase-bin),既验证 drizzle 是格子来源,又补上 v5 上 hybrid-vs-nodrizzle 缺失的 A/B;若视觉等同则系统更简单(可弃整条 phase-bin 路径)。
+- `dc_resid`:为下一步选 checkpoint/配置提供真实物理判据;预期 solver(end-on-DC) < plain UNet(无视前向)。
+
+**验收标准(隔夜两跑,次晨对比)**:格子消失 + 线仍直 + 真实 `dc_resid_band` ≤ 当前 hybrid + 真实 `out_of_band` 仍在 [0.002, 0.005]。
+**训练结果**: 待填(Run A `--solver-no-drizzle` / Run B `--solver-warmstart aligned_mean`)。
+
+---
+
 ### [ACL-031] 2026-06-28 — solver_train 提速:DC monitor 延迟计算 + `--compile` 编译 prox 子网
 
 **问题诊断**:

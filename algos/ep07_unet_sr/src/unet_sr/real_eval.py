@@ -208,6 +208,66 @@ def _select_solver_eval_frames(
     )
 
 
+def _select_holdout_eval_frames(
+    lr_burst: np.ndarray,
+    shifts: np.ndarray,
+    m_dc: int,
+    m_eval: int = 16,
+) -> tuple[np.ndarray, np.ndarray]:
+    """Frames NOT used in the solver's DC subset, for an honest real data-consistency check.
+
+    The solver's DC step consumes the `m_dc` frames picked by `_select_solver_eval_frames`; if we
+    measured ||A x - y|| on those same frames the residual would be partly self-fit. We instead
+    sample up to `m_eval` frames from the complement (falling back to the full burst when there are
+    too few frames to hold any out)."""
+
+    n_frames = int(lr_burst.shape[0])
+    m_dc = min(max(1, int(m_dc)), n_frames)
+    if m_dc >= n_frames:
+        dc_idx: set[int] = set(range(n_frames))
+    else:
+        dc_idx = set(np.unique(np.linspace(0, n_frames - 1, m_dc, dtype=np.int64)).tolist())
+    complement = np.array([i for i in range(n_frames) if i not in dc_idx], dtype=np.int64)
+    if complement.size == 0:
+        complement = np.arange(n_frames, dtype=np.int64)
+    m = min(max(1, int(m_eval)), complement.size)
+    sel = complement[np.unique(np.linspace(0, complement.size - 1, m, dtype=np.int64))]
+    return (
+        np.asarray(lr_burst[sel], dtype=np.float32),
+        np.asarray(shifts[sel], dtype=np.float32),
+    )
+
+
+@torch.no_grad()
+def _solver_real_dc_residual(
+    solver: torch.nn.Module,
+    solver_temp: np.ndarray,
+    raw_frames: np.ndarray,
+    shifts: np.ndarray,
+    *,
+    training_config: Any,
+    device: torch.device,
+) -> tuple[float, float]:
+    """RMS of (A x - y) on HELD-OUT real frames — the only GT-free, physics-grounded real metric.
+
+    Runs the full-frame reconstruction `solver_temp` back through the certified forward operator
+    against frames the DC step never saw. Returns (highpass-band RMS, full-band RMS). The real PSF
+    is the misspecified single Gaussian (sigma=forward_model_psf_sigma); treat the number as a
+    RELATIVE comparison across configs/checkpoints, not an absolute physics certificate (ACL-032)."""
+
+    scale = int(training_config.scale)
+    y, sh = _select_holdout_eval_frames(
+        raw_frames, shifts, int(getattr(training_config, "solver_m_frames", 16))
+    )
+    x = torch.from_numpy(np.ascontiguousarray(solver_temp[None, None])).to(device)
+    y_t = torch.from_numpy(y[None]).to(device)
+    sh_t = torch.from_numpy(sh[None]).to(device)
+    psf = _solver_real_psf(training_config, 1, device)
+    band_rms = float(solver.dc_residual_rms(x, y_t, sh_t, psf, band=True))
+    full_rms = float(solver.dc_residual_rms(x, y_t, sh_t, psf, band=False))
+    return band_rms, full_rms
+
+
 def _solver_real_psf(training_config: Any, batch_size: int, device: torch.device) -> ScenePSF:
     sigma = float(getattr(training_config, "forward_model_psf_sigma", 0.5))
     return ScenePSF(
@@ -277,7 +337,10 @@ def infer_solver_from_burst(
         n_bins = int(getattr(training_config, "phase_bin_channels", 4))
         drz = phase_bin_drizzle(burst, shift_arr, scale=scale, n_bins=n_bins)
         cond = np.concatenate([features_up, drz], axis=0).astype(np.float32, copy=False)
-        mean_ch = HYBRID_DRIZZLE_MEAN_CHANNEL
+        # Warm-start source must match training (ACL-032): aligned_mean (ch0, de-waffled) vs the
+        # first phase-bin drizzle channel (ch5). cond stays 9ch either way.
+        mean_ch = 0 if str(getattr(training_config, "solver_warmstart", "phasebin")) == "aligned_mean" \
+            else HYBRID_DRIZZLE_MEAN_CHANNEL
 
     burst_sub, shifts_sub = _select_solver_eval_frames(
         burst,
@@ -501,6 +564,19 @@ def maybe_log_solver_real_eval(
     writer.add_scalar("eval_real/out_of_band_ratio", oob, step)
     writer.add_scalar("eval_real/artifact_score", score, step)
     writer.add_scalar("eval_real/frame_limit", float(config.frame_limit), step)
+    # Physics-grounded real metric (ACL-032): ||A x - y|| on HELD-OUT real frames. Unlike the
+    # synthetic PSNR/boundary_f1 (which reward fitting the GT generator and are anti-correlated
+    # with real quality), this asks whether the reconstruction actually explains the observed
+    # photons. Lower is better; compare relatively across configs (real PSF is misspecified).
+    dc_band = dc_full = float("nan")
+    try:
+        dc_band, dc_full = _solver_real_dc_residual(
+            solver, solver_temp, raw_frames, shifts, training_config=training_config, device=device
+        )
+        writer.add_scalar("eval_real/dc_resid_band", dc_band, step)
+        writer.add_scalar("eval_real/dc_resid_full", dc_full, step)
+    except Exception as exc:  # never let a monitor crash an overnight run
+        print(f"[real_eval] dc_residual skipped ({type(exc).__name__}: {exc})")
     writer.flush()
 
     if config.save_png and config.output_dir:
@@ -521,6 +597,8 @@ def maybe_log_solver_real_eval(
     return {
         "out_of_band_ratio": oob,
         "artifact_score": score,
+        "dc_resid_band": dc_band,
+        "dc_resid_full": dc_full,
     }
 
 

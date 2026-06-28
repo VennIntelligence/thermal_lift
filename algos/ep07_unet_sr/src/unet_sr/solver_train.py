@@ -181,9 +181,11 @@ def train(config: TrainingConfig) -> Path:
         solver_no_drizzle=config.solver_no_drizzle,
     )
     # cond/warm-start channels: lean path uses 5ch upsampled fused + aligned_mean (ch0);
-    # hybrid path uses 9ch obs and warm-starts from the first phase-bin channel (ch5).
+    # hybrid path uses 9ch obs and warm-starts from the first phase-bin channel (ch5) by default,
+    # or the smooth aligned-mean (ch0) when --solver-warmstart aligned_mean (de-waffled, ACL-032).
     cond_channels = 5 if config.solver_no_drizzle else config.in_channels
-    mean_ch = 0 if config.solver_no_drizzle else HYBRID_DRIZZLE_MEAN_CHANNEL
+    mean_ch = 0 if (config.solver_no_drizzle or config.solver_warmstart == "aligned_mean") \
+        else HYBRID_DRIZZLE_MEAN_CHANNEL
     sampler = SceneInterleavedSampler(
         n_scenes=len(dataset.scene_paths),
         patches_per_scene=dataset.patches_per_scene,
@@ -208,9 +210,10 @@ def train(config: TrainingConfig) -> Path:
         _compile_solver_prox(solver)
     criterion = build_criterion(config)
     n_params = sum(p.numel() for p in solver.parameters())
+    warmstart_label = "aligned_mean(ch0)" if mean_ch == 0 else f"phasebin(ch{mean_ch})"
     print(f"UnrolledSolver: K={config.unroll_steps} steps, M={config.solver_m_frames} frames, "
           f"{n_params:,} params, cond={cond_channels}ch, no_drizzle={config.solver_no_drizzle}, "
-          f"band_sigma={config.solver_band_sigma}, device={device}")
+          f"warmstart x0={warmstart_label}, band_sigma={config.solver_band_sigma}, device={device}")
 
     optimizer = torch.optim.AdamW(solver.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, config.total_steps))
