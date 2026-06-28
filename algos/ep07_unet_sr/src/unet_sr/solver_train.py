@@ -307,13 +307,21 @@ def train(config: TrainingConfig) -> Path:
                 ms = (time.monotonic() - t0) * 1000.0 / step
                 progress.set_postfix_str(
                     f"total={float(total.detach()):.4f} dc={float(dc_log):.5f} eta={eta:.3f} gnorm={grad_norm:.2f}")
+                # Break out every ContourSRLoss component (mse/highpass/edge/ssim/grad_vector, plus
+                # flatness/laplacian when enabled). The criterion returns them all; solver_train used
+                # to collapse them into the single loss/struct scalar, so the loss BALANCE was
+                # invisible in TensorBoard/nohup — exactly what's needed to tune it (ACL-032).
+                comp = {k: float(v.detach()) for k, v in losses.items() if k != "total"}
+                comp_str = " ".join(f"{k}={val:.4f}" for k, val in comp.items())
                 progress.write(
                     f"step={step} total={float(total.detach()):.5f} struct={float(losses['total'].detach()):.5f} "
-                    f"dc={float(dc_log):.6f} anneal={anneal:.2f} eta={eta:.3f} gnorm={grad_norm:.2f} "
+                    f"dc={float(dc_log):.6f} {comp_str} anneal={anneal:.2f} eta={eta:.3f} gnorm={grad_norm:.2f} "
                     f"lr={scheduler.get_last_lr()[0]:.2e} {ms:.0f}ms/step")
                 writer.add_scalar("loss/total", float(total.detach()), step)  # grand total = struct*anneal + w*dc
                 writer.add_scalar("loss/struct", float(losses["total"].detach()), step)
                 writer.add_scalar("loss/dc", float(dc_log), step)
+                for _name, _val in comp.items():
+                    writer.add_scalar(f"loss/{_name}", _val, step)
                 writer.add_scalar("train/anneal", anneal, step)
                 writer.add_scalar("train/eta", eta, step)
                 writer.add_scalar("train/grad_norm", grad_norm, step)
