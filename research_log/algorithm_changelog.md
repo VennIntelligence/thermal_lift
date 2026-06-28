@@ -39,7 +39,14 @@
 - smoke: `outputs/v5_smoke`(看 eval_synth/out_of_band 是否抬离 0)
 - 全量: `outputs/v10_v5_sharp` / `outputs/solver_v5_sharp`
 
-**涉及文件**: configs/synthetic/pool_2x_v5_sharp.json(新), docs/REMOTE_ORDERS.md;无代码改动(edge_sigma 为既有 config 旋钮)
+**涉及文件**: configs/synthetic/pool_2x_v5_sharp.json(新), docs/REMOTE_ORDERS.md, scripts/verify_pool_sharpness.py(新);无算法代码改动(edge_sigma 为既有 config 旋钮)
+
+**修正(2026-06-28,远端跑出 0.8 池后)**:
+- 上表是在 **HARD mask** 上孤立测的;真实生成管线把**抗锯齿 SSAA coverage mask**喂给 render(`build_scene_mask_with_metadata(antialias=True, ssaa_factor=4)` → `render_isothermal_field`),coverage 自带 ~0.7 HR px 软化,所以 edge_sigma **不是唯一软化源**。
+- 按真实管线重测(AA + defects,本地复现):1.4→0.00008、**0.8→0.0013(远端 5k 池实测 0.00122,吻合,验证 sweep 可信)**、**0.6→0.0039(边缘≈1 pitch=目标)**、0.5→0.0073、AA 地板(edge_sigma=0)→0.018。
+- 结论:0.8 只到 **15× v4(仍糊)**;**v5 改用 `edge_sigma=0.6`**(~50× v4,边缘落在 pitch)。**别低于 ~0.5**(逼近 AA 地板 = sub-pitch → 幻觉/珠串)。"realism 属于观测、清晰属于 GT"不变,只是 AA 已占掉一部分软化预算。
+- verify_pool_sharpness.py 修两个 bug:(1) 缺陷计数键 `geo_meta`→`geometry_metadata`(导致 0/96 假阴性,缺陷其实在 mask + metadata 里);(2) PASS 阈值按真实管线重标 0.0025–0.010(原 0.0015 来自 hard-mask 高估,把合格的 0.6 也会判错;0.8 应判 too-soft)。
+- 远端流程:`rm -rf data/synthetic/pool_2x_v5_5k`(旧 0.8 部分池;否则 resume-skip 会混入旧 scene)→ 按 0.6 重生 → `verify_pool_sharpness.py` PASS → smoke 短训。
 
 ---
 

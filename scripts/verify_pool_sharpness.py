@@ -31,8 +31,11 @@ CRITICAL = "hr_temperature_2x.npy"
 EXPECT_FILES = [CRITICAL, "phase_bin_drizzle_2x.npy", "obs_features_1x.npz",
                 "lr_burst.npy", "shifts.npy", "hr_mask_4x.png", "metadata.json"]
 V4_REF = 0.00008          # edge_sigma=1.4 reference (the blurry target)
-PASS_MIN = 0.0015         # below -> sharpening did not land
-PASS_MAX = 0.02           # above -> GT is sub-pitch (hallucination bait)
+# Calibrated through the REAL AA+defects pipeline (ACL-030): the SSAA coverage mask softens edges
+# ~0.7 HR px on its own, so edge_sigma 0.8 only reaches ~0.0013 (still soft); 0.6 -> ~0.0039 (edges
+# at ~1 pitch = target); <=0.4 -> >=0.013 (approaches the AA floor = sub-pitch). Target edge_sigma=0.6.
+PASS_MIN = 0.0025         # below -> too soft (e.g. edge_sigma>=0.8, lost to AA) -> sharpen the GT
+PASS_MAX = 0.010          # above -> sub-pitch (edge_sigma<=0.4) -> hallucination / FM-1 beading risk
 SCALE = 2
 
 
@@ -78,9 +81,10 @@ def scan_pool(pool: Path, k: int, seed: int) -> dict:
         mp = sd / "metadata.json"
         if mp.exists():
             md = json.loads(mp.read_text())
-            geo = md.get("geo_meta", md)
+            geo = md.get("geometry_metadata") or md.get("geo_meta") or md
             d = geo.get("defects") if isinstance(geo, dict) else None
-            if d and (not isinstance(d, dict) or any(d.get(k2) for k2 in ("holes", "notches", "cracks"))):
+            # defect_meta is a counts dict: {holes, notches, cracks, severity}
+            if isinstance(d, dict) and any(int(d.get(k2, 0) or 0) > 0 for k2 in ("holes", "notches", "cracks")):
                 has_defects += 1
     return {
         "n_total": len(scenes), "n_checked": len(oob), "oob": np.array(oob),
@@ -127,7 +131,7 @@ def main() -> int:
     print(f"  out_of_band(GT):  {_summ(r['oob'])}")
     print(f"  p99 |grad| (C/px): {_summ(r['p99'])}")
     print(f"  scenes with defects in metadata: {r['has_defects']}/{r['n_checked']}")
-    print(f"  reference: v4 edge_sigma=1.4 ~ {V4_REF}  |  v5 edge_sigma=0.8 expect ~0.002-0.005")
+    print(f"  reference: v4 edge_sigma=1.4 ~ {V4_REF}  |  v5 edge_sigma=0.6 expect ~0.003-0.005 (real AA pipeline)")
 
     if args.ref_pool:
         rr = scan_pool(Path(args.ref_pool), args.k, args.seed)

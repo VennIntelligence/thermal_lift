@@ -97,17 +97,22 @@ warm-start/conditioning, and computing it on-the-fly per sample is slow. Two way
 > ACL-030: the v4 GT (`edge_sigma=1.4`) carried ~zero super-resolution-band energy —
 > `out_of_band(GT)=0.00008`, matching the trained model's real-data output `0.00001`. The model
 > faithfully reproduced a detail-free target → "good fidelity, no hallucination, but blurry / no
-> detail". **The loss is fine.** v5 sharpens the GT to `edge_sigma=0.8` (edges at ~1 pitch = the
-> recoverable limit; ~40× more SR-band detail). Do **NOT** go below ~0.6 — sub-pitch GT detail can't
-> be recovered honestly and re-invites the FM-1 beading of the old aggressive runs. Realism/blur
-> belongs in the forward path (PSF); sharpness belongs in the GT. seed kept = v4 → controlled A/B.
-> `edge_sigma` is a config knob (`pool_2x_v5_sharp.json`), no code change.
+> detail". **The loss is fine.** **NOTE (measured through the real pipeline):** the GT is rendered
+> from an antialiased SSAA coverage mask that *itself* softens edges ~0.7 HR px, so `edge_sigma` is
+> not the only softening — `edge_sigma` 1.4→0.00008, **0.8→0.0013 (still too soft)**, **0.6→0.0039
+> (target = edges at ~1 pitch)**, ≤0.4→≥0.013 (sub-pitch). v5 therefore uses **`edge_sigma=0.6`**
+> (a first 0.8 attempt only reached 15× v4). Do **NOT** go below ~0.5 (approaches the AA floor →
+> sub-pitch → re-invites FM-1 beading). Realism/blur belongs in the forward path (PSF); sharpness in
+> the GT. seed kept = v4 → controlled A/B. `edge_sigma` is a config knob, no code change.
 
 ```
 # (a) SMOKE first — 300 scenes, ~minutes — cheap proof before the overnight full regen
 uv run --with tqdm python scripts/generate_training_pool.py \
   --config configs/synthetic/pool_2x_v5_sharp.json \
   --num-scenes 300 --output-dir data/synthetic/pool_2x_v5_smoke_300 --workers 14
+
+# VERIFY the GT landed: PASS = median out_of_band ~0.003-0.005 (~40x v4) + defects present
+uv run python scripts/verify_pool_sharpness.py --pool data/synthetic/pool_2x_v5_smoke_300 --k 96
 
 # short V10 train on the smoke pool — watch eval_synth/out_of_band_ratio LIFT off ~0
 uv run python -m unet_sr.train \
@@ -117,13 +122,17 @@ uv run python -m unet_sr.train \
   --synth-eval-holdout 48 --synth-eval-every 1000 \
   --total-steps 5000 --batch-size 24 --patch-size-hr 256 \
   --num-workers 12 --save-every 1000 --no-real-eval --output-dir outputs/v5_smoke
-# PASS bar: eval_synth/out_of_band_ratio rises from ~0 toward the GT's ~0.003, region_rmse stays
+# PASS bar: eval_synth/out_of_band_ratio rises from ~0 toward the GT's ~0.004, region_rmse stays
 # low, and the center-zoom temperature visibly sharpens. If it does NOT lift → STOP and report
 # (the model isn't picking up the new band; then it's an obs-PSF / capacity issue, not the GT).
 
-# (b) FULL regen — 5000 scenes, overnight — ONLY after the smoke confirms
+# (b) FULL regen — 5000 scenes, overnight — ONLY after the smoke confirms.
+# rm first: a prior partial run at this path is KEPT by the resume-skip (per-scene metadata.json)
+# and would mix old-edge_sigma scenes into the pool.
+rm -rf data/synthetic/pool_2x_v5_5k
 uv run --with tqdm python scripts/generate_training_pool.py \
   --config configs/synthetic/pool_2x_v5_sharp.json --workers 14
+uv run python scripts/verify_pool_sharpness.py --pool data/synthetic/pool_2x_v5_5k --k 96
 ```
 
 ## TRAINING — V10 baseline (plain UNet) on v5 + ACL-027 loss/metrics  — the headline run

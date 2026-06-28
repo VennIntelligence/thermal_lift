@@ -1,5 +1,5 @@
 {
-  "_comment": "Realistic 2x training pool (v5). IDENTICAL to v4 (defects + isothermal + field noise) EXCEPT the GT edge sharpness: temperature_isothermal.edge_sigma 1.4 -> 0.8. ACL-030 diagnosis: at edge_sigma=1.4 the GT itself carried ~zero super-resolution-band energy (out_of_band(GT)=0.00008, matching the trained model's real-data output 0.00001) -> the model faithfully reproduced a detail-free target = 'blurry, no detail'. The blur was in the TARGET, not the loss. edge_sigma=0.8 puts edges at ~1 pitch (20um = 2 HR px = the recoverable limit), ~40x more SR-band detail to learn, WITHOUT demanding sub-pitch detail (that would re-invite the FM-1 beading of the old aggressive runs; do NOT go below ~0.6). Realism/blur belongs in the forward/observation path (PSF), sharpness belongs in the GT. seed kept = v4 for a controlled A/B (same geometry/draws, only GT sharpness differs).",
+  "_comment": "Realistic 2x training pool (v5). IDENTICAL to v4 EXCEPT GT edge sharpness: temperature_isothermal.edge_sigma 1.4 -> 0.6 (ACL-030). At 1.4 the GT carried ~zero super-resolution-band energy (out_of_band(GT)=0.00008 = the blurry trained-model output) -> the blur was in the TARGET, not the loss. KEY: the GT is rendered from an ANTIALIASED SSAA coverage mask that itself softens edges ~0.7 HR px, so edge_sigma is NOT the only softening. Measured through the REAL pipeline (AA + defects): edge_sigma 1.4->0.00008, 0.8->0.0013, 0.6->0.0039, 0.5->0.0073, AA-floor(0.0)->0.018. So 0.8 only reached 15x v4 (still soft); 0.6 puts the total edge at ~1 pitch (20um = 2 HR px = recoverable limit), ~50x v4. Do NOT go below ~0.5: edge_sigma<=0.4 approaches the AA floor (edges sub-pitch) -> demands hallucination -> FM-1 beading (the old failure). Realism/blur belongs in the forward/observation path (PSF); sharpness belongs in the GT. seed kept = v4 for a controlled A/B.",
   "dataset": "ThermalChipPhantom_v5_sharp",
   "engine": "TCForge",
   "version": "0.5.0",
@@ -35,7 +35,7 @@
   },
 
   "temperature_model": "isothermal",
-  "temperature_isothermal": {"level_min": 0.82, "edge_sigma": 0.8},
+  "temperature_isothermal": {"level_min": 0.82, "edge_sigma": 0.6},
 
   "physics_ranges": {
     "psf_sigma_lr_px": [0.15, 0.55],
