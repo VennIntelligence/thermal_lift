@@ -43,7 +43,7 @@ def main() -> int:
     args = ap.parse_args()
 
     scale = 2
-    cond_ch = 5 if args.no_drizzle else 8
+    cond_ch = 5 if args.no_drizzle else 9
     mean_ch = 0 if args.no_drizzle else HYBRID_DRIZZLE_MEAN_CHANNEL
     ds = ThermalSRDataset(
         args.pool, patch_size_hr=args.patch, scale=scale, seed=0, patches_per_scene=8,
@@ -103,9 +103,11 @@ def main() -> int:
         opt.step()
         finite &= bool(torch.isfinite(total)) and all(
             torch.isfinite(p.grad).all() for p in solver.parameters() if p.grad is not None)
-        losses.append(float(total.detach())); dcs.append(float(dc.detach()))
+        total_value = float(total.detach())
+        dc_value = float(dc.detach())
+        losses.append(total_value); dcs.append(dc_value)
         if step in (0, args.steps // 2, args.steps - 1):
-            print(f"  step {step:>3}: total={float(total):.4f} dc={float(dc):.5f} gnorm={gnorm:.2f}")
+            print(f"  step {step:>3}: total={total_value:.4f} dc={dc_value:.5f} gnorm={gnorm:.2f}")
 
     first, last = sum(losses[:5]) / 5, sum(losses[-5:]) / 5
     print(f"\n[1] shapes/plumbing OK = {shape_ok}")

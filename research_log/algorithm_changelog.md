@@ -8,6 +8,47 @@
 
 ## 变更记录
 
+### [ACL-031] 2026-06-28 — solver_train 提速:DC monitor 延迟计算 + `--compile` 编译 prox 子网
+
+**问题诊断**:
+- v5 5k solver 首训时 GPU 利用率波动,增加 `--num-workers` 后收益不明显。检查热路径发现 `--solver-dc-weight 0` 的推荐配置下,训练循环仍每个 step 额外调用一次 `terminal_dc_loss()` 只为记录 `loss/dc` monitor,等价于每步多跑一次物理 forward `A(x)`。
+- `solver_train.py` 接收 `--compile`,但此前没有使用 `config.compile_model`;用户加 `--compile` 对 solver 路径实际无效。
+- 整个 solver 不适合直接 `torch.compile(solver)`:unroll 内含 `autograd.grad`、per-scene PSF Python loop 和动态 `ScenePSF`,整图编译风险高且 checkpoint state_dict 可能变复杂。
+
+**修改内容**:
+1. `solver_train.py`:当 `--solver-dc-weight 0` 时,不再每步计算 `dc` monitor;仅在 `step==1` 或 `step % --log-every == 0` 时用 `torch.no_grad()` 计算并写入 TensorBoard。`solver_dc_weight>0` 时保持原行为,因为 DC loss 参与反传。
+2. `solver_train.py`:实现 `--compile` 在 solver 路径的实际作用,只编译 learned prox UNet 子网络;物理 DC 路径保持 eager,避免 `autograd.grad`/PSF 分支图断裂。
+3. `solver_train.py`:保存 checkpoint 时清理 compiled child module 的 `._orig_mod.` state_dict 前缀,保持 `solver_step_*.pt` / `solver_final.pt` 可被未编译模型读取。
+
+**预期效果**:
+- 推荐 solver 配置 (`--solver-dc-weight 0`) 下减少每个 step 一次额外物理 forward,预期提高吞吐并降低 GPU 小 kernel/同步开销。
+- `--compile` 对 prox 卷积子网生效,可能进一步提升 5090 上的卷积吞吐;若编译开销或 Triton 编译器环境不稳定,可去掉 `--compile` 回到 eager。
+- 风险: `loss/dc` 不再每步记录,只按 `log_every` 采样;不影响训练梯度、checkpoint real_eval 或 synth_eval。
+
+**推荐参数**:
+```bash
+uv run python -m unet_sr.solver_train \
+  --training-pool-dir ../../data/synthetic/pool_2x_v5_5k \
+  --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 4 \
+  --solver-m-frames 12 --solver-band-sigma 5 \
+  --solver-prior-anneal-steps 0 --solver-dc-weight 0 \
+  --boundary-boost 4.0 --flatness-weight 0.0 \
+  --synth-eval-holdout 200 --synth-eval-every 2500 \
+  --total-steps 20000 --batch-size 16 --patch-size-hr 192 \
+  --save-every 5000 --num-workers 8 --compile --log-every 1000 \
+  --output-dir outputs/solver_v5_sharp
+```
+
+说明: v5 5k 已完整生成 `phase_bin_drizzle_2x.npy`(5000/5000 scene),主跑优先使用 hybrid drizzle 路径;仅当 drizzle 文件缺失或 IO 压力过大时才加 `--solver-no-drizzle` 回退到 5ch aligned-mean warm-start。
+
+**训练结果**: _(训练后填写)_
+- 输出目录: `outputs/solver_v5_sharp`
+- 视觉效果:
+- 关键指标:
+- 结论:
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/solver_train.py`, `algos/ep07_unet_sr/tests/test_gate_c_smoke.py`
+
 ### [ACL-030] 2026-06-27 — 诊断"保真好/无幻觉/但很糊":blur 在 GT 不在 loss → v5 把 GT edge_sigma 1.4→0.8
 
 **问题诊断**:

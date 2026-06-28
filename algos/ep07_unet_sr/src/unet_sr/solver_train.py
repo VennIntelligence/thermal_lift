@@ -38,6 +38,26 @@ from .train import _log_pred_vs_target, _to_device_tensor, _worker_init_fn
 from .unroll import UnrolledSolver
 
 
+def _compile_solver_prox(solver: UnrolledSolver) -> None:
+    """Compile only the learned prox UNet(s), not the physics/autograd DC path."""
+
+    if not hasattr(torch, "compile"):
+        print("torch.compile requested but this PyTorch build has no torch.compile; continuing uncompiled")
+        return
+    if solver.share_weights:
+        solver.prox = torch.compile(solver.prox)  # type: ignore[assignment]
+    else:
+        solver.prox = torch.nn.ModuleList(torch.compile(module) for module in solver.prox)  # type: ignore[arg-type,assignment]
+    print("torch.compile enabled for solver prox network(s); physics DC path remains eager")
+
+
+def _checkpoint_state_dict(solver: UnrolledSolver) -> dict[str, torch.Tensor]:
+    """Return a checkpoint-compatible state dict even when child modules are compiled."""
+
+    state = solver.state_dict()
+    return {key.replace("._orig_mod.", "."): value for key, value in state.items()}
+
+
 def build_scene_psf(batch: dict, device: torch.device) -> ScenePSF:
     """Per-sample PSF from the batched scene metadata (gaussian/elliptical/airy)."""
     return ScenePSF(
@@ -184,6 +204,8 @@ def train(config: TrainingConfig) -> Path:
     )
 
     solver = build_solver(config, device, cond_channels)
+    if config.compile_model:
+        _compile_solver_prox(solver)
     criterion = build_criterion(config)
     n_params = sum(p.numel() for p in solver.parameters())
     print(f"UnrolledSolver: K={config.unroll_steps} steps, M={config.solver_m_frames} frames, "
@@ -247,23 +269,21 @@ def train(config: TrainingConfig) -> Path:
             pred = solver(x0, burst, shifts, psf, obs, frame_mask=mask)  # (1,1,h,w) broadcasts over B,M
             losses = criterion(pred, target, lr_observation=None, lr_obs=None, boundary_weight=boundary)
             # DC is now enforced ARCHITECTURALLY (end-on-DC + frozen eta, ACL-026). The soft DC loss
-            # term is the falsified soft forward anchoring (ACL-017/019) and is optional: when its
-            # weight is 0 we still compute `dc` under no_grad as a MONITOR (watch loss/dc in TB), with
-            # no backward graph. When >0 it acts only as a weak secondary regularizer, not the mechanism.
+            # term is the falsified soft forward anchoring (ACL-017/019) and is optional. When its
+            # weight is 0, `dc` is only a monitor, so avoid paying an extra A(x) every train step.
+            # Logging/checkpoint eval still compute it periodically.
+            dc = None
             if config.solver_dc_weight > 0:
                 dc = terminal_dc_loss(pred, burst, shifts, psf, config.scale, config.solver_band_sigma,
                                       mask, config.solver_huber_delta)
-            else:
-                with torch.no_grad():
-                    dc = terminal_dc_loss(pred, burst, shifts, psf, config.scale, config.solver_band_sigma,
-                                          mask, config.solver_huber_delta)
             anneal = 1.0 if config.solver_prior_anneal_steps <= 0 else min(1.0, step / config.solver_prior_anneal_steps)
             total = anneal * losses["total"]
-            if config.solver_dc_weight > 0:
+            if dc is not None:
                 total = total + config.solver_dc_weight * dc
 
             if not torch.isfinite(total):
-                raise FloatingPointError(f"non-finite loss at step {step}: total={total}, dc={dc}")
+                dc_msg = "not-computed" if dc is None else str(dc)
+                raise FloatingPointError(f"non-finite loss at step {step}: total={total}, dc={dc_msg}")
             optimizer.zero_grad(set_to_none=True)
             total.backward()
             grad_norm = torch.nn.utils.clip_grad_norm_(solver.parameters(), 1.0).item()
@@ -272,17 +292,25 @@ def train(config: TrainingConfig) -> Path:
             progress.update(1)
 
             if step == 1 or step % config.log_every == 0:
+                if dc is None:
+                    with torch.no_grad():
+                        dc_log = terminal_dc_loss(
+                            pred, burst, shifts, psf, config.scale, config.solver_band_sigma,
+                            mask, config.solver_huber_delta,
+                        ).detach()
+                else:
+                    dc_log = dc.detach()
                 eta = float(torch.nn.functional.softplus(solver.eta_raw.detach()).mean())
                 ms = (time.monotonic() - t0) * 1000.0 / step
                 progress.set_postfix_str(
-                    f"total={float(total):.4f} dc={float(dc):.5f} eta={eta:.3f} gnorm={grad_norm:.2f}")
+                    f"total={float(total.detach()):.4f} dc={float(dc_log):.5f} eta={eta:.3f} gnorm={grad_norm:.2f}")
                 progress.write(
-                    f"step={step} total={float(total):.5f} struct={float(losses['total']):.5f} "
-                    f"dc={float(dc):.6f} anneal={anneal:.2f} eta={eta:.3f} gnorm={grad_norm:.2f} "
+                    f"step={step} total={float(total.detach()):.5f} struct={float(losses['total'].detach()):.5f} "
+                    f"dc={float(dc_log):.6f} anneal={anneal:.2f} eta={eta:.3f} gnorm={grad_norm:.2f} "
                     f"lr={scheduler.get_last_lr()[0]:.2e} {ms:.0f}ms/step")
-                writer.add_scalar("loss/total", float(total), step)  # grand total = struct*anneal + w*dc
-                writer.add_scalar("loss/struct", float(losses["total"]), step)
-                writer.add_scalar("loss/dc", float(dc), step)
+                writer.add_scalar("loss/total", float(total.detach()), step)  # grand total = struct*anneal + w*dc
+                writer.add_scalar("loss/struct", float(losses["total"].detach()), step)
+                writer.add_scalar("loss/dc", float(dc_log), step)
                 writer.add_scalar("train/anneal", anneal, step)
                 writer.add_scalar("train/eta", eta, step)
                 writer.add_scalar("train/grad_norm", grad_norm, step)
@@ -292,7 +320,7 @@ def train(config: TrainingConfig) -> Path:
                 _log_pred_vs_target(writer, pred, target, step)
             if step % config.save_every == 0:
                 ckpt = output_dir / f"solver_step_{step:06d}.pt"
-                torch.save({"step": step, "model_state_dict": solver.state_dict(),
+                torch.save({"step": step, "model_state_dict": _checkpoint_state_dict(solver),
                             "config": vars(config)}, ckpt)
                 progress.write(f"saved {ckpt}")
                 real_metrics = maybe_log_solver_real_eval(
@@ -323,7 +351,7 @@ def train(config: TrainingConfig) -> Path:
 
     progress.close()
     final = output_dir / "solver_final.pt"
-    torch.save({"step": step, "model_state_dict": solver.state_dict(), "config": vars(config)}, final)
+    torch.save({"step": step, "model_state_dict": _checkpoint_state_dict(solver), "config": vars(config)}, final)
     print(f"saved {final}")
     maybe_log_solver_real_eval(
         writer,
