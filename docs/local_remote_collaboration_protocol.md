@@ -12,6 +12,33 @@
 - Analysis host project path: `/Users/ujs/mycode/thermal_lift`
 - Code remote: `git@github-venn:VennIntelligence/thermal_lift.git`
 
+## Remote Connection (WSL-over-SSH) — the working recipe
+
+远端 `Administrator@100.98.99.29`(Windows + 5090)的 OpenSSH 默认 shell 是 WSL,且被以 `wsl.exe -c "<cmd>"` 调用,而 `-c` 不是 wsl 的合法参数 —— 所以**非交互式** `exec_command` / `ssh host "<cmd>"` 会直接报"无效的命令行参数,请使用 wsl.exe --help"(且输出是 UTF-16/GBK 乱码)。**别在非交互式调用上耗时间。**
+
+正确方式:**用交互式 shell**(`ssh -tt` 或 paramiko `invoke_shell()`)—— 它直接落进 WSL **bash**(用户 `ujs`,项目 `~/thermal_lift`,Linux WSL2)。要点:
+- 发**纯 Linux 命令**(不是 `wsl` / `chcp` / `ver`;在 bash 里它们不存在)。
+- 输出按 **UTF-8** 解码。坑:ASCII 文本若误用 `utf-16-le` 解码,会变成"看似合法"的中日韩字符、不报 `�`,从而骗过"自动挑编码"的启发式 —— 固定用 utf-8。
+- 用唯一 sentinel(`echo __DONE__`)界定命令输出边界,并正则剥掉 ANSI / bracketed-paste 转义:`\x1b\[…[a-zA-Z]` 和 `\x1b]…;\x07`。
+
+paramiko 最小骨架(**密码不入库** —— 运行时从环境变量/交互读取;长期换公钥,见本协议末段):
+```python
+import paramiko, time, re
+c = paramiko.SSHClient(); c.set_missing_host_key_policy(paramiko.AutoAddPolicy())
+c.connect("100.98.99.29", username="Administrator", password=PW, timeout=12)
+ch = c.invoke_shell(width=220, height=60); time.sleep(1.5)
+while ch.recv_ready(): ch.recv(65536)               # flush login banner
+ansi = re.compile(r'\x1b\[[0-9;?]*[a-zA-Z]|\x1b\][0-9;]*;?[^\x07]*\x07')
+def run(cmd, wait=15):
+    ch.send(cmd + "\n"); buf=b""; t=time.time()
+    while time.time()-t < wait:
+        buf += ch.recv(65536) if ch.recv_ready() else b""; time.sleep(0.2)
+    return ansi.sub('', buf.decode("utf-8", "replace")).replace('\r','')
+print(run("cd ~/thermal_lift && git pull --ff-only && nvidia-smi -L"))
+```
+
+**根因修复(一劳永逸)**:把远端 sshd 的 `DefaultShell` 设为 cmd/powershell(或给 wsl 配正确命令选项),之后非交互式 `exec_command` / `rsync` / `sftp` 才能直接用,这条 recipe 就不再需要。
+
 ## Division Of Labor
 
 本地负责代码编写、方案思考、轻量数据计算和短时间分析。适合在本地完成的工作包括：
