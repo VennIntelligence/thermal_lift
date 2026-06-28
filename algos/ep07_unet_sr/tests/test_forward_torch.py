@@ -136,6 +136,41 @@ def test_fast_forward_equals_certified_loop() -> None:
     assert check_fast_equivalence() < 1e-9
 
 
+def check_fast_dcgrad_vjp() -> float:
+    """ACL-033: the explicit self-adjoint VJP for the (quadratic) DC grad == the autograd
+    second-order double-backward, for g AND the second-order gradient d/dx <g, c>."""
+    torch.manual_seed(4)
+    scale = 2
+    B, N, H, W = 4, 4, 32, 32
+    psf = ScenePSF(
+        sigma_lr_px=torch.tensor([0.7, 1.2, 0.9, 0.5], dtype=DT, device=DEVICE),
+        shape=["gaussian", "gaussian", "elliptical_gaussian", "airy_disk"],
+        sigma_y_lr_px=[None, None, 1.3, 0.8],
+        angle_deg=torch.tensor([0.0, 0.0, 25.0, -30.0], dtype=DT, device=DEVICE),
+    )
+    shifts = (torch.rand(B, N, 2, dtype=DT, device=DEVICE) - 0.5) * 3.0
+    y = torch.randn(B, N, H // scale, W // scale, dtype=DT, device=DEVICE)
+    fmask = torch.ones(B, N, 1, 1, dtype=DT, device=DEVICE); fmask[:, -1] = 0.0
+    c = torch.randn(B, 1, H, W, dtype=DT, device=DEVICE)
+    x0 = torch.randn(B, 1, H, W, dtype=DT, device=DEVICE)
+    worst = 0.0
+    for band in (0.0, 3.0):
+        outs = []
+        for fast in (False, True):
+            x = x0.clone().requires_grad_(True)
+            g, _ = data_consistency_grad(x, y, shifts, psf, scale, frame_mask=fmask,
+                                         band_highpass_sigma_lr_px=band, create_graph=True, fast_vjp=fast)
+            (dx,) = torch.autograd.grad((g * c).sum(), x)
+            outs.append((g.detach(), dx.detach()))
+        worst = max(worst, float((outs[0][0] - outs[1][0]).abs().max()),
+                    float((outs[0][1] - outs[1][1]).abs().max()))
+    return worst
+
+
+def test_fast_dcgrad_vjp_matches_double_backward() -> None:
+    assert check_fast_dcgrad_vjp() < 1e-9
+
+
 def test_data_consistency_grad_works_inside_no_grad() -> None:
     """Solver eval runs under no_grad, but its DC step still needs local A^T gradients."""
     scale = 2

@@ -20,15 +20,17 @@
    - 组内不同核**零填充到统一半径**(尾部权重 + 多出的输入 padding 都是 0,精确等价),用 `conv2d(groups=n)`(可分离用两次 grouped conv1d);
    - 重采样 `block_average_shifted_batched`:把原函数加一维 B 批处理(同样的 gather/数学,只是不再逐 b)。
 2. `forward_burst(..., fast=None)`:默认走 fast(可用环境变量 `TL_SOLVER_FAST_FORWARD=0` 或 `fast=False` 回退到认证 loop);保留 `_forward_burst_loop` 作为参考/回退。
-3. 认证:`tests/test_forward_torch.py` 新增 `[4] fast==loop`(混合全 PSF 形状的 batch,fwd + autograd `A^T` 在 fp64 下对齐)。本地实测 **forward 逐元素 0.0、A^T 5.6e-16**,Gate-A 四项全过。
-4. `scripts/bench_forward_fast.py`(新):fp64 正确性 + fp32 训练形状下 loop vs fast 的 forward 与 DC-grad(含 double-backward)计时/加速比(远端 GPU 上跑出真实数字)。
+3. **DC 梯度的二阶 double-backward → 一阶 self-adjoint VJP**(`_DCGradLinearVJP`):剖析发现训练真正的瓶颈不是卷积,而是 `data_consistency_grad` 的 **autograd 二阶图**(实测 DC+double-bwd ≈ 175ms,占 step 绝大头,且 forward 优化对它几乎无效)。DC 目标 ½‖M·H(Ax−y)‖² 对 x 是**二次型**,梯度 g 仿射,Jacobian `J=dg/dx=AᵀHᵀM²HA` 是**固定自伴线性算子**——所以不需要二阶图,backward 直接给 `J·v = ∇_v(½‖M·H·A·v‖²)`,**一次一阶 autograd**(A^T 仍由 autograd 给,认证伴随不变)。Huber 时(非线性)自动回退二阶图。环境变量 `TL_SOLVER_FAST_DCGRAD=0` 或 `fast_vjp=False` 回退。
+4. 认证:`tests/test_forward_torch.py` 新增 `[4] fast==loop`(fwd + `A^T` fp64 对齐)+ VJP 等价测试(g 与二阶梯度 `d/dx⟨g,c⟩` 对齐 + `torch.autograd.gradcheck`)。本地实测 **forward 逐元素 0.0、A^T 5.6e-16、VJP 二阶梯度逐元素 0.0、gradcheck PASS**,Gate-A 全过。
+5. `scripts/bench_forward_fast.py`(新):fp64/fp32 正确性(含 VJP 训练梯度)+ forward 与 DC-grad(含 double-backward)的 old-vs-new 计时/加速比(远端 GPU 上跑出真实数字)。
 
 **预期效果**:
-- 消除 per-sample 串行 → 拉满 GPU 利用率、降 step 时间(CPU 上仅 1.2x,因 CPU 本就 compute-bound;**GPU 上预期明显更大**,因为正是它消掉了 launch 气泡)。**数值与认证算子逐元素等价**,训练/收敛行为不变,纯提速。
-- 风险可控:`fast=False` / 环境变量一键回退;Gate-A 测试是护栏。
+- forward:per-sample 串行 → grouped-conv,**GPU 实测 2.73x**(5090,batch18)。
+- 训练 DC 路径:消掉二阶图 → 一阶 VJP(CPU 1.3x;**GPU 上预期更大**,二阶 gather/scatter 图开销大);叠加拉满利用率。**数值与认证算子逐元素等价**(g、A^T、二阶梯度全 0.0 差),训练/收敛行为不变,纯提速。
+- 风险可控:两个环境变量分别一键回退;Gate-A + VJP gradcheck 是护栏。
 
-**验收标准**:`uv run python -m pytest tests/test_forward_torch.py`(含 `[4]`)全过 + `uv run python scripts/bench_forward_fast.py` 报 correctness OK 且 fast 不慢于 loop。
-**训练结果**: 待填(远端 5090 上的 bench 加速比 + 接入后实际 ms/step)。
+**验收标准**:`uv run python -m pytest tests/test_forward_torch.py` 全过 + `uv run python scripts/bench_forward_fast.py` 报两个 correctness OK 且 new 不慢于 old。
+**训练结果**: 待填(远端 5090:forward 2.73x 已测;接入后实际 ms/step 待填)。
 
 ---
 

@@ -376,6 +376,55 @@ def _highpass(t: torch.Tensor, sigma_lr_px: float) -> torch.Tensor:
     return (x - lo).reshape(B, N, h, w).to(in_dtype)
 
 
+_FAST_DCGRAD_DEFAULT = os.environ.get("TL_SOLVER_FAST_DCGRAD", "1") != "0"
+
+
+def _dc_residual(x, y_burst, shifts, psf, scale, frame_mask, band):
+    """The masked, band-limited DC residual r = M ∘ H(Ax - y)."""
+    r = forward_burst(x, shifts, psf, scale) - y_burst
+    if band > 0:
+        r = _highpass(r, band)
+    if frame_mask is not None:
+        r = r * frame_mask
+    return r
+
+
+class _DCGradLinearVJP(torch.autograd.Function):
+    """g = A^T H^T M^2 H (A x - y) with an O(1)-order backward.
+
+    The DC objective ½‖M H(Ax−y)‖² is QUADRATIC in x, so its gradient g is affine and the
+    Jacobian J = dg/dx = A^T H^T M^2 H A is a fixed self-adjoint linear operator. Autograd's
+    create_graph=True double-backward rebuilds a second-order graph through the whole forward to
+    apply J — ~7x the cost of a single forward+adjoint (measured). Instead we provide the backward
+    explicitly: J·v = ∇_v(½‖M H A v‖²), one FIRST-order autograd pass. Exact (no Huber). The forward
+    still gets A^T from autograd (the certified adjoint); only the wasteful 2nd-order graph is gone.
+    """
+
+    @staticmethod
+    def forward(ctx, x, y_burst, shifts, frame_mask, psf, scale, band):
+        with torch.enable_grad():
+            xv = x.detach().requires_grad_(True)
+            r = _dc_residual(xv, y_burst, shifts, psf, scale, frame_mask, band)
+            (g,) = torch.autograd.grad(0.5 * (r * r).sum(), xv)
+        ctx.psf = psf; ctx.scale = int(scale); ctx.band = float(band)
+        ctx.shifts = shifts; ctx.frame_mask = frame_mask
+        return g.detach(), r.detach()
+
+    @staticmethod
+    def backward(ctx, grad_g, grad_r):
+        # dL/dx = J^T grad_g = J grad_g (J self-adjoint) = ∇_v(½‖M H A v‖²) at v = grad_g.
+        # grad_r is ignored: the residual output is detached (matches the eager path's r.detach()).
+        with torch.enable_grad():
+            v = grad_g.detach().requires_grad_(True)
+            Av = forward_burst(v, ctx.shifts, ctx.psf, ctx.scale)
+            if ctx.band > 0:
+                Av = _highpass(Av, ctx.band)
+            if ctx.frame_mask is not None:
+                Av = Av * ctx.frame_mask
+            (jv,) = torch.autograd.grad(0.5 * (Av * Av).sum(), v)
+        return jv, None, None, None, None, None, None
+
+
 def data_consistency_grad(
     x_hr: torch.Tensor,
     y_burst: torch.Tensor,
@@ -387,6 +436,7 @@ def data_consistency_grad(
     band_highpass_sigma_lr_px: float = 0.0,
     huber_delta: float | None = None,
     create_graph: bool = True,
+    fast_vjp: bool | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return ``(g, residual)`` where ``g = A^T(Ax - y)`` (exact, via autograd).
 
@@ -401,9 +451,19 @@ def data_consistency_grad(
         band_highpass_sigma_lr_px: >0 restricts DC to the high-frequency band (rejects drift).
         huber_delta: if set, use a Huber data term (robust to hot/cold defects, stripe noise).
     """
-    # This function is also used inside eval/inference wrappers decorated with
-    # torch.no_grad().  A^T(Ax-y) still needs a local graph w.r.t. x, even when
-    # the caller does not want parameter gradients.
+    # Fast path: when we need a differentiable g (create_graph=True, i.e. training) and the
+    # objective is the plain quadratic (no Huber), use the explicit self-adjoint VJP — same g, but
+    # the backward is one first-order pass instead of a second-order graph (ACL-033). Env override:
+    # TL_SOLVER_FAST_DCGRAD=0, or fast_vjp=False.
+    use_fast_vjp = _FAST_DCGRAD_DEFAULT if fast_vjp is None else bool(fast_vjp)
+    linear = huber_delta is None or huber_delta <= 0
+    if create_graph and use_fast_vjp and linear:
+        return _DCGradLinearVJP.apply(
+            x_hr, y_burst, shifts, frame_mask, psf, scale, float(band_highpass_sigma_lr_px)
+        )
+
+    # Reference path (also used inside eval/inference wrappers decorated with torch.no_grad():
+    # A^T(Ax-y) still needs a local graph w.r.t. x even when the caller wants no param gradients).
     with torch.enable_grad():
         x = x_hr if x_hr.requires_grad else x_hr.requires_grad_(True)
         Ax = forward_burst(x, shifts, psf, scale)

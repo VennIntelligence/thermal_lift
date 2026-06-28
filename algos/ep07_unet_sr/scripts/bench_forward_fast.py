@@ -104,29 +104,47 @@ def main() -> int:
     sh = (torch.rand(B, N, 2, dtype=dt, device=device) - 0.5) * 3.0
     y = forward_burst(x, sh, psf, scale, fast=True).detach()
 
+    import unet_sr.forward_torch as FT
+    fmask = torch.ones(B, N, 1, 1, dtype=dt, device=device); fmask[:, -1] = 0.0
+
+    # training-path correctness: end-to-end second-order grad d/dx<g,c> must match the reference
+    cvec = torch.randn(B, 1, H, H, dtype=dt, device=device)
+
+    def dL_dx(fast):
+        FT._FAST_FORWARD_DEFAULT = fast
+        xt = x.detach().requires_grad_(True)
+        g, _ = data_consistency_grad(xt, y, sh, psf, scale, frame_mask=fmask,
+                                     band_highpass_sigma_lr_px=5.0, create_graph=True, fast_vjp=fast)
+        (dx,) = torch.autograd.grad((g * cvec).sum(), xt)
+        return dx.detach()
+
+    vjp_err = (dL_dx(False) - dL_dx(True)).abs().max().item()
+    print(f"[correctness fp32] training grad d/dx<g,c> max|diff|={vjp_err:.2e}"
+          f"   -> {'OK' if vjp_err < 1e-3 else 'FAIL'}  (fast VJP == 2nd-order autograd)")
+
     fwd_loop = _time(lambda: forward_burst(x, sh, psf, scale, fast=False), args.iters, device)
     fwd_fast = _time(lambda: forward_burst(x, sh, psf, scale, fast=True), args.iters, device)
 
     def dc(fast):
+        FT._FAST_FORWARD_DEFAULT = fast
         xt = x.detach().requires_grad_(True)
-        g, _ = data_consistency_grad(xt, y, sh, psf, scale, band_highpass_sigma_lr_px=5.0,
-                                     create_graph=True)
-        # mimic training: backprop the DC grad's norm so double-backward through A/A^T runs
+        g, _ = data_consistency_grad(xt, y, sh, psf, scale, frame_mask=fmask,
+                                     band_highpass_sigma_lr_px=5.0, create_graph=True, fast_vjp=fast)
+        # mimic training: backprop the DC grad's norm so the double-backward through A/A^T runs
         (g ** 2).sum().backward()
 
-    import unet_sr.forward_torch as FT
-    FT._FAST_FORWARD_DEFAULT = False
     dc_loop = _time(lambda: dc(False), max(10, args.iters // 3), device)
-    FT._FAST_FORWARD_DEFAULT = True
     dc_fast = _time(lambda: dc(True), max(10, args.iters // 3), device)
+    FT._FAST_FORWARD_DEFAULT = True
 
-    print(f"\n[forward only]            loop={fwd_loop:8.2f} ms   fast={fwd_fast:8.2f} ms"
-          f"   speedup={fwd_loop / max(fwd_fast, 1e-9):5.2f}x")
-    print(f"[DC grad + double-bwd]    loop={dc_loop:8.2f} ms   fast={dc_fast:8.2f} ms"
-          f"   speedup={dc_loop / max(dc_fast, 1e-9):5.2f}x")
-    print("\nNote: a training step runs the DC path K=4x; the fast path also raises GPU utilization "
-          "(removes the per-sample launch bubbles), so wall-clock gain can exceed the per-call ratio.")
-    return 0 if max(fwd_err, adj_err) < 1e-9 else 1
+    print(f"\n[forward only]            old={fwd_loop:8.2f} ms   new={fwd_fast:8.2f} ms"
+          f"   speedup={fwd_loop / max(fwd_fast, 1e-9):5.2f}x   (grouped-conv blur)")
+    print(f"[DC grad + double-bwd]    old={dc_loop:8.2f} ms   new={dc_fast:8.2f} ms"
+          f"   speedup={dc_loop / max(dc_fast, 1e-9):5.2f}x   (grouped conv + self-adjoint VJP)")
+    print("\nThe DC path is what training pays (run K=4x/step); 'old' = per-sample loop + 2nd-order "
+          "autograd, 'new' = grouped conv + first-order VJP. On GPU the gain is usually larger than "
+          "CPU: the fast path also removes per-sample launch bubbles (raises GPU utilization).")
+    return 0 if max(fwd_err, adj_err, vjp_err) < 1e-3 and max(fwd_err, adj_err) < 1e-9 else 1
 
 
 if __name__ == "__main__":
