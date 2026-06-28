@@ -106,6 +106,36 @@ def check_adjoint_identity() -> float:
     return rel
 
 
+def check_fast_equivalence() -> float:
+    """ACL-033: the vectorized (grouped-conv) forward == the certified per-sample loop, fp64.
+
+    Mixed batch of all PSF shapes (incl. zero-sigma identity) so both the separable group and the
+    2D-kernel group are exercised, plus shifts that fall partly out of bounds (validity mask)."""
+    torch.manual_seed(3)
+    scale = 2
+    sigma = torch.tensor([0.7, 1.3, 0.9, 1.1, 0.0, 1.6], dtype=DT, device=DEVICE)
+    psf = ScenePSF(
+        sigma_lr_px=sigma,
+        shape=["gaussian", "gaussian", "elliptical_gaussian", "airy_disk", "gaussian", "elliptical_gaussian"],
+        sigma_y_lr_px=[None, None, 1.4, 0.8, None, 2.0],
+        angle_deg=torch.tensor([0.0, 0.0, 20.0, -35.0, 0.0, 60.0], dtype=DT, device=DEVICE),
+    )
+    x = torch.randn(6, 1, 48, 64, dtype=DT, device=DEVICE, requires_grad=True)
+    shifts = (torch.rand(6, 9, 2, dtype=DT, device=DEVICE) - 0.5) * 3.0
+    y_loop = forward_burst(x, shifts, psf, scale, fast=False)
+    y_fast = forward_burst(x, shifts, psf, scale, fast=True)
+    fwd = float((y_loop - y_fast).detach().abs().max())
+    r = torch.randn_like(y_loop)
+    (g_loop,) = torch.autograd.grad((y_loop * r).sum(), x, retain_graph=True)
+    (g_fast,) = torch.autograd.grad((y_fast * r).sum(), x)
+    adj = float((g_loop - g_fast).abs().max())
+    return max(fwd, adj)
+
+
+def test_fast_forward_equals_certified_loop() -> None:
+    assert check_fast_equivalence() < 1e-9
+
+
 def test_data_consistency_grad_works_inside_no_grad() -> None:
     """Solver eval runs under no_grad, but its DC step still needs local A^T gradients."""
     scale = 2
@@ -137,10 +167,12 @@ def main() -> int:
     fwd = check_forward_parity()
     lin = check_linearity()
     adj = check_adjoint_identity()
+    fast = check_fast_equivalence()
     print(f"\n[1] forward parity (gauss/ellip/airy)   worst max-abs = {fwd:.2e}   (want < 1e-5)")
     print(f"[2] linearity            A(au+bv)=aAu+bAv  max-abs = {lin:.2e}   (want < 1e-9)")
     print(f"[3] adjoint identity     <Au,v>=<u,A^T v>  rel-err = {adj:.2e}   (want < 1e-9)")
-    ok = (fwd < 1e-5) and (lin < 1e-9) and (adj < 1e-9)
+    print(f"[4] fast==loop (fwd+A^T) vectorized parity  max-abs = {fast:.2e}   (want < 1e-9)")
+    ok = (fwd < 1e-5) and (lin < 1e-9) and (adj < 1e-9) and (fast < 1e-9)
     print("\nGATE A:", "PASS — proceed to Gate B" if ok else "FAIL — STOP, fix the operator")
     return 0 if ok else 1
 

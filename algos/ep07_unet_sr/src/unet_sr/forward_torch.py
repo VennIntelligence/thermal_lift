@@ -28,10 +28,19 @@ Convention (matches tcforge.forward and forward self-check T1):
 from __future__ import annotations
 
 import math
+import os
 from dataclasses import dataclass
 
 import torch
 import torch.nn.functional as F
+
+# Vectorized batched forward (ACL-033): replaces the per-sample `for b in range(B)` Python loop
+# (which serialized the physics and starved the GPU) with grouped convolutions that process the
+# whole batch's heterogeneous per-scene PSFs in a single launch. Numerically equivalent to the
+# certified per-sample path (proven to fp64 in tests/test_forward_torch.py). Set
+# TL_SOLVER_FAST_FORWARD=0 (or pass forward_burst(..., fast=False)) to fall back to the reference
+# loop if anything misbehaves on a given box.
+_FAST_FORWARD_DEFAULT = os.environ.get("TL_SOLVER_FAST_FORWARD", "1") != "0"
 
 
 # ---------------------------------------------------------------------------
@@ -159,6 +168,48 @@ def block_average_shifted(blurred: torch.Tensor, shifts: torch.Tensor, scale: in
     return cols.reshape(N, h, s, w, s).mean(dim=(2, 4))
 
 
+def block_average_shifted_batched(blurred: torch.Tensor, shifts: torch.Tensor, scale: int) -> torch.Tensor:
+    """Batched (over B) form of :func:`block_average_shifted` — identical math, one launch.
+
+    Args:
+        blurred: ``(B, H, W)`` per-sample PSF-blurred HR images.
+        shifts:  ``(B, N, 2)`` ``[dx, dy]`` in LR pixels.
+    Returns: ``(B, N, h, w)`` LR frames.
+    """
+    B, H, W = blurred.shape
+    s = int(scale)
+    h, w = H // s, W // s
+    N = shifts.shape[1]
+    dev, dt = blurred.device, blurred.dtype
+    off = torch.arange(s, device=dev, dtype=dt)
+    dy = shifts[:, :, 1].view(B, N, 1, 1)
+    dx = shifts[:, :, 0].view(B, N, 1, 1)
+    ar_h = torch.arange(h, device=dev, dtype=dt).view(1, 1, h, 1)
+    ar_w = torch.arange(w, device=dev, dtype=dt).view(1, 1, w, 1)
+    yy = (s * (ar_h + dy) + off.view(1, 1, 1, s)).reshape(B, N, s * h)
+    xx = (s * (ar_w + dx) + off.view(1, 1, 1, s)).reshape(B, N, s * w)
+    y0 = torch.floor(yy)
+    x0 = torch.floor(xx)
+    fy = (yy - y0).unsqueeze(-1)            # (B, N, s*h, 1)
+    fx = (xx - x0).unsqueeze(2)            # (B, N, 1, s*w)
+    vy = ((yy >= 0) & (yy <= H - 1)).to(dt).unsqueeze(-1)
+    vx = ((xx >= 0) & (xx <= W - 1)).to(dt).unsqueeze(2)
+    y0i = y0.long(); y1i = y0i + 1
+    x0i = x0.long(); x1i = x0i + 1
+    y0c = y0i.clamp(0, H - 1); y1c = y1i.clamp(0, H - 1)
+    x0c = x0i.clamp(0, W - 1); x1c = x1i.clamp(0, W - 1)
+    # row gather along H: (B, N, s*h, W)
+    be = blurred.unsqueeze(1).expand(B, N, H, W)
+    y0e = y0c.unsqueeze(-1).expand(B, N, s * h, W)
+    y1e = y1c.unsqueeze(-1).expand(B, N, s * h, W)
+    rows = (be.gather(2, y0e) * (1.0 - fy) + be.gather(2, y1e) * fy) * vy
+    # col gather along W: (B, N, s*h, s*w)
+    idx0 = x0c.unsqueeze(2).expand(B, N, s * h, s * w)
+    idx1 = x1c.unsqueeze(2).expand(B, N, s * h, s * w)
+    cols = (rows.gather(3, idx0) * (1.0 - fx) + rows.gather(3, idx1) * fx) * vx
+    return cols.reshape(B, N, h, s, w, s).mean(dim=(3, 5))
+
+
 # ---------------------------------------------------------------------------
 # Per-scene PSF spec + batched forward + autograd data-consistency gradient
 # ---------------------------------------------------------------------------
@@ -192,14 +243,86 @@ def _compute_dtype(dtype: torch.dtype) -> torch.dtype:
     return torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
 
 
-def forward_burst(x_hr: torch.Tensor, shifts: torch.Tensor, psf: ScenePSF, scale: int) -> torch.Tensor:
-    """A x:  (B,1,H,W) HR  ->  (B,N,h,w) LR burst, replicating physical_block_average per scene.
+def _grouped_separable_blur(x: torch.Tensor, kernels: list[torch.Tensor]) -> torch.Tensor:
+    """Apply a DIFFERENT separable Gaussian per sample in ONE pair of grouped conv1d launches.
 
-    Computes in fp32 for half-precision inputs (AMP safety) and in the input dtype otherwise
-    (so fp64 inputs stay fp64 for tight certification).
+    x: (n,1,H,W); kernels: list of n odd-length 1D tensors (the same 1D kernel is used for both
+    axes, matching :func:`_blur_gauss_separable`). Smaller kernels are zero-padded to the group's
+    common radius — exact, because the appended weights and the extra input padding are both zero.
     """
-    if x_hr.ndim != 4 or x_hr.shape[1] != 1:
-        raise ValueError(f"x_hr must be (B,1,H,W); got {tuple(x_hr.shape)}")
+    n, _, H, W = x.shape
+    dev, dt = x.device, x.dtype
+    R = max(k.numel() // 2 for k in kernels)
+    w1 = torch.zeros(n, 1, 2 * R + 1, 1, device=dev, dtype=dt)
+    for i, k in enumerate(kernels):
+        r = k.numel() // 2
+        w1[i, 0, R - r:R + r + 1, 0] = k
+    xv = x.reshape(1, n, H, W)
+    xv = F.conv2d(F.pad(xv, (0, 0, R, R)), w1, groups=n)
+    xv = F.conv2d(F.pad(xv, (R, R, 0, 0)), w1.view(n, 1, 1, 2 * R + 1), groups=n)
+    return xv.reshape(n, 1, H, W)
+
+
+def _grouped_kernel2d_blur(x: torch.Tensor, kernels: list[torch.Tensor]) -> torch.Tensor:
+    """Apply a DIFFERENT 2D PSF per sample in ONE grouped conv2d launch.
+
+    x: (n,1,H,W); kernels: list of n already-flipped square 2D tensors (flip matches
+    :func:`_blur_kernel2d` / ndimage.convolve). Smaller kernels are zero-padded to the common
+    radius (exact, same reasoning as the separable case)."""
+    n, _, H, W = x.shape
+    dev, dt = x.device, x.dtype
+    R = max(k.shape[0] // 2 for k in kernels)
+    wk = torch.zeros(n, 1, 2 * R + 1, 2 * R + 1, device=dev, dtype=dt)
+    for i, k in enumerate(kernels):
+        r = k.shape[0] // 2
+        wk[i, 0, R - r:R + r + 1, R - r:R + r + 1] = k
+    xv = x.reshape(1, n, H, W)
+    xv = F.conv2d(F.pad(xv, (R, R, R, R)), wk, groups=n)
+    return xv.reshape(n, 1, H, W)
+
+
+def _blur_batch(xc: torch.Tensor, psf: ScenePSF, scale: int) -> torch.Tensor:
+    """Per-sample PSF blur of (B,1,H,W) without a Python loop over the big-image convolution.
+
+    Partitions the batch into the separable-Gaussian fast path and the general 2D-kernel path
+    (each sample keeps EXACTLY the path :func:`_blur_one` would take, so numerics are unchanged),
+    vectorizes each group with a grouped conv, then scatters back to the original order. Kernel
+    construction stays a cheap per-sample loop; only the expensive convolution is batched."""
+    B, _, H, W = xc.shape
+    dev, dt = xc.device, xc.dtype
+    sep_idx: list[int] = []; sep_k: list[torch.Tensor] = []
+    ker_idx: list[int] = []; ker_k: list[torch.Tensor] = []
+    for b in range(B):
+        shape = psf.shape[b]
+        sigma = float(psf.sigma_lr_px[b])
+        sy = psf.sigma_y_lr_px[b]
+        ang = float(psf.angle_deg[b])
+        if shape == "gaussian" and sy is None and ang == 0.0:
+            k1 = gaussian_kernel1d(sigma * scale, device=dev, dtype=dt)
+            if k1 is None:                       # sigma<=0 -> identity (delta)
+                k1 = torch.ones(1, device=dev, dtype=dt)
+            sep_idx.append(b); sep_k.append(k1)
+        else:
+            k2 = make_psf_kernel2d(
+                psf_sigma_lr_px=sigma, scale=scale, psf_shape=shape,
+                psf_sigma_y_lr_px=sy, psf_angle_deg=ang, device=dev, dtype=dt,
+            )
+            if k2 is None:                       # zero-sigma -> identity (delta)
+                k2 = torch.ones(1, 1, device=dev, dtype=dt)
+            ker_idx.append(b); ker_k.append(torch.flip(k2, (0, 1)))
+    parts: list[torch.Tensor] = []
+    order: list[int] = []
+    if sep_idx:
+        parts.append(_grouped_separable_blur(xc[sep_idx], sep_k)); order += sep_idx
+    if ker_idx:
+        parts.append(_grouped_kernel2d_blur(xc[ker_idx], ker_k)); order += ker_idx
+    blurred = torch.cat(parts, 0)
+    perm = torch.argsort(torch.tensor(order, device=dev))
+    return blurred.index_select(0, perm)         # back to original batch order (differentiable)
+
+
+def _forward_burst_loop(x_hr: torch.Tensor, shifts: torch.Tensor, psf: ScenePSF, scale: int) -> torch.Tensor:
+    """Reference per-sample forward (the certified path). Kept for fallback + equivalence tests."""
     B = x_hr.shape[0]
     in_dtype = x_hr.dtype
     cdt = _compute_dtype(in_dtype)
@@ -209,6 +332,32 @@ def forward_burst(x_hr: torch.Tensor, shifts: torch.Tensor, psf: ScenePSF, scale
         blurred = _blur_one(xc[b, 0], psf, b, scale)
         outs.append(block_average_shifted(blurred, shifts[b].to(cdt), scale))
     return torch.stack(outs, 0).to(in_dtype)
+
+
+def _forward_burst_fast(x_hr: torch.Tensor, shifts: torch.Tensor, psf: ScenePSF, scale: int) -> torch.Tensor:
+    """Vectorized forward: grouped-conv blur + batched block-average. ~Equivalent to the loop."""
+    in_dtype = x_hr.dtype
+    cdt = _compute_dtype(in_dtype)
+    xc = x_hr.to(cdt)
+    blurred = _blur_batch(xc, psf, scale)                       # (B,1,H,W)
+    out = block_average_shifted_batched(blurred[:, 0], shifts.to(cdt), scale)
+    return out.to(in_dtype)
+
+
+def forward_burst(
+    x_hr: torch.Tensor, shifts: torch.Tensor, psf: ScenePSF, scale: int, *, fast: bool | None = None,
+) -> torch.Tensor:
+    """A x:  (B,1,H,W) HR  ->  (B,N,h,w) LR burst, replicating physical_block_average per scene.
+
+    Computes in fp32 for half-precision inputs (AMP safety) and in the input dtype otherwise
+    (so fp64 inputs stay fp64 for tight certification). ``fast`` selects the vectorized path
+    (default from TL_SOLVER_FAST_FORWARD); ``fast=False`` forces the reference per-sample loop.
+    """
+    if x_hr.ndim != 4 or x_hr.shape[1] != 1:
+        raise ValueError(f"x_hr must be (B,1,H,W); got {tuple(x_hr.shape)}")
+    use_fast = _FAST_FORWARD_DEFAULT if fast is None else bool(fast)
+    impl = _forward_burst_fast if use_fast else _forward_burst_loop
+    return impl(x_hr, shifts, psf, scale)
 
 
 def _highpass(t: torch.Tensor, sigma_lr_px: float) -> torch.Tensor:

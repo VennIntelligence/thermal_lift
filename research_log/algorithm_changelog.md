@@ -8,6 +8,30 @@
 
 ## 变更记录
 
+### [ACL-033] 2026-06-29 — 物理前向算子向量化(去掉 per-sample 循环,grouped-conv 批处理)
+
+**问题诊断**:
+- solver 每 step ~727ms 且 **GPU 利用率跑不满**。热路径在 `forward_torch.forward_burst`:它对 batch 用 **`for b in range(B)` 的 Python 循环**——每个场景单独建 PSF kernel、单独做大图卷积 + 重采样(因为 65% 场景是 elliptical/airy,PSF 逐场景不同)。该 `forward_burst` 在 unroll 里每步 DC 调 K=4 次,反向求 `A^T`(autograd)再遍历,训练 double-backward(fp32,create_graph)再遍历 → 一个 step ~4×B 次**串行**小 kernel,GPU 做一点就停下等下一次 Python 迭代 → launch-bound、利用率低。prox UNet(批处理 + compiled)不是瓶颈。
+- 关键约束:`forward_torch` 是 **Gate-A 认证算子**(fp64 下证了线性性 + autograd 伴随 `A^T` 的精确性),任何改写必须**数值等价**且重过认证。
+
+**修改内容**:
+1. `forward_torch.py`:新增向量化前向 `_forward_burst_fast`——把 per-sample 大图卷积换成 **grouped convolution** 一次 launch 处理整个 batch 的异构 PSF:
+   - 按路径分组:各样本仍走它在 `_blur_one` 里**本来的路径**(各向同性高斯走可分离 fast path、其余走 2D kernel path),所以数值不变;
+   - 组内不同核**零填充到统一半径**(尾部权重 + 多出的输入 padding 都是 0,精确等价),用 `conv2d(groups=n)`(可分离用两次 grouped conv1d);
+   - 重采样 `block_average_shifted_batched`:把原函数加一维 B 批处理(同样的 gather/数学,只是不再逐 b)。
+2. `forward_burst(..., fast=None)`:默认走 fast(可用环境变量 `TL_SOLVER_FAST_FORWARD=0` 或 `fast=False` 回退到认证 loop);保留 `_forward_burst_loop` 作为参考/回退。
+3. 认证:`tests/test_forward_torch.py` 新增 `[4] fast==loop`(混合全 PSF 形状的 batch,fwd + autograd `A^T` 在 fp64 下对齐)。本地实测 **forward 逐元素 0.0、A^T 5.6e-16**,Gate-A 四项全过。
+4. `scripts/bench_forward_fast.py`(新):fp64 正确性 + fp32 训练形状下 loop vs fast 的 forward 与 DC-grad(含 double-backward)计时/加速比(远端 GPU 上跑出真实数字)。
+
+**预期效果**:
+- 消除 per-sample 串行 → 拉满 GPU 利用率、降 step 时间(CPU 上仅 1.2x,因 CPU 本就 compute-bound;**GPU 上预期明显更大**,因为正是它消掉了 launch 气泡)。**数值与认证算子逐元素等价**,训练/收敛行为不变,纯提速。
+- 风险可控:`fast=False` / 环境变量一键回退;Gate-A 测试是护栏。
+
+**验收标准**:`uv run python -m pytest tests/test_forward_torch.py`(含 `[4]`)全过 + `uv run python scripts/bench_forward_fast.py` 报 correctness OK 且 fast 不慢于 loop。
+**训练结果**: 待填(远端 5090 上的 bench 加速比 + 接入后实际 ms/step)。
+
+---
+
 ### [ACL-032] 2026-06-29 — 去波纹暖启动(de-waffle x0) + 真实数据物理一致性指标(dc_resid)
 
 **问题诊断**:
