@@ -511,7 +511,7 @@ def build_arg_parser() -> argparse.ArgumentParser:
         type=int,
         default=TrainingConfig.real_eval_solver_halo_hr,
         help="Outer halo size in HR pixels for --real-eval-solver-mode full_halo. "
-             "Use 64 as the first anti-boundary-artifact setting.",
+             "Use 96 as the current anti-boundary-artifact setting.",
     )
     # --- Held-out synthetic GT eval ---
     parser.add_argument("--synth-eval", action=argparse.BooleanOptionalAction,

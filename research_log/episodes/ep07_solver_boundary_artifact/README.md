@@ -26,7 +26,9 @@ Evidence:
    - `dc2`: artifact reduced again
 3. Halo tests on the same visible flat ROI show:
    - `halo0`: artifact remains
-   - `halo64`, `halo96`, `halo128`: the visible square glow disappears or is pushed outside the visible crop
+   - `halo64`: visibly reduces the artifact but is not fully sufficient in the fine-grid TensorBoard view
+   - `halo96`: sufficient to suppress the visible square glow
+   - `halo128`: no clear visual improvement over `halo96`
 4. Full-frame outer-halo tests completed successfully on the RTX 5090, suggesting a practical eval-time mitigation.
 5. A final dense-tile test kept the original `patch_size_hr=192`, `overlap=160` (`32 HR px` step) grid, but solved each tile with extra real-context halo and cropped back to the original visible tile. This directly tests whether the original fine tile grid can be retained while suppressing prox boundary artifacts.
 
@@ -61,11 +63,11 @@ The full-frame outer-halo diagnostic ran on an RTX 5090 and all tested halo size
 | `full_halo96` | `1152 x 1472` | 6.84 s | 16.0 GB |
 | `full_halo128` | `1216 x 1536` | 6.86 s | 9.4 GB |
 
-Treat the peak-memory numbers as run-local diagnostics rather than exact scaling laws, because CUDA allocator reuse and kernel plan caching can affect the reported peak.  The practical conclusion is still clear: full-frame solve with at least `64 HR px` outer halo is feasible on the current 32 GB GPU for this K=2 checkpoint.
+Treat the peak-memory numbers as run-local diagnostics rather than exact scaling laws, because CUDA allocator reuse and kernel plan caching can affect the reported peak.  The practical conclusion is still clear: full-frame solve with at least `96 HR px` outer halo is feasible on the current 32 GB GPU for this K=2 checkpoint, and `128 HR px` did not provide a visible benefit over `96 HR px`.
 
 ## Recommended Next Steps
 
-1. Use full-frame solve with outer reflect halo for real-data eval, then crop back to the original FOV. Start with `halo_hr=64`; compare `96` and `128` only if visually needed.
+1. Use full-frame solve with outer reflect halo for real-data eval, then crop back to the original FOV. Use `halo_hr=96` as the current recommended setting; `64` is a useful diagnostic but not fully sufficient, and `128` showed no visible gain over `96`.
 2. Add an eval path for full-frame halo inference so this is reproducible from CLI, not only from ad hoc diagnostics.
 3. For the training-side fix, consider reflect-padding prox convolutions, valid-center training/inference, and/or an overlap-consistency loss so the model does not learn patch-edge-dependent solutions.
 4. For a cleaner architectural fix, consider splitting the output into a full-frame lowpass anchor plus a learned highpass/residual solver, reducing the prox network's freedom to create low/mid-frequency square illumination.

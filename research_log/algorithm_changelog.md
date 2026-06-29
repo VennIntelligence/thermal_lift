@@ -12,7 +12,7 @@
 
 **问题诊断**:
 - no-drizzle solver 的真实图中仍可见规则方框。进一步 TensorBoard 分解显示: `x0/aligned_mean` 无方框,`prox1` 立即产生强方框,`dc1` 只能削弱;`prox2` 再次产生,`dc2` 再次削弱。
-- 同一可视 flat ROI 上,保持输出区域不变但扩大求解上下文: `halo0` 有方框,`halo64/96/128` 的可视方框消失。说明方框主要是 learned prox 的 patch-local 边界响应,不是 alignment、drizzle 或最终 stitch window。
+- 同一可视 flat ROI 上,保持输出区域不变但扩大求解上下文: `halo0` 有方框,`halo64` 明显减轻但目视仍不够干净,`halo96` 可压住可视方框,`halo128` 相比 `halo96` 无明显收益。说明方框主要是 learned prox 的 patch-local 边界响应,不是 alignment、drizzle 或最终 stitch window。
 - full-frame outer halo 诊断显示 K2 checkpoint 在 RTX 5090 上可跑 `halo_hr=64/96/128`,峰值显存约 11.6-16.0GB 量级,作为 real-eval 路径可行。
 
 **修改内容**:
@@ -35,16 +35,16 @@
 
 **推荐参数**:
 ```bash
---real-eval-solver-mode full_halo --real-eval-solver-halo-hr 64
+--real-eval-solver-mode full_halo --real-eval-solver-halo-hr 96
 ```
 
 完整对标命令见本条训练结果/结论中的建议;训练本身仍建议从头跑 no-drizzle,不从旧中断 checkpoint resume。
 
 **训练结果**: _(待 50K 主线训练后回填)_
 - 输出目录: 推荐 `outputs/solver_v8_nodrizzle_fullhalo_eval`
-- 视觉效果: 已在 `outputs/solver_v7_k2_nodrizzle_flat005_smoke/tb_logs` 追加 `eval_dense_tile_halo/*` 诊断图:原 `p192/o160` 细密 tiled 配置加 per-tile halo 后,可直接对比 `aligned | dense no-halo | dense halo64 | halo96 | halo128`。
+- 视觉效果: 已在 `outputs/solver_v7_k2_nodrizzle_flat005_smoke/tb_logs` 追加 `eval_dense_tile_halo/*` 诊断图:原 `p192/o160` 细密 tiled 配置加 per-tile halo 后,可直接对比 `aligned | dense no-halo | dense halo64 | halo96 | halo128`。用户目视结论: `halo64` 仍不够,`halo96` 已可抑制,`halo128` 与 `halo96` 无明显差异。
 - 关键指标: full-frame outer halo 诊断在 K2 smoke checkpoint 上通过 `halo_hr=0/64/96/128`;实测峰值约 `11.6/14.5/16.0/9.4GB`(CUDA allocator 影响较大,作相对参考)。
-- 结论: eval 侧优先使用 `full_halo + halo_hr=64` 查看真实图;若仍有外边缘伪影再试 96/128。
+- 结论: eval 侧优先使用 `full_halo + halo_hr=96` 查看真实图;不再把 64 作为主推荐,128 仅在后续出现新型边界残留时再试。
 
 **涉及文件**: `algos/ep07_unet_sr/src/unet_sr/real_eval.py`, `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/solver_train.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/tests/test_real_eval.py`, `algos/ep07_unet_sr/tests/test_config.py`
 
