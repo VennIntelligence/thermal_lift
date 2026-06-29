@@ -30,13 +30,16 @@ during training — set create_graph via .training).
 from __future__ import annotations
 
 import math
+import os
 
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
 
-from .forward_torch import ScenePSF, data_consistency_grad
+from .forward_torch import ScenePSF, data_consistency_grad, prepare_forward_burst_plan
 from .model import ThermalSRUNet
+
+_USE_FORWARD_PLAN_DEFAULT = os.environ.get("TL_SOLVER_FORWARD_PLAN", "1") != "0"
 
 
 def _inv_softplus(y: float) -> float:
@@ -140,6 +143,15 @@ class UnrolledSolver(nn.Module):
             raise ValueError(f"cond must have {self.cond_channels} channels; got {cond.shape[1]}")
         create_graph = self.training
         huber = self.huber_delta if self.huber_delta > 0 else None
+        forward_plan = None
+        if _USE_FORWARD_PLAN_DEFAULT:
+            forward_plan = prepare_forward_burst_plan(
+                shifts,
+                psf,
+                self.scale,
+                tuple(map(int, x0.shape[-2:])),
+                dtype=x0.dtype,
+            )
         x = x0
         iters: list[torch.Tensor] = []
         for k in range(self.n_steps):
@@ -151,6 +163,7 @@ class UnrolledSolver(nn.Module):
                 band_highpass_sigma_lr_px=self.band_highpass_sigma_lr_px,
                 huber_delta=huber,
                 create_graph=create_graph,
+                plan=forward_plan,
             )
             x = x - eta * g              # DC gradient step (range constraint) — LAST: x_K ends on DC
             if return_iters:

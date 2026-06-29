@@ -8,6 +8,41 @@
 
 ## 变更记录
 
+### [ACL-036] 2026-06-29 — DC forward plan: 预计算 PSF/gather 常量以减少 solver kernel 图开销
+
+**问题诊断**:
+- `solver_train.py` 的 K-step solver 稳态 profiling 显示 DataLoader/H2D 已不是瓶颈(`~0.2/0.8 ms`),主要耗时在 prox + DC + backward。
+- DC 路径里 `forward_burst()` 每个 unroll step、以及 custom VJP backward 中都会重复构造同一 batch 的 PSF grouped-conv 权重、shifted block-average gather 索引/权重。它们只依赖 batch 的 PSF/shifts/patch shape,不依赖当前估计 `x`,因此重复构造是纯开销。
+- 完整 CUDA Graph replay 直接套 DC 不安全: per-batch PSF shape/sigma/kernel radius 和 shifts 会改变图结构/常量;先把这些动态常量显式 plan 化,是更稳的前置优化。
+
+**修改内容**:
+1. `forward_torch.py` 新增 `ForwardBurstPlan` 与 `prepare_forward_burst_plan()`:
+   - 预计算 per-batch PSF separable/2D grouped-conv 权重与恢复顺序;
+   - 预计算 shifted detector block-average 的 gather index、插值权重和 validity mask;
+   - `forward_burst(..., plan=...)` 使用 planned path,数学公式和原 fast path 等价。
+2. `data_consistency_grad()` 与 `_DCGradLinearVJP` 接收并保存 plan,使训练 forward 与 custom VJP backward 都复用同一批常量。
+3. `unroll.py` 在每次 solver forward 开头构建一次 plan,供 K 次 DC step 复用;新增环境变量 `TL_SOLVER_FORWARD_PLAN=0` 可回退旧路径。
+4. `tests/test_forward_torch.py` 新增 planned path 等价测试,覆盖 forward、autograd adjoint `A^T`、DC gradient `g` 和训练用二阶 VJP `d/dx<g,c>`。
+
+**预期效果**:
+- 不改变训练语义、不改变 loss、不改变 forward operator;只减少每个 step 中重复的 kernel/index 构造和小 kernel 图开销。
+- 预期提升 solver 吞吐,尤其在 K=4 且 `--compile` 后 prox 已较快时更明显。
+- 风险: planned constants 与 batch shape/dtype/device 强绑定;如遇驱动/边界问题可用 `TL_SOLVER_FORWARD_PLAN=0` 回退。
+
+**推荐参数**: 保持当前 solver 命令;默认启用 planned path。若要禁用: `TL_SOLVER_FORWARD_PLAN=0 uv run python -m unet_sr.solver_train ...`
+
+**训练结果**:
+- 输出目录: 未启动长训;本轮为 microbenchmark + 等价测试。
+- 视觉效果: 未评估视觉,该改动应为数学等价优化。
+- 关键指标:
+  - B24/K4/M12/base64/`--compile`: no-plan `441.1 ms/step, 54.4 samples/s`; planned `345.3 ms/step, 69.5 samples/s`。
+  - B20/K4/M12/base64/`--compile`: planned `290.1 ms/step, 68.9 samples/s`。
+  - planned path DC forward 段约 `70.0 ms -> 9.7 ms`(B24),总吞吐约 `+27.7%`。
+  - 测试: `tests/test_config.py tests/test_forward_torch.py tests/test_gate_c_smoke.py tests/test_real_eval.py` 共 22 项通过; planned path forward/A^T/DC/VJP 与 unplanned fp64 对齐 `<1e-12`。
+- 结论: 值得合入;B20 planned 与 B24 planned 吞吐接近,考虑 OOM 风险可继续用 B20,追吞吐可用 B24。
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/forward_torch.py`, `algos/ep07_unet_sr/src/unet_sr/unroll.py`, `algos/ep07_unet_sr/tests/test_forward_torch.py`
+
 ### [ACL-035] 2026-06-29 — solver 真实数据评估改为 tile batching
 
 **问题诊断**:

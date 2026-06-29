@@ -224,6 +224,48 @@ class ScenePSF:
     angle_deg: torch.Tensor            # (B,)
 
 
+@dataclass(frozen=True)
+class _BlurPlan:
+    sep_index: torch.Tensor | None
+    sep_weight_v: torch.Tensor | None
+    sep_weight_h: torch.Tensor | None
+    ker_index: torch.Tensor | None
+    ker_weight: torch.Tensor | None
+    restore_perm: torch.Tensor
+
+
+@dataclass(frozen=True)
+class _BlockAveragePlan:
+    scale: int
+    hr_shape: tuple[int, int]
+    out_shape: tuple[int, int]
+    y0c: torch.Tensor
+    y1c: torch.Tensor
+    x0c: torch.Tensor
+    x1c: torch.Tensor
+    fy: torch.Tensor
+    fx: torch.Tensor
+    vy: torch.Tensor
+    vx: torch.Tensor
+
+
+@dataclass(frozen=True)
+class ForwardBurstPlan:
+    """Precomputed per-batch constants for repeated calls to ``forward_burst``.
+
+    A solver step calls the same physical forward operator many times: once in each K-step DC
+    update and once again during the custom VJP backward. PSF kernels and shifted detector gather
+    indices depend on the batch metadata, not on the current estimate x, so they can be built once
+    and reused without changing the math.
+    """
+
+    scale: int
+    dtype: torch.dtype
+    device: torch.device
+    blur: _BlurPlan
+    block: _BlockAveragePlan
+
+
 def _blur_one(img: torch.Tensor, psf: ScenePSF, b: int, scale: int) -> torch.Tensor:
     shape = psf.shape[b]
     sigma = float(psf.sigma_lr_px[b])
@@ -241,6 +283,124 @@ def _compute_dtype(dtype: torch.dtype) -> torch.dtype:
     """Upcast half precision to fp32 for AMP safety (ACL-011 fp16 Gaussian NaNs), but PRESERVE
     fp64 so the operator can be certified at double precision (Gate A linearity/adjoint)."""
     return torch.float32 if dtype in (torch.float16, torch.bfloat16) else dtype
+
+
+def _build_blur_plan(psf: ScenePSF, scale: int, *, device: torch.device, dtype: torch.dtype) -> _BlurPlan:
+    sep_idx: list[int] = []
+    sep_k: list[torch.Tensor] = []
+    ker_idx: list[int] = []
+    ker_k: list[torch.Tensor] = []
+    for b in range(len(psf.shape)):
+        shape = psf.shape[b]
+        sigma = float(psf.sigma_lr_px[b])
+        sy = psf.sigma_y_lr_px[b]
+        ang = float(psf.angle_deg[b])
+        if shape == "gaussian" and sy is None and ang == 0.0:
+            k1 = gaussian_kernel1d(sigma * scale, device=device, dtype=dtype)
+            if k1 is None:
+                k1 = torch.ones(1, device=device, dtype=dtype)
+            sep_idx.append(b)
+            sep_k.append(k1)
+        else:
+            k2 = make_psf_kernel2d(
+                psf_sigma_lr_px=sigma, scale=scale, psf_shape=shape,
+                psf_sigma_y_lr_px=sy, psf_angle_deg=ang, device=device, dtype=dtype,
+            )
+            if k2 is None:
+                k2 = torch.ones(1, 1, device=device, dtype=dtype)
+            ker_idx.append(b)
+            ker_k.append(torch.flip(k2, (0, 1)))
+
+    order: list[int] = []
+    sep_index = sep_weight_v = sep_weight_h = None
+    if sep_idx:
+        order += sep_idx
+        sep_index = torch.tensor(sep_idx, device=device, dtype=torch.long)
+        radius = max(k.numel() // 2 for k in sep_k)
+        sep_weight_v = torch.zeros(len(sep_k), 1, 2 * radius + 1, 1, device=device, dtype=dtype)
+        for i, k in enumerate(sep_k):
+            r = k.numel() // 2
+            sep_weight_v[i, 0, radius - r:radius + r + 1, 0] = k
+        sep_weight_h = sep_weight_v.view(len(sep_k), 1, 1, 2 * radius + 1)
+
+    ker_index = ker_weight = None
+    if ker_idx:
+        order += ker_idx
+        ker_index = torch.tensor(ker_idx, device=device, dtype=torch.long)
+        radius = max(k.shape[0] // 2 for k in ker_k)
+        ker_weight = torch.zeros(len(ker_k), 1, 2 * radius + 1, 2 * radius + 1, device=device, dtype=dtype)
+        for i, k in enumerate(ker_k):
+            r = k.shape[0] // 2
+            ker_weight[i, 0, radius - r:radius + r + 1, radius - r:radius + r + 1] = k
+
+    restore_perm = torch.argsort(torch.tensor(order, device=device, dtype=torch.long))
+    return _BlurPlan(sep_index, sep_weight_v, sep_weight_h, ker_index, ker_weight, restore_perm)
+
+
+def _build_block_average_plan(
+    shifts: torch.Tensor,
+    scale: int,
+    hr_shape: tuple[int, int],
+    *,
+    dtype: torch.dtype,
+) -> _BlockAveragePlan:
+    H, W = int(hr_shape[0]), int(hr_shape[1])
+    s = int(scale)
+    h, w = H // s, W // s
+    B, N = shifts.shape[:2]
+    dev = shifts.device
+    st = shifts.to(dtype)
+    off = torch.arange(s, device=dev, dtype=dtype)
+    dy = st[:, :, 1].view(B, N, 1, 1)
+    dx = st[:, :, 0].view(B, N, 1, 1)
+    ar_h = torch.arange(h, device=dev, dtype=dtype).view(1, 1, h, 1)
+    ar_w = torch.arange(w, device=dev, dtype=dtype).view(1, 1, w, 1)
+    yy = (s * (ar_h + dy) + off.view(1, 1, 1, s)).reshape(B, N, s * h)
+    xx = (s * (ar_w + dx) + off.view(1, 1, 1, s)).reshape(B, N, s * w)
+    y0 = torch.floor(yy)
+    x0 = torch.floor(xx)
+    fy = (yy - y0).unsqueeze(-1)
+    fx = (xx - x0).unsqueeze(2)
+    vy = ((yy >= 0) & (yy <= H - 1)).to(dtype).unsqueeze(-1)
+    vx = ((xx >= 0) & (xx <= W - 1)).to(dtype).unsqueeze(2)
+    y0i = y0.long(); y1i = y0i + 1
+    x0i = x0.long(); x1i = x0i + 1
+    return _BlockAveragePlan(
+        scale=s,
+        hr_shape=(H, W),
+        out_shape=(h, w),
+        y0c=y0i.clamp(0, H - 1),
+        y1c=y1i.clamp(0, H - 1),
+        x0c=x0i.clamp(0, W - 1),
+        x1c=x1i.clamp(0, W - 1),
+        fy=fy,
+        fx=fx,
+        vy=vy,
+        vx=vx,
+    )
+
+
+def prepare_forward_burst_plan(
+    shifts: torch.Tensor,
+    psf: ScenePSF,
+    scale: int,
+    hr_shape: tuple[int, int],
+    *,
+    dtype: torch.dtype,
+) -> ForwardBurstPlan:
+    """Build reusable per-batch constants for repeated ``forward_burst`` calls."""
+
+    if shifts.ndim != 3 or shifts.shape[-1] != 2:
+        raise ValueError(f"shifts must be (B,N,2); got {tuple(shifts.shape)}")
+    cdt = _compute_dtype(dtype)
+    device = shifts.device
+    return ForwardBurstPlan(
+        scale=int(scale),
+        dtype=cdt,
+        device=device,
+        blur=_build_blur_plan(psf, int(scale), device=device, dtype=cdt),
+        block=_build_block_average_plan(shifts, int(scale), hr_shape, dtype=cdt),
+    )
 
 
 def _grouped_separable_blur(x: torch.Tensor, kernels: list[torch.Tensor]) -> torch.Tensor:
@@ -263,6 +423,15 @@ def _grouped_separable_blur(x: torch.Tensor, kernels: list[torch.Tensor]) -> tor
     return xv.reshape(n, 1, H, W)
 
 
+def _grouped_separable_blur_planned(x: torch.Tensor, weight_v: torch.Tensor, weight_h: torch.Tensor) -> torch.Tensor:
+    n, _, H, W = x.shape
+    R = weight_v.shape[2] // 2
+    xv = x.reshape(1, n, H, W)
+    xv = F.conv2d(F.pad(xv, (0, 0, R, R)), weight_v, groups=n)
+    xv = F.conv2d(F.pad(xv, (R, R, 0, 0)), weight_h, groups=n)
+    return xv.reshape(n, 1, H, W)
+
+
 def _grouped_kernel2d_blur(x: torch.Tensor, kernels: list[torch.Tensor]) -> torch.Tensor:
     """Apply a DIFFERENT 2D PSF per sample in ONE grouped conv2d launch.
 
@@ -278,6 +447,14 @@ def _grouped_kernel2d_blur(x: torch.Tensor, kernels: list[torch.Tensor]) -> torc
         wk[i, 0, R - r:R + r + 1, R - r:R + r + 1] = k
     xv = x.reshape(1, n, H, W)
     xv = F.conv2d(F.pad(xv, (R, R, R, R)), wk, groups=n)
+    return xv.reshape(n, 1, H, W)
+
+
+def _grouped_kernel2d_blur_planned(x: torch.Tensor, weight: torch.Tensor) -> torch.Tensor:
+    n, _, H, W = x.shape
+    R = weight.shape[2] // 2
+    xv = x.reshape(1, n, H, W)
+    xv = F.conv2d(F.pad(xv, (R, R, R, R)), weight, groups=n)
     return xv.reshape(n, 1, H, W)
 
 
@@ -321,6 +498,24 @@ def _blur_batch(xc: torch.Tensor, psf: ScenePSF, scale: int) -> torch.Tensor:
     return blurred.index_select(0, perm)         # back to original batch order (differentiable)
 
 
+def _blur_batch_planned(xc: torch.Tensor, plan: _BlurPlan) -> torch.Tensor:
+    parts: list[torch.Tensor] = []
+    if plan.sep_index is not None:
+        assert plan.sep_weight_v is not None and plan.sep_weight_h is not None
+        parts.append(
+            _grouped_separable_blur_planned(
+                xc.index_select(0, plan.sep_index),
+                plan.sep_weight_v,
+                plan.sep_weight_h,
+            )
+        )
+    if plan.ker_index is not None:
+        assert plan.ker_weight is not None
+        parts.append(_grouped_kernel2d_blur_planned(xc.index_select(0, plan.ker_index), plan.ker_weight))
+    blurred = torch.cat(parts, 0)
+    return blurred.index_select(0, plan.restore_perm)
+
+
 def _forward_burst_loop(x_hr: torch.Tensor, shifts: torch.Tensor, psf: ScenePSF, scale: int) -> torch.Tensor:
     """Reference per-sample forward (the certified path). Kept for fallback + equivalence tests."""
     B = x_hr.shape[0]
@@ -344,8 +539,47 @@ def _forward_burst_fast(x_hr: torch.Tensor, shifts: torch.Tensor, psf: ScenePSF,
     return out.to(in_dtype)
 
 
+def block_average_shifted_batched_planned(blurred: torch.Tensor, plan: _BlockAveragePlan) -> torch.Tensor:
+    """Batched block-average using precomputed shift interpolation indices/weights."""
+    B, H, W = blurred.shape
+    if (H, W) != plan.hr_shape:
+        raise ValueError(f"planned HR shape {plan.hr_shape} does not match blurred shape {(H, W)}")
+    h, w = plan.out_shape
+    N = plan.y0c.shape[1]
+    be = blurred.unsqueeze(1).expand(B, N, H, W)
+    y0e = plan.y0c.unsqueeze(-1).expand(B, N, plan.y0c.shape[2], W)
+    y1e = plan.y1c.unsqueeze(-1).expand(B, N, plan.y1c.shape[2], W)
+    rows = (be.gather(2, y0e) * (1.0 - plan.fy) + be.gather(2, y1e) * plan.fy) * plan.vy
+    idx0 = plan.x0c.unsqueeze(2).expand(B, N, plan.y0c.shape[2], plan.x0c.shape[2])
+    idx1 = plan.x1c.unsqueeze(2).expand(B, N, plan.y0c.shape[2], plan.x1c.shape[2])
+    cols = (rows.gather(3, idx0) * (1.0 - plan.fx) + rows.gather(3, idx1) * plan.fx) * plan.vx
+    s = plan.scale
+    return cols.reshape(B, N, h, s, w, s).mean(dim=(3, 5))
+
+
+def _forward_burst_planned(x_hr: torch.Tensor, plan: ForwardBurstPlan) -> torch.Tensor:
+    in_dtype = x_hr.dtype
+    cdt = _compute_dtype(in_dtype)
+    if cdt != plan.dtype:
+        raise ValueError(f"forward plan dtype {plan.dtype} does not match compute dtype {cdt}")
+    if x_hr.device != plan.device:
+        raise ValueError(f"forward plan device {plan.device} does not match x device {x_hr.device}")
+    if tuple(x_hr.shape[-2:]) != plan.block.hr_shape:
+        raise ValueError(f"forward plan HR shape {plan.block.hr_shape} does not match x shape {tuple(x_hr.shape[-2:])}")
+    xc = x_hr.to(cdt)
+    blurred = _blur_batch_planned(xc, plan.blur)
+    out = block_average_shifted_batched_planned(blurred[:, 0], plan.block)
+    return out.to(in_dtype)
+
+
 def forward_burst(
-    x_hr: torch.Tensor, shifts: torch.Tensor, psf: ScenePSF, scale: int, *, fast: bool | None = None,
+    x_hr: torch.Tensor,
+    shifts: torch.Tensor,
+    psf: ScenePSF,
+    scale: int,
+    *,
+    fast: bool | None = None,
+    plan: ForwardBurstPlan | None = None,
 ) -> torch.Tensor:
     """A x:  (B,1,H,W) HR  ->  (B,N,h,w) LR burst, replicating physical_block_average per scene.
 
@@ -355,6 +589,10 @@ def forward_burst(
     """
     if x_hr.ndim != 4 or x_hr.shape[1] != 1:
         raise ValueError(f"x_hr must be (B,1,H,W); got {tuple(x_hr.shape)}")
+    if plan is not None:
+        if int(scale) != plan.scale:
+            raise ValueError(f"forward plan scale {plan.scale} does not match requested scale {scale}")
+        return _forward_burst_planned(x_hr, plan)
     use_fast = _FAST_FORWARD_DEFAULT if fast is None else bool(fast)
     impl = _forward_burst_fast if use_fast else _forward_burst_loop
     return impl(x_hr, shifts, psf, scale)
@@ -379,9 +617,9 @@ def _highpass(t: torch.Tensor, sigma_lr_px: float) -> torch.Tensor:
 _FAST_DCGRAD_DEFAULT = os.environ.get("TL_SOLVER_FAST_DCGRAD", "1") != "0"
 
 
-def _dc_residual(x, y_burst, shifts, psf, scale, frame_mask, band):
+def _dc_residual(x, y_burst, shifts, psf, scale, frame_mask, band, plan=None):
     """The masked, band-limited DC residual r = M ∘ H(Ax - y)."""
-    r = forward_burst(x, shifts, psf, scale) - y_burst
+    r = forward_burst(x, shifts, psf, scale, plan=plan) - y_burst
     if band > 0:
         r = _highpass(r, band)
     if frame_mask is not None:
@@ -401,13 +639,13 @@ class _DCGradLinearVJP(torch.autograd.Function):
     """
 
     @staticmethod
-    def forward(ctx, x, y_burst, shifts, frame_mask, psf, scale, band):
+    def forward(ctx, x, y_burst, shifts, frame_mask, psf, scale, band, plan):
         with torch.enable_grad():
             xv = x.detach().requires_grad_(True)
-            r = _dc_residual(xv, y_burst, shifts, psf, scale, frame_mask, band)
+            r = _dc_residual(xv, y_burst, shifts, psf, scale, frame_mask, band, plan)
             (g,) = torch.autograd.grad(0.5 * (r * r).sum(), xv)
         ctx.psf = psf; ctx.scale = int(scale); ctx.band = float(band)
-        ctx.shifts = shifts; ctx.frame_mask = frame_mask
+        ctx.shifts = shifts; ctx.frame_mask = frame_mask; ctx.plan = plan
         return g.detach(), r.detach()
 
     @staticmethod
@@ -416,13 +654,13 @@ class _DCGradLinearVJP(torch.autograd.Function):
         # grad_r is ignored: the residual output is detached (matches the eager path's r.detach()).
         with torch.enable_grad():
             v = grad_g.detach().requires_grad_(True)
-            Av = forward_burst(v, ctx.shifts, ctx.psf, ctx.scale)
+            Av = forward_burst(v, ctx.shifts, ctx.psf, ctx.scale, plan=ctx.plan)
             if ctx.band > 0:
                 Av = _highpass(Av, ctx.band)
             if ctx.frame_mask is not None:
                 Av = Av * ctx.frame_mask
             (jv,) = torch.autograd.grad(0.5 * (Av * Av).sum(), v)
-        return jv, None, None, None, None, None, None
+        return jv, None, None, None, None, None, None, None
 
 
 def data_consistency_grad(
@@ -437,6 +675,7 @@ def data_consistency_grad(
     huber_delta: float | None = None,
     create_graph: bool = True,
     fast_vjp: bool | None = None,
+    plan: ForwardBurstPlan | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """Return ``(g, residual)`` where ``g = A^T(Ax - y)`` (exact, via autograd).
 
@@ -459,14 +698,14 @@ def data_consistency_grad(
     linear = huber_delta is None or huber_delta <= 0
     if create_graph and use_fast_vjp and linear:
         return _DCGradLinearVJP.apply(
-            x_hr, y_burst, shifts, frame_mask, psf, scale, float(band_highpass_sigma_lr_px)
+            x_hr, y_burst, shifts, frame_mask, psf, scale, float(band_highpass_sigma_lr_px), plan
         )
 
     # Reference path (also used inside eval/inference wrappers decorated with torch.no_grad():
     # A^T(Ax-y) still needs a local graph w.r.t. x even when the caller wants no param gradients).
     with torch.enable_grad():
         x = x_hr if x_hr.requires_grad else x_hr.requires_grad_(True)
-        Ax = forward_burst(x, shifts, psf, scale)
+        Ax = forward_burst(x, shifts, psf, scale, plan=plan)
         r = Ax - y_burst
         if band_highpass_sigma_lr_px > 0:
             r = _highpass(r, band_highpass_sigma_lr_px)

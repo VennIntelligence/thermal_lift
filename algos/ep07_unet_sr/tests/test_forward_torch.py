@@ -25,7 +25,12 @@ for p in (_ROOT / "tcforge" / "src", _ROOT / "algos" / "ep07_unet_sr" / "src"):
         sys.path.insert(0, str(p))
 
 from tcforge.forward import generate_lr_burst  # noqa: E402
-from unet_sr.forward_torch import ScenePSF, data_consistency_grad, forward_burst  # noqa: E402
+from unet_sr.forward_torch import (  # noqa: E402
+    ScenePSF,
+    data_consistency_grad,
+    forward_burst,
+    prepare_forward_burst_plan,
+)
 
 DEVICE = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 DT = torch.float64  # double precision so parity tolerances are tight and unambiguous
@@ -169,6 +174,53 @@ def check_fast_dcgrad_vjp() -> float:
 
 def test_fast_dcgrad_vjp_matches_double_backward() -> None:
     assert check_fast_dcgrad_vjp() < 1e-9
+
+
+def test_forward_burst_plan_matches_unplanned_forward_adjoint_and_vjp() -> None:
+    """Per-batch planned constants must be mathematically invisible."""
+    torch.manual_seed(5)
+    scale = 2
+    B, N, H, W = 5, 6, 40, 48
+    psf = ScenePSF(
+        sigma_lr_px=torch.tensor([0.7, 1.2, 0.9, 0.5, 0.0], dtype=DT, device=DEVICE),
+        shape=["gaussian", "gaussian", "elliptical_gaussian", "airy_disk", "gaussian"],
+        sigma_y_lr_px=[None, None, 1.3, 0.8, None],
+        angle_deg=torch.tensor([0.0, 0.0, 25.0, -30.0, 0.0], dtype=DT, device=DEVICE),
+    )
+    shifts = (torch.rand(B, N, 2, dtype=DT, device=DEVICE) - 0.5) * 3.0
+    x = torch.randn(B, 1, H, W, dtype=DT, device=DEVICE, requires_grad=True)
+    plan = prepare_forward_burst_plan(shifts, psf, scale, (H, W), dtype=DT)
+
+    y0 = forward_burst(x, shifts, psf, scale)
+    y1 = forward_burst(x, shifts, psf, scale, plan=plan)
+    assert float((y0 - y1).detach().abs().max()) < 1e-12
+
+    r = torch.randn_like(y0)
+    (at0,) = torch.autograd.grad((y0 * r).sum(), x, retain_graph=True)
+    (at1,) = torch.autograd.grad((y1 * r).sum(), x, retain_graph=True)
+    assert float((at0 - at1).detach().abs().max()) < 1e-12
+
+    target = torch.randn_like(y0)
+    c = torch.randn_like(x)
+    fmask = torch.ones(B, N, 1, 1, dtype=DT, device=DEVICE)
+    outs = []
+    for maybe_plan in (None, plan):
+        xp = x.detach().clone().requires_grad_(True)
+        g, _ = data_consistency_grad(
+            xp,
+            target,
+            shifts,
+            psf,
+            scale,
+            frame_mask=fmask,
+            band_highpass_sigma_lr_px=3.0,
+            create_graph=True,
+            plan=maybe_plan,
+        )
+        (dx,) = torch.autograd.grad((g * c).sum(), xp)
+        outs.append((g.detach(), dx.detach()))
+    assert float((outs[0][0] - outs[1][0]).abs().max()) < 1e-12
+    assert float((outs[0][1] - outs[1][1]).abs().max()) < 1e-12
 
 
 def test_data_consistency_grad_works_inside_no_grad() -> None:
