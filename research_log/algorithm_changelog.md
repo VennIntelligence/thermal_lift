@@ -8,6 +8,53 @@
 
 ## 变更记录
 
+### [ACL-037] 2026-06-29 — K4 shared solver 的 30px 方块来自 recurrent prox 残差累积,主线改为 K2
+
+**问题诊断**:
+- `outputs/solver_v5_nodrizzle` 的 no-drizzle 真实图仍出现约 30 display-px 量级的暗/亮块状纹理;该现象不是 phase-bin drizzle 独有,也不是 `patch_size_hr=192` tile seam。
+- 诊断方式:固定同一真实主 session 中心 patch,不经过 full-frame tiled blending,展开 `x0 -> prox1 -> dc1 -> ... -> prox4 -> dc4`,并在平坦区统计相对 `x0` 的残差 RMS 与 lag=15/30/32 HR-px 自相关。
+- 关键发现:
+  - `x0=aligned_mean` 和 5 个 no-drizzle condition channel 本身没有 15/29/30 HR-px 周期峰。
+  - 已训练 `solver_v5_nodrizzle/solver_step_005000.pt` 中,`prox1` 后新增 15 HR-px 残差相关;`prox2/prox4` 后出现最强 29-30 HR-px 残差;DC 步会压低一部分但不会消除。
+  - 只反复跑同一个 shared prox、不跑 DC,第 2/3 次 prox 已出现 32/30 HR-px best lag,说明源头是 `x <- x + prox([x, cond])` 的 shared recurrent residual loop。
+  - 同一主 checkpoint 若停在 `dc2`,平坦区 `delta_rms=0.0969`、`corr30=0.421`、`edge_grad=0.784`;继续到 `dc4` 后 `delta_rms=0.1180`、`corr30=0.485`、`edge_grad=0.779`。后两轮没有带来边缘收益,反而放大 30px 残差。
+- 机制判断:solver prox 是 HR 同分辨率 UNet,没有 `ConvTranspose2d`/PixelShuffle 棋盘源;但三层 pooling + shared recurrent residual 会引入相位敏感的固定模式,多次迭代把弱残差积分成可见块状纹理。普通 V10/UNet 只做一次映射,因此没有同样的 recurrent 放大。
+
+**修改内容**:
+1. 训练策略调整:主线不再使用 `--unroll-steps 4` 的 shared prox 配置,优先改为 `--unroll-steps 2`。
+2. 暂不把 `--no-solver-share-weights` 作为主线:200-step smoke 中 K4 unshared 参数量从 7.45M 增至 29.78M,早期中间状态不稳定,训练成本和泛化风险更高。
+3. 若 K2 长训后仍有残留,下一步代码级修复才考虑 prox residual damping (`x <- x + alpha * delta`,如 `alpha=0.5`) 或 flat-region residual 正则;不优先做后处理。
+
+**预期效果**:
+- 减少 shared prox recurrent loop 对 30px 残差模式的放大,同时保留前两轮带来的边缘增强和 terminal DC consistency。
+- 速度提升:200-step smoke 中 K2 shared 约 `219 ms/step`,K4 shared 约 `370 ms/step`;预计 K2 训练吞吐明显优于 K4。
+- 风险:K2 的物理/learned alternating 步数更少,若少数结构需要更多 refinement 可能略降锐度;需用真实图和 `eval_real/dc_resid_*` 做主判据。
+
+**推荐参数**:
+```bash
+uv run python -m unet_sr.solver_train \
+  --training-pool-dir ../../data/synthetic/pool_2x_v5_5k \
+  --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 2 \
+  --solver-m-frames 12 --solver-band-sigma 5 \
+  --solver-prior-anneal-steps 0 --solver-dc-weight 0 \
+  --boundary-boost 4.0 --flatness-weight 0.0 \
+  --synth-eval-holdout 200 --synth-eval-every 2500 \
+  --batch-size 20 --patch-size-hr 192 \
+  --num-workers 14 --compile --log-every 1000 --save-every 5000 \
+  --solver-no-drizzle \
+  --output-dir outputs/solver_v6_k2_nodrizzle --total-steps 50000
+```
+
+**训练结果**: _(K2 主线训练后回填)_
+- 输出目录: `outputs/solver_v6_k2_nodrizzle`
+- 视觉效果: 待训练后填写。
+- 关键指标: 诊断基线来自 `outputs/solver_v5_nodrizzle/solver_step_005000.pt`: `dc2` vs `dc4` 同 patch 对比显示 `delta_rms 0.0969 -> 0.1180`, `corr30 0.421 -> 0.485`, `edge_grad 0.784 -> 0.779`。
+- 结论: 先用 K2 替代 K4 shared 作为最低风险修复;不从 K4 checkpoint resume,需要从头训练。
+
+**涉及文件**: `research_log/algorithm_changelog.md`
+
+---
+
 ### [ACL-036] 2026-06-29 — DC forward plan: 预计算 PSF/gather 常量以减少 solver kernel 图开销
 
 **问题诊断**:
@@ -154,7 +201,13 @@ uv run python -m unet_sr.solver_train \
 - `dc_resid`:为下一步选 checkpoint/配置提供真实物理判据;预期 solver(end-on-DC) < plain UNet(无视前向)。
 
 **验收标准(隔夜两跑,次晨对比)**:格子消失 + 线仍直 + 真实 `dc_resid_band` ≤ 当前 hybrid + 真实 `out_of_band` 仍在 [0.002, 0.005]。
-**训练结果**: 待填(Run A `--solver-no-drizzle` / Run B `--solver-warmstart aligned_mean`)。
+
+**训练结果**: _(2026-06-29 部分回填;两跑均未作为最终主线继续)_
+- Run B `outputs/solver_v5_dewaffle` (`--solver-warmstart aligned_mean`,保留 9ch phase-bin cond):已保存 5k/10k/15k/20k/25k/30k checkpoint。5k 真实指标 `out_of_band=0.002074`, `artifact_score=0.439135`, `dc_resid_band=1.22472`, `dc_resid_full=1.50165`;30k 真实指标 `out_of_band=0.002310`, `artifact_score=0.468315`, `dc_resid_band=1.22643`, `dc_resid_full=1.50240`。视觉上亮区/背景仍有云块状纹理和边缘旁条纹,随训练未变干净。
+- Run A `outputs/solver_v5_nodrizzle` (`--solver-no-drizzle`,5ch cond):当前本地只保留 5k checkpoint。5k 真实指标 `out_of_band=0.001913`, `artifact_score=0.421701`, `dc_resid_band=1.22283`, `dc_resid_full=1.50202`;共同 5k 处比 dewaffle 更干净,dc residual 基本打平。
+- 输入侧诊断(真实 248 帧,不经过网络):`aligned_mean_up2` 在 full-flat mask 上 `out_of_band=1.7e-5`,4 个 phase-bin drizzle channel 为 `0.00186-0.00235`;phase-bin mean 仍有 `out_of_band=1.12e-4`。这说明 phase-bin cond 在平坦区自带 SR-band 相位/覆盖伪纹理,即使 warmstart 改成 aligned_mean,prox 仍能从 cond 读到并放大这些伪高频。
+- Synthetic 指标不作为主判据:dewaffle 30k 的 synthetic PSNR/region RMSE 继续改善,但真实 artifact 同步升高,再次说明 synth GT 指标不能单独用于选择 solver 超参。
+- 结论:在 aligned-mean warm-start 与 no-drizzle 两条输入路径中,优先保留 `--solver-no-drizzle`。不过两者仍共享 ACL-037 诊断出的 K4 shared recurrent prox 方块问题;下一轮应从头跑 `--solver-no-drizzle --unroll-steps 2`,而不是继续 K4 dewaffle/nodrizzle 二选一长训。
 
 ---
 
