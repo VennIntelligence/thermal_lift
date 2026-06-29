@@ -62,6 +62,30 @@ def test_config_parses_hybrid_drizzle2x_input_mode() -> None:
     assert cfg.in_channels == 9
 
 
+def test_config_parses_solver_full_halo_real_eval_args() -> None:
+    cfg = config_from_args([
+        "--training-pool-dir", "dummy_pool",
+        "--scale", "2",
+        "--real-eval-solver-mode", "full_halo",
+        "--real-eval-solver-halo-hr", "64",
+        "--boundary-boost", "3.0",
+    ])
+
+    assert cfg.real_eval_solver_mode == "full_halo"
+    assert cfg.real_eval_solver_halo_hr == 64
+
+
+def test_config_rejects_solver_real_eval_halo_not_divisible_by_scale() -> None:
+    with pytest.raises(ValueError, match="divisible by --scale"):
+        config_from_args([
+            "--training-pool-dir", "dummy_pool",
+            "--scale", "2",
+            "--real-eval-solver-mode", "full_halo",
+            "--real-eval-solver-halo-hr", "63",
+            "--boundary-boost", "3.0",
+        ])
+
+
 def test_config_input_mode_default_is_lr() -> None:
     """V9A: default input_mode is 'lr' for backward compatibility."""
     cfg = config_from_args([

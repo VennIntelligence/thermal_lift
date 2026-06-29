@@ -37,6 +37,8 @@ class RealEvalConfig:
     zoom: float = 3.0
     overlap: int = 128
     tile_batch: int = 16
+    solver_mode: str = "tiled"
+    solver_halo_hr: int = 0
     highpass_sigma: float = 5.0
     workers: int = 2
     output_dir: str = ""
@@ -288,6 +290,34 @@ def _lr_edge_mask(h: int, w: int, rim: int, device: torch.device) -> torch.Tenso
     return mask
 
 
+def _solver_conditioning_from_burst(
+    lr_burst: np.ndarray,
+    shifts: np.ndarray,
+    *,
+    training_config: Any,
+    scale: int,
+) -> tuple[np.ndarray, int]:
+    """Build solver conditioning channels and return the warm-start channel index."""
+
+    features_1x = fuse_burst_to_features(
+        lr_burst,
+        shifts,
+        sigma_bg=float(getattr(training_config, "highpass_sigma", 5.0)),
+    )
+    features_up = scipy_zoom(features_1x, (1, scale, scale), order=1).astype(np.float32)
+    if bool(getattr(training_config, "solver_no_drizzle", False)):
+        return features_up, 0
+
+    n_bins = int(getattr(training_config, "phase_bin_channels", 4))
+    drz = phase_bin_drizzle(lr_burst, shifts, scale=scale, n_bins=n_bins)
+    cond = np.concatenate([features_up, drz], axis=0).astype(np.float32, copy=False)
+    # Warm-start source must match training (ACL-032): aligned_mean (ch0, de-waffled) vs the
+    # first phase-bin drizzle channel (ch5). cond stays 9ch either way.
+    mean_ch = 0 if str(getattr(training_config, "solver_warmstart", "phasebin")) == "aligned_mean" \
+        else HYBRID_DRIZZLE_MEAN_CHANNEL
+    return cond, mean_ch
+
+
 @torch.no_grad()
 def infer_solver_from_burst(
     solver: torch.nn.Module,
@@ -326,23 +356,12 @@ def infer_solver_from_burst(
     if shift_arr.shape != (burst.shape[0], 2):
         raise ValueError(f"shifts must be ({burst.shape[0]}, 2), got {shift_arr.shape}")
 
-    features_1x = fuse_burst_to_features(
+    cond, mean_ch = _solver_conditioning_from_burst(
         burst,
         shift_arr,
-        sigma_bg=float(getattr(training_config, "highpass_sigma", 5.0)),
+        training_config=training_config,
+        scale=scale,
     )
-    features_up = scipy_zoom(features_1x, (1, scale, scale), order=1).astype(np.float32)
-    if bool(getattr(training_config, "solver_no_drizzle", False)):
-        cond = features_up
-        mean_ch = 0
-    else:
-        n_bins = int(getattr(training_config, "phase_bin_channels", 4))
-        drz = phase_bin_drizzle(burst, shift_arr, scale=scale, n_bins=n_bins)
-        cond = np.concatenate([features_up, drz], axis=0).astype(np.float32, copy=False)
-        # Warm-start source must match training (ACL-032): aligned_mean (ch0, de-waffled) vs the
-        # first phase-bin drizzle channel (ch5). cond stays 9ch either way.
-        mean_ch = 0 if str(getattr(training_config, "solver_warmstart", "phasebin")) == "aligned_mean" \
-            else HYBRID_DRIZZLE_MEAN_CHANNEL
 
     burst_sub, shifts_sub = _select_solver_eval_frames(
         burst,
@@ -410,6 +429,88 @@ def infer_solver_from_burst(
     if was_training:
         solver.train()
     return out_hr / np.maximum(weight_hr, 1e-6)
+
+
+@torch.no_grad()
+def infer_solver_from_burst_full_halo(
+    solver: torch.nn.Module,
+    lr_burst: np.ndarray,
+    shifts: np.ndarray,
+    *,
+    training_config: Any,
+    halo_hr: int,
+    device: torch.device | str,
+) -> np.ndarray:
+    """Run full-frame solver inference with an outer reflect halo, then crop to the original FOV.
+
+    This eval path avoids patch-local prox boundaries inside the visible image.  The halo is applied
+    on the LR burst before feature fusion; after solving on the enlarged field, the HR output is
+    cropped back to the original detector FOV.
+    """
+
+    scale = int(training_config.scale)
+    if scale <= 0:
+        raise ValueError("scale must be positive")
+    if int(halo_hr) < 0 or int(halo_hr) % scale != 0:
+        raise ValueError("halo_hr must be non-negative and divisible by scale")
+
+    requested_device = torch.device(device)
+    if requested_device.type == "cuda" and not torch.cuda.is_available():
+        requested_device = torch.device("cpu")
+
+    burst = np.asarray(lr_burst, dtype=np.float32)
+    shift_arr = np.asarray(shifts, dtype=np.float32)
+    if burst.ndim != 3:
+        raise ValueError(f"lr_burst must be (N,H,W), got {burst.shape}")
+    if shift_arr.shape != (burst.shape[0], 2):
+        raise ValueError(f"shifts must be ({burst.shape[0]}, 2), got {shift_arr.shape}")
+
+    halo_lr = int(halo_hr) // scale
+    if halo_lr > 0:
+        burst_solve = np.pad(
+            burst,
+            ((0, 0), (halo_lr, halo_lr), (halo_lr, halo_lr)),
+            mode="reflect",
+        ).astype(np.float32, copy=False)
+    else:
+        burst_solve = burst
+
+    cond, mean_ch = _solver_conditioning_from_burst(
+        burst_solve,
+        shift_arr,
+        training_config=training_config,
+        scale=scale,
+    )
+    burst_sub, shifts_sub = _select_solver_eval_frames(
+        burst_solve,
+        shift_arr,
+        int(getattr(training_config, "solver_m_frames", 16)),
+    )
+
+    solver = solver.to(requested_device)
+    was_training = solver.training
+    solver.eval()
+
+    obs_t = torch.from_numpy(np.ascontiguousarray(cond[None])).to(requested_device)
+    burst_t = torch.from_numpy(np.ascontiguousarray(burst_sub[None])).to(requested_device)
+    shifts_t = torch.from_numpy(np.ascontiguousarray(shifts_sub[None])).to(requested_device)
+    psf = _solver_real_psf(training_config, 1, requested_device)
+    frame_mask = _lr_edge_mask(
+        burst_solve.shape[-2],
+        burst_solve.shape[-1],
+        int(getattr(training_config, "solver_dc_rim_lr_px", 0)),
+        requested_device,
+    )
+    x0 = obs_t[:, mean_ch : mean_ch + 1]
+    pred_t = solver(x0, burst_t, shifts_t, psf, obs_t, frame_mask=frame_mask)
+    pred = pred_t.detach().float().cpu().numpy()[0, 0]
+    if was_training:
+        solver.train()
+    if int(halo_hr) > 0:
+        h_hr = int(burst.shape[-2]) * scale
+        w_hr = int(burst.shape[-1]) * scale
+        pred = pred[int(halo_hr) : int(halo_hr) + h_hr, int(halo_hr) : int(halo_hr) + w_hr]
+    return pred.astype(np.float32, copy=False)
 
 
 @lru_cache(maxsize=1)
@@ -545,16 +646,29 @@ def maybe_log_solver_real_eval(
 
     raw_frames, shifts = _load_real_eval_cache(config.frame_limit, config.alignment_method)
     scale = int(training_config.scale)
-    solver_temp = infer_solver_from_burst(
-        solver,
-        raw_frames,
-        shifts,
-        training_config=training_config,
-        patch_size_hr=int(training_config.patch_size_hr),
-        overlap=int(config.overlap),
-        tile_batch_size=int(config.tile_batch),
-        device=device,
-    ).astype(np.float32, copy=False)
+    solver_mode = str(getattr(config, "solver_mode", "tiled"))
+    if solver_mode == "full_halo":
+        solver_temp = infer_solver_from_burst_full_halo(
+            solver,
+            raw_frames,
+            shifts,
+            training_config=training_config,
+            halo_hr=int(getattr(config, "solver_halo_hr", 0)),
+            device=device,
+        ).astype(np.float32, copy=False)
+    elif solver_mode == "tiled":
+        solver_temp = infer_solver_from_burst(
+            solver,
+            raw_frames,
+            shifts,
+            training_config=training_config,
+            patch_size_hr=int(training_config.patch_size_hr),
+            overlap=int(config.overlap),
+            tile_batch_size=int(config.tile_batch),
+            device=device,
+        ).astype(np.float32, copy=False)
+    else:
+        raise ValueError(f"unknown solver real-eval mode: {solver_mode!r}")
     solver_hp = highpass_preprocess(
         solver_temp,
         sigma_bg=float(config.highpass_sigma or training_config.highpass_sigma),
@@ -580,6 +694,7 @@ def maybe_log_solver_real_eval(
     writer.add_scalar("eval_real/out_of_band_ratio", oob, step)
     writer.add_scalar("eval_real/artifact_score", score, step)
     writer.add_scalar("eval_real/frame_limit", float(config.frame_limit), step)
+    writer.add_scalar("eval_real/solver_halo_hr", float(getattr(config, "solver_halo_hr", 0)), step)
     # Physics-grounded real metric (ACL-032): ||A x - y|| on HELD-OUT real frames. Unlike the
     # synthetic PSNR/boundary_f1 (which reward fitting the GT generator and are anti-correlated
     # with real quality), this asks whether the reconstruction actually explains the observed
@@ -599,7 +714,11 @@ def maybe_log_solver_real_eval(
         eval_dir = Path(config.output_dir) / "eval_real"
         temp_png = save_ep11_temperature_figure(
             solver_temp,
-            eval_dir / f"solver_step{step}_center_zoom{int(config.zoom)}x_temperature.png",
+            eval_dir / (
+                f"solver_step{step}_{solver_mode}"
+                f"{int(getattr(config, 'solver_halo_hr', 0)) if solver_mode == 'full_halo' else ''}"
+                f"_center_zoom{int(config.zoom)}x_temperature.png"
+            ),
             zoom=config.zoom,
             center_fraction=config.center_fraction,
             step=step,

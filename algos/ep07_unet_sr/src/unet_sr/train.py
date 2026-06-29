@@ -167,6 +167,8 @@ def train(config: TrainingConfig) -> Path:
         zoom=config.real_eval_zoom,
         overlap=config.real_eval_overlap,
         tile_batch=config.real_eval_tile_batch,
+        solver_mode=config.real_eval_solver_mode,
+        solver_halo_hr=config.real_eval_solver_halo_hr,
         highpass_sigma=config.highpass_sigma,
         output_dir=str(output_dir),
     )

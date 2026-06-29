@@ -13,6 +13,7 @@ from unet_sr.real_eval import (
     _temperature_rgb,
     center_fraction_crop,
     infer_solver_from_burst,
+    infer_solver_from_burst_full_halo,
     zoom_center,
 )
 
@@ -124,4 +125,24 @@ def test_infer_solver_from_burst_hybrid_uses_9ch_contract() -> None:
     assert out.shape == (16, 20)
     assert np.isfinite(out).all()
     assert set(solver.cond_channels) == {9}
+    assert set(solver.burst_frames) == {3}
+
+
+def test_infer_solver_from_burst_full_halo_crops_back_to_original_fov() -> None:
+    solver = RecordingSolver()
+    burst = np.ones((7, 8, 10), dtype=np.float32) * 21.0
+    shifts = np.linspace(-0.2, 0.2, 14, dtype=np.float32).reshape(7, 2)
+
+    out = infer_solver_from_burst_full_halo(
+        solver,
+        burst,
+        shifts,
+        training_config=_solver_eval_config(solver_no_drizzle=True),
+        halo_hr=2,
+        device="cpu",
+    )
+
+    assert out.shape == (16, 20)
+    assert np.isfinite(out).all()
+    assert set(solver.cond_channels) == {5}
     assert set(solver.burst_frames) == {3}

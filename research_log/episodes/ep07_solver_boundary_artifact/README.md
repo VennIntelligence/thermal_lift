@@ -28,6 +28,7 @@ Evidence:
    - `halo0`: artifact remains
    - `halo64`, `halo96`, `halo128`: the visible square glow disappears or is pushed outside the visible crop
 4. Full-frame outer-halo tests completed successfully on the RTX 5090, suggesting a practical eval-time mitigation.
+5. A final dense-tile test kept the original `patch_size_hr=192`, `overlap=160` (`32 HR px` step) grid, but solved each tile with extra real-context halo and cropped back to the original visible tile. This directly tests whether the original fine tile grid can be retained while suppressing prox boundary artifacts.
 
 Interpretation:
 
@@ -45,6 +46,9 @@ The regular square is a boundary response of the patch-local prox network.  Each
 - `11_flatroi_halo_lowpass_delta_vs_aligned.png`: lowpass view showing the broad square response disappearing with halo.
 - `12_full_outer_halo_temp_center2third.png`: full-frame outer-halo comparison.
 - `13_full_outer_halo_lowpass_delta_center2third.png`: full-frame lowpass delta against aligned input.
+- `15_dense_tile_halo_temp_center2third.png`: original dense `p192/o160` tiled output vs the same dense grid with per-tile halo `64/96/128 HR px`.
+- `16_dense_tile_halo_temp_flatroi.png`: the same dense-grid halo comparison on the diagnostic flat ROI.
+- `17_dense_tile_halo_lowpass_delta_flatroi.png`: lowpass delta view for the flat ROI, emphasizing the broad square glow suppression.
 
 ## Full-Frame Outer-Halo Memory Notes
 
@@ -65,4 +69,3 @@ Treat the peak-memory numbers as run-local diagnostics rather than exact scaling
 2. Add an eval path for full-frame halo inference so this is reproducible from CLI, not only from ad hoc diagnostics.
 3. For the training-side fix, consider reflect-padding prox convolutions, valid-center training/inference, and/or an overlap-consistency loss so the model does not learn patch-edge-dependent solutions.
 4. For a cleaner architectural fix, consider splitting the output into a full-frame lowpass anchor plus a learned highpass/residual solver, reducing the prox network's freedom to create low/mid-frequency square illumination.
-

@@ -8,6 +8,48 @@
 
 ## 变更记录
 
+### [ACL-038] 2026-06-30 — solver real-eval 支持 full-frame outer halo,避免 prox 边界方框进入可视 FOV
+
+**问题诊断**:
+- no-drizzle solver 的真实图中仍可见规则方框。进一步 TensorBoard 分解显示: `x0/aligned_mean` 无方框,`prox1` 立即产生强方框,`dc1` 只能削弱;`prox2` 再次产生,`dc2` 再次削弱。
+- 同一可视 flat ROI 上,保持输出区域不变但扩大求解上下文: `halo0` 有方框,`halo64/96/128` 的可视方框消失。说明方框主要是 learned prox 的 patch-local 边界响应,不是 alignment、drizzle 或最终 stitch window。
+- full-frame outer halo 诊断显示 K2 checkpoint 在 RTX 5090 上可跑 `halo_hr=64/96/128`,峰值显存约 11.6-16.0GB 量级,作为 real-eval 路径可行。
+
+**修改内容**:
+1. `real_eval.py` 新增 `_solver_conditioning_from_burst()` 复用 solver 条件构建逻辑,避免 tiled/full-halo 两条路径重复。
+2. `real_eval.py` 新增 `infer_solver_from_burst_full_halo()`:
+   - 在 LR burst 上做 outer reflect halo;
+   - halo 后构建 no-drizzle/hybrid 条件通道;
+   - 对 enlarged field 做一次 full-frame solver;
+   - 最后 crop 回原始 detector FOV。
+3. `RealEvalConfig` / `TrainingConfig` / CLI 新增:
+   - `--real-eval-solver-mode {tiled,full_halo}`
+   - `--real-eval-solver-halo-hr N`
+4. `solver_train.py` 和 `train.py` 将新增 real-eval 配置传入 `RealEvalConfig`。默认仍为 `tiled`,保持老实验口径;显式开启 `full_halo` 后才改变 solver real eval。
+5. `tests/test_real_eval.py` 添加 full-halo crop-back contract 测试;`tests/test_config.py` 添加 CLI 解析/校验测试。
+
+**预期效果**:
+- 训练期间 TensorBoard `eval_real/*` 可直接展示 full-frame outer-halo solver 输出,避免 tiled eval 在真实图中引入 prox 边界方框。
+- 不改变训练 loss 或 checkpoint 权重;这是 eval/inference 路径修复。若视觉确认有效,后续再考虑把 full-halo 作为默认 solver real-eval 口径。
+- 风险: full-frame solver eval 比 tiled eval 单次显存峰值更高;当前 K2 checkpoint 通过,但 K4/更大模型仍需实测。`--real-eval-solver-halo-hr` 必须能被 `--scale` 整除。
+
+**推荐参数**:
+```bash
+--real-eval-solver-mode full_halo --real-eval-solver-halo-hr 64
+```
+
+完整对标命令见本条训练结果/结论中的建议;训练本身仍建议从头跑 no-drizzle,不从旧中断 checkpoint resume。
+
+**训练结果**: _(待 50K 主线训练后回填)_
+- 输出目录: 推荐 `outputs/solver_v8_nodrizzle_fullhalo_eval`
+- 视觉效果: 已在 `outputs/solver_v7_k2_nodrizzle_flat005_smoke/tb_logs` 追加 `eval_dense_tile_halo/*` 诊断图:原 `p192/o160` 细密 tiled 配置加 per-tile halo 后,可直接对比 `aligned | dense no-halo | dense halo64 | halo96 | halo128`。
+- 关键指标: full-frame outer halo 诊断在 K2 smoke checkpoint 上通过 `halo_hr=0/64/96/128`;实测峰值约 `11.6/14.5/16.0/9.4GB`(CUDA allocator 影响较大,作相对参考)。
+- 结论: eval 侧优先使用 `full_halo + halo_hr=64` 查看真实图;若仍有外边缘伪影再试 96/128。
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/real_eval.py`, `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/solver_train.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/tests/test_real_eval.py`, `algos/ep07_unet_sr/tests/test_config.py`
+
+---
+
 ### [ACL-037] 2026-06-29 — K4 shared solver 的 30px 方块来自 recurrent prox 残差累积,主线改为 K2
 
 **问题诊断**:
