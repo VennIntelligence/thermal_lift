@@ -36,6 +36,7 @@ class RealEvalConfig:
     center_fraction: float = 1.0 / 3.0
     zoom: float = 3.0
     overlap: int = 128
+    tile_batch: int = 16
     highpass_sigma: float = 5.0
     workers: int = 2
     output_dir: str = ""
@@ -297,6 +298,7 @@ def infer_solver_from_burst(
     patch_size_hr: int,
     overlap: int,
     device: torch.device | str,
+    tile_batch_size: int = 16,
 ) -> np.ndarray:
     """Run tiled real-data inference for the unrolled solver.
 
@@ -353,13 +355,13 @@ def infer_solver_from_burst(
     step_lr = max(1, patch_lr - overlap_lr)
     ys = _positions(h_lr, patch_lr, step_lr)
     xs = _positions(w_lr, patch_lr, step_lr)
+    tile_batch_size = max(1, int(tile_batch_size))
     out_hr = np.zeros((h_lr * scale, w_lr * scale), dtype=np.float32)
     weight_hr = np.zeros_like(out_hr)
 
     solver = solver.to(requested_device)
     was_training = solver.training
     solver.eval()
-    psf = _solver_real_psf(training_config, 1, requested_device)
     frame_mask = _lr_edge_mask(
         patch_lr,
         patch_lr,
@@ -367,8 +369,12 @@ def infer_solver_from_burst(
         requested_device,
     )
 
-    for y_lr in ys:
-        for x_lr in xs:
+    tiles = [(y_lr, x_lr) for y_lr in ys for x_lr in xs]
+    for start in range(0, len(tiles), tile_batch_size):
+        chunk = tiles[start:start + tile_batch_size]
+        cond_patches: list[np.ndarray] = []
+        burst_patches: list[np.ndarray] = []
+        for y_lr, x_lr in chunk:
             y_hr = y_lr * scale
             x_hr = x_lr * scale
             cond_patch = cond[:, y_hr : y_hr + patch_size_hr, x_hr : x_hr + patch_size_hr]
@@ -377,17 +383,26 @@ def infer_solver_from_burst(
             burst_patch = burst_sub[:, y_lr : y_lr + patch_lr, x_lr : x_lr + patch_lr]
             if burst_patch.shape != (burst_sub.shape[0], patch_lr, patch_lr):
                 raise RuntimeError(f"burst patch shape mismatch: {burst_patch.shape}")
-            obs_t = torch.from_numpy(cond_patch[None]).to(requested_device)
-            x0 = obs_t[:, mean_ch : mean_ch + 1]
-            pred_t = solver(
-                x0,
-                torch.from_numpy(burst_patch[None]).to(requested_device),
-                torch.from_numpy(shifts_sub[None]).to(requested_device),
-                psf,
-                obs_t,
-                frame_mask=frame_mask,
-            )
-            pred = pred_t.detach().float().cpu().numpy()[0, 0]
+            cond_patches.append(cond_patch)
+            burst_patches.append(burst_patch)
+        bsz = len(chunk)
+        obs_t = torch.from_numpy(np.stack(cond_patches, axis=0)).to(requested_device)
+        burst_t = torch.from_numpy(np.stack(burst_patches, axis=0)).to(requested_device)
+        shifts_t = torch.from_numpy(np.broadcast_to(shifts_sub, (bsz, *shifts_sub.shape)).copy()).to(requested_device)
+        psf = _solver_real_psf(training_config, bsz, requested_device)
+        x0 = obs_t[:, mean_ch : mean_ch + 1]
+        pred_t = solver(
+            x0,
+            burst_t,
+            shifts_t,
+            psf,
+            obs_t,
+            frame_mask=frame_mask,
+        )
+        pred_np = pred_t.detach().float().cpu().numpy()[:, 0]
+        for (y_lr, x_lr), pred in zip(chunk, pred_np, strict=True):
+            y_hr = y_lr * scale
+            x_hr = x_lr * scale
             window = _window_2d(*pred.shape)
             out_hr[y_hr : y_hr + pred.shape[0], x_hr : x_hr + pred.shape[1]] += pred * window
             weight_hr[y_hr : y_hr + pred.shape[0], x_hr : x_hr + pred.shape[1]] += window
@@ -537,6 +552,7 @@ def maybe_log_solver_real_eval(
         training_config=training_config,
         patch_size_hr=int(training_config.patch_size_hr),
         overlap=int(config.overlap),
+        tile_batch_size=int(config.tile_batch),
         device=device,
     ).astype(np.float32, copy=False)
     solver_hp = highpass_preprocess(

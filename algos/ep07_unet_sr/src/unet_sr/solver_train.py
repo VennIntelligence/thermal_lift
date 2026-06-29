@@ -20,8 +20,10 @@ Usage (see docs/REMOTE_ORDERS.md):
 from __future__ import annotations
 
 import time
+import warnings
 from itertools import count
 from pathlib import Path
+from typing import Any
 
 import torch
 from torch.utils.data import DataLoader
@@ -56,6 +58,47 @@ def _checkpoint_state_dict(solver: UnrolledSolver) -> dict[str, torch.Tensor]:
 
     state = solver.state_dict()
     return {key.replace("._orig_mod.", "."): value for key, value in state.items()}
+
+
+def _save_solver_checkpoint(
+    path: Path,
+    *,
+    step: int,
+    solver: UnrolledSolver,
+    optimizer: torch.optim.Optimizer,
+    scheduler: torch.optim.lr_scheduler.LRScheduler,
+    config: TrainingConfig,
+) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    torch.save(
+        {
+            "step": int(step),
+            "model_state_dict": _checkpoint_state_dict(solver),
+            "optimizer_state_dict": optimizer.state_dict(),
+            "scheduler_state_dict": scheduler.state_dict(),
+            "config": vars(config),
+        },
+        path,
+    )
+
+
+def _load_resume_checkpoint(path_text: str, device: torch.device) -> tuple[Path, dict[str, Any], int]:
+    ckpt_path = Path(path_text)
+    if not ckpt_path.exists():
+        raise FileNotFoundError(f"resume checkpoint not found: {ckpt_path}")
+    ckpt = torch.load(ckpt_path, map_location=device, weights_only=False)
+    if not isinstance(ckpt, dict) or "model_state_dict" not in ckpt:
+        raise ValueError(f"unsupported solver checkpoint format: {ckpt_path}")
+    return ckpt_path, ckpt, int(ckpt.get("step", 0))
+
+
+def _fast_forward_scheduler(scheduler: torch.optim.lr_scheduler.LRScheduler, steps: int) -> None:
+    """Approximate scheduler state for legacy solver checkpoints without scheduler_state_dict."""
+
+    with warnings.catch_warnings():
+        warnings.filterwarnings("ignore", message="Detected call of `lr_scheduler.step\\(\\)` before")
+        for _ in range(max(0, int(steps))):
+            scheduler.step()
 
 
 def build_scene_psf(batch: dict, device: torch.device) -> ScenePSF:
@@ -139,8 +182,11 @@ def train(config: TrainingConfig) -> Path:
     output_dir.mkdir(parents=True, exist_ok=True)
     tb_dir = Path(config.tb_log_dir or (output_dir / "tb_logs"))
     tb_dir.mkdir(parents=True, exist_ok=True)
-    writer = SummaryWriter(log_dir=str(tb_dir))
-    print(f"TensorBoard logs → {tb_dir}  (tensorboard --logdir {tb_dir})")
+    resume_ckpt: dict[str, Any] | None = None
+    resume_path: Path | None = None
+    start_step = 0
+    if config.resume_from:
+        resume_path, resume_ckpt, start_step = _load_resume_checkpoint(config.resume_from, device)
     real_eval_cfg = RealEvalConfig(
         enabled=config.real_eval_enabled,
         every=config.real_eval_every,
@@ -150,6 +196,7 @@ def train(config: TrainingConfig) -> Path:
         center_fraction=config.real_eval_center_fraction,
         zoom=config.real_eval_zoom,
         overlap=config.real_eval_overlap,
+        tile_batch=config.real_eval_tile_batch,
         highpass_sigma=config.highpass_sigma,
         output_dir=str(output_dir),
         save_png=True,
@@ -206,6 +253,8 @@ def train(config: TrainingConfig) -> Path:
     )
 
     solver = build_solver(config, device, cond_channels)
+    if resume_ckpt is not None:
+        solver.load_state_dict(resume_ckpt["model_state_dict"])
     if config.compile_model:
         _compile_solver_prox(solver)
     criterion = build_criterion(config)
@@ -224,6 +273,25 @@ def train(config: TrainingConfig) -> Path:
             optimizer, schedulers=[warmup, cosine], milestones=[config.lr_warmup_steps])
     else:
         scheduler = cosine
+    if resume_ckpt is not None:
+        if "optimizer_state_dict" in resume_ckpt:
+            optimizer.load_state_dict(resume_ckpt["optimizer_state_dict"])
+        else:
+            print(
+                "Resume checkpoint has no optimizer_state_dict; continuing as a warm restart "
+                "with fresh AdamW moments."
+            )
+        if "scheduler_state_dict" in resume_ckpt:
+            scheduler.load_state_dict(resume_ckpt["scheduler_state_dict"])
+        else:
+            _fast_forward_scheduler(scheduler, start_step)
+            print(f"Resume checkpoint has no scheduler_state_dict; fast-forwarded scheduler to step {start_step}.")
+        print(f"Resumed solver from {resume_path} at step {start_step}")
+    writer_kwargs: dict[str, Any] = {"log_dir": str(tb_dir)}
+    if start_step > 0:
+        writer_kwargs["purge_step"] = start_step + 1
+    writer = SummaryWriter(**writer_kwargs)
+    print(f"TensorBoard logs → {tb_dir}  (tensorboard --logdir {tb_dir})")
 
     p1 = config.patch_size_hr // config.scale
     mask = edge_mask(p1, p1, config.solver_dc_rim_lr_px, device)
@@ -251,11 +319,25 @@ def train(config: TrainingConfig) -> Path:
                       build_scene_psf(batch, dev), obs_e, frame_mask=mask)
 
     solver.train()
-    step = 0
+    step = start_step
     t0 = time.monotonic()
     # disable=None auto-disables the bar on a non-TTY (e.g. nohup > log) so the periodic
     # progress.write() lines stay clean; on a terminal you get the live bar + ETA + postfix.
-    progress = tqdm(total=config.total_steps, desc="Solver", dynamic_ncols=True, disable=None)
+    progress = tqdm(total=config.total_steps, initial=start_step, desc="Solver", dynamic_ncols=True, disable=None)
+    if step >= config.total_steps:
+        progress.close()
+        final = output_dir / "solver_final.pt"
+        _save_solver_checkpoint(
+            final,
+            step=step,
+            solver=solver,
+            optimizer=optimizer,
+            scheduler=scheduler,
+            config=config,
+        )
+        print(f"resume step {step} already reached total_steps={config.total_steps}; saved {final}")
+        writer.close()
+        return final
     for epoch in count():
         dataset.set_epoch(epoch)
         sampler.set_epoch(epoch)
@@ -304,7 +386,8 @@ def train(config: TrainingConfig) -> Path:
                 else:
                     dc_log = dc.detach()
                 eta = float(torch.nn.functional.softplus(solver.eta_raw.detach()).mean())
-                ms = (time.monotonic() - t0) * 1000.0 / step
+                resumed_steps = max(1, step - start_step)
+                ms = (time.monotonic() - t0) * 1000.0 / resumed_steps
                 progress.set_postfix_str(
                     f"total={float(total.detach()):.4f} dc={float(dc_log):.5f} eta={eta:.3f} gnorm={grad_norm:.2f}")
                 # Break out every ContourSRLoss component (mse/highpass/edge/ssim/grad_vector, plus
@@ -331,8 +414,14 @@ def train(config: TrainingConfig) -> Path:
                 _log_pred_vs_target(writer, pred, target, step)
             if step % config.save_every == 0:
                 ckpt = output_dir / f"solver_step_{step:06d}.pt"
-                torch.save({"step": step, "model_state_dict": _checkpoint_state_dict(solver),
-                            "config": vars(config)}, ckpt)
+                _save_solver_checkpoint(
+                    ckpt,
+                    step=step,
+                    solver=solver,
+                    optimizer=optimizer,
+                    scheduler=scheduler,
+                    config=config,
+                )
                 progress.write(f"saved {ckpt}")
                 real_metrics = maybe_log_solver_real_eval(
                     writer,
@@ -362,7 +451,14 @@ def train(config: TrainingConfig) -> Path:
 
     progress.close()
     final = output_dir / "solver_final.pt"
-    torch.save({"step": step, "model_state_dict": _checkpoint_state_dict(solver), "config": vars(config)}, final)
+    _save_solver_checkpoint(
+        final,
+        step=step,
+        solver=solver,
+        optimizer=optimizer,
+        scheduler=scheduler,
+        config=config,
+    )
     print(f"saved {final}")
     maybe_log_solver_real_eval(
         writer,

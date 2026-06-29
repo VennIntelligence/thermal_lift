@@ -166,6 +166,7 @@ def train(config: TrainingConfig) -> Path:
         center_fraction=config.real_eval_center_fraction,
         zoom=config.real_eval_zoom,
         overlap=config.real_eval_overlap,
+        tile_batch=config.real_eval_tile_batch,
         highpass_sigma=config.highpass_sigma,
         output_dir=str(output_dir),
     )

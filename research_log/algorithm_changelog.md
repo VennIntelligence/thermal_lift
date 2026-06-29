@@ -8,6 +8,72 @@
 
 ## 变更记录
 
+### [ACL-035] 2026-06-29 — solver 真实数据评估改为 tile batching
+
+**问题诊断**:
+- `maybe_log_solver_real_eval()` 在每个 checkpoint 会对 248 帧真实主 session 做 EP11-style 推理;默认 `patch_size_hr=192`、`overlap=128` 时约 234 个 tile。
+- 旧实现逐 tile 以 batch=1 调用 solver,每个 tile 都重复 K-step prox + DC 物理步,大量 GPU launch 被拆碎;这会让 checkpoint 后验/真实评估明显拖慢,尤其是新增 `eval_real/dc_resid_*` 后整体评估更重。
+
+**修改内容**:
+1. `real_eval.py` 的 `infer_solver_from_burst()` 新增 `tile_batch_size`,把多个 full-frame tile 堆叠成一个 batch 送入 solver;PSF、burst、shift 和 frame mask 按 batch 广播/构造。
+2. `config.py` 新增 CLI 参数 `--real-eval-tile-batch`(默认 16),并在 `train.py` / `solver_train.py` 的 `RealEvalConfig` 中传递。
+3. 保持输出 blending、window 加权和温度/高通指标口径不变;只减少 checkpoint eval 的小 batch 调用开销。
+
+**预期效果**:
+- checkpoint real_eval 墙钟时间下降,尤其是 GPU 上的 solver tile inference;训练主 step 数学不变。
+- 风险: tile batch 过大可能增加显存峰值;显存不足时把 `--real-eval-tile-batch` 降到 8 或 4。
+
+**推荐参数**: `--real-eval-tile-batch 16`；若显存充足可试 `24` 或 `32`,若 checkpoint eval OOM 则降到 `8`。
+
+**训练结果**: _(训练后填写)_
+- 输出目录: `outputs/solver_v5_nodrizzle`
+- 视觉效果:
+- 关键指标:
+- 结论:
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/real_eval.py`, `algos/ep07_unet_sr/src/unet_sr/config.py`, `algos/ep07_unet_sr/src/unet_sr/train.py`, `algos/ep07_unet_sr/src/unet_sr/solver_train.py`
+
+### [ACL-034] 2026-06-29 — solver_train 支持完整 resume 与 TensorBoard purge 续写
+
+**问题诊断**:
+- `solver_train.py` 虽然继承了通用 `--resume` CLI 参数,但此前没有实际读取 `config.resume_from`;中断后重跑会从 step 0 开始,并在同一 TensorBoard logdir 写入重叠 step,导致曲线混乱。
+- 旧 solver checkpoint 只保存 `step`、`model_state_dict`、`config`,缺少 AdamW 动量与 LR scheduler 状态;从旧 checkpoint 只能做权重 warm restart,不能做到数学意义上的无缝续训。
+
+**修改内容**:
+1. `solver_train.py` 新增 `_save_solver_checkpoint()` / `_load_resume_checkpoint()`,新 checkpoint 保存并恢复 `optimizer_state_dict` 与 `scheduler_state_dict`。
+2. 恢复时将训练步数、tqdm 初始值和日志 global step 设为 checkpoint step;旧 checkpoint 缺少 optimizer 时明确提示 fresh AdamW moments,缺少 scheduler 时按 step 快进 scheduler。
+3. TensorBoard writer 在 resume 时使用 `purge_step=start_step + 1`,保留 checkpoint step 及之前曲线,隐藏中断尾部的脏事件。
+4. 修复 resume step 已达到 `--total-steps` 时仍多跑一步的边界问题;直接保存 `solver_final.pt` 并退出。
+
+**预期效果**:
+- 新 checkpoint 起可正常中断/恢复 optimizer、scheduler 和训练步数;TensorBoard 曲线从旧 step 后自然续写。
+- 从历史 `solver_step_010000.pt` 恢复仍是 warm restart,AdamW 动量无法补回;但保留 10K 权重并重建 scheduler 位置,优于从头训练。
+- 风险: 旧 checkpoint 的 optimizer 动量缺失可能造成恢复后短期 loss 抖动;后续新 checkpoint 不再有这个问题。
+
+**推荐参数**:
+```bash
+uv run python -m unet_sr.solver_train \
+  --training-pool-dir ../../data/synthetic/pool_2x_v5_5k \
+  --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 4 \
+  --solver-m-frames 12 --solver-band-sigma 5 \
+  --solver-prior-anneal-steps 0 --solver-dc-weight 0 \
+  --boundary-boost 4.0 --flatness-weight 0.0 \
+  --synth-eval-holdout 200 --synth-eval-every 2500 \
+  --batch-size 20 --patch-size-hr 192 \
+  --num-workers 14 --compile --log-every 1000 --save-every 5000 \
+  --solver-no-drizzle \
+  --output-dir outputs/solver_v5_nodrizzle --total-steps 50000 \
+  --resume outputs/solver_v5_nodrizzle/solver_step_010000.pt
+```
+
+**训练结果**: _(训练后填写)_
+- 输出目录: `outputs/solver_v5_nodrizzle`
+- 视觉效果:
+- 关键指标:
+- 结论:
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/solver_train.py`
+
 ### [ACL-033] 2026-06-29 — 物理前向算子向量化(去掉 per-sample 循环,grouped-conv 批处理)
 
 **问题诊断**:

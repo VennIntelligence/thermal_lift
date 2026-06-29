@@ -70,6 +70,7 @@ class TrainingConfig:
     real_eval_center_fraction: float = 1.0 / 3.0
     real_eval_zoom: float = 3.0
     real_eval_overlap: int = 128
+    real_eval_tile_batch: int = 16
     # --- Held-out synthetic GT eval (PSNR / region-RMSE / defect boundary-F1 /
     # out-of-band). Eval scenes are a fixed tail of the pool, excluded from
     # training (no leakage). synth_eval_holdout=0 disables it. ---
@@ -247,6 +248,8 @@ class TrainingConfig:
             raise ValueError("real_eval_zoom must be positive")
         if self.real_eval_overlap < 0 or self.real_eval_overlap >= self.patch_size_hr:
             raise ValueError("real_eval_overlap must satisfy 0 <= overlap < patch_size_hr")
+        if self.real_eval_tile_batch <= 0:
+            raise ValueError("real_eval_tile_batch must be positive")
         if self.synth_eval_every < 0:
             raise ValueError("synth_eval_every must be >= 0")
         if self.synth_eval_holdout < 0:
@@ -482,6 +485,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
         default=TrainingConfig.real_eval_overlap,
         help="Tiled inference overlap for real eval.",
     )
+    parser.add_argument(
+        "--real-eval-tile-batch",
+        type=int,
+        default=TrainingConfig.real_eval_tile_batch,
+        help="Number of full-frame real-eval tiles evaluated per solver batch (default: 16).",
+    )
     # --- Held-out synthetic GT eval ---
     parser.add_argument("--synth-eval", action=argparse.BooleanOptionalAction,
                         default=TrainingConfig.synth_eval_enabled, dest="synth_eval_enabled",
@@ -593,6 +602,7 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         real_eval_center_fraction=args.real_eval_center_fraction,
         real_eval_zoom=args.real_eval_zoom,
         real_eval_overlap=args.real_eval_overlap,
+        real_eval_tile_batch=args.real_eval_tile_batch,
         synth_eval_enabled=args.synth_eval_enabled,
         synth_eval_every=args.synth_eval_every,
         synth_eval_holdout=args.synth_eval_holdout,
