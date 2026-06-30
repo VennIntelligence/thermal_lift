@@ -91,3 +91,20 @@ Decision implication: do not use `full_halo96` alone as the main K4 real-eval
 selection view. Prefer tiled views for checkpoint quality judgment, then test
 degrid/tile-halo candidates separately for removing the grid without changing
 the learned structure prior too much.
+
+Follow-up visual read after the tile-halo comparison:
+
+- `tile_halo_single_temp/full_halo96`: worst flocculent texture; grid is gone,
+  but thin structures swell and become visually poor.
+- `tile_halo_single_temp/tile_halo96`: less flocculent than full-frame halo,
+  but still worse than the gridded tiled render.
+- `tile_halo_single_temp/tile_halo64`: least flocculent among halo variants,
+  but a faint grid returns and the result is still not clean.
+- `tile_halo_single_temp/tiled_p192_o128`: sharpest/cleanest structures, but
+  with the strongest visible grid.
+
+This establishes a clear tradeoff rather than a root fix: increasing solver
+context suppresses the grid but moves the prox further from its 192-patch
+training distribution; decreasing context preserves structure but keeps the
+grid. The current evidence should be reviewed by a second agent before adding
+more ad-hoc inference postprocessing.
