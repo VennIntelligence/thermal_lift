@@ -108,3 +108,22 @@ context suppresses the grid but moves the prox further from its 192-patch
 training distribution; decreasing context preserves structure but keeps the
 grid. The current evidence should be reviewed by a second agent before adding
 more ad-hoc inference postprocessing.
+
+## Second-agent root-cause diagnosis (2026-06-30)
+
+See `diagnosis_20260630/DIAGNOSIS.md`. Offline analysis of the render arrays plus
+an architecture extent-invariance test (`diag_extent.py`, no checkpoint needed)
+confirms and quantifies the mechanism:
+
+- The grid is a prox **patch-boundary + stitch** artifact: a seam comb present in
+  every tiled variant, absent in `full_halo`, suppressed monotonically by larger
+  solve context (NOT in the target; not the stitch window or DC rim).
+- The flocculence/swelling/background-lift is the **GroupNorm + SE extent
+  distribution shift** (user hypothesis CONFIRMED): a far-field perturbation 272 px
+  away changes a window's prediction by ~1.4σ with GroupNorm+SE but **exactly 0**
+  for a pure-conv UNet; SE and GroupNorm contribute ~equally. K4 recurrence
+  amplifies it ~linearly (composes with ACL-037).
+- `halo` is a single tradeoff knob (small=sharp+grid, large=clean-bg+shifted),
+  not a fix. Prioritized experiments E1–E5 (offset-averaged tiling first; then
+  multi-scale training / drop-SE / K2+damping / lowpass-anchor split) are in the
+  report with pass/fail criteria. Reproducible metrics: `diag_arrays*.py`.
