@@ -31,6 +31,13 @@ This archive preserves the meaningful V8/K4 real-eval images before deleting
   - `dense_p192_o160`: denser small-grid tiled diagnostic口径.
   - `full_halo96`: full-frame outer-halo solver eval.
   Difference panels subtract `tiled_p192_o128`.
+- `figures/candidate_step10000_degrid_*.png`:
+  post-render low-frequency graft candidates. These keep the tiled/dense
+  high-frequency detail and replace only a Gaussian lowpass component with the
+  aligned-mean lowpass.
+- `figures/candidate_step10000_tile_halo_*.png`:
+  per-tile outer-halo candidates. Each legacy `p192/o128` tile is solved with
+  halo `32/64/96`, cropped back to the central 192 HR patch, then stitched.
 - `scalars/*.csv`:
   scalar series exported from the original TensorBoard event file.
 
@@ -50,6 +57,10 @@ Important tags:
 - `eval_compare_v8k4_step10000/highpass_aligned_tiled_dense_fullhalo`
 - `eval_compare_v8k4_step10000/temp_diff_vs_tiled`
 - `eval_compare_v8k4_step10000/highpass_diff_vs_tiled`
+- `eval_compare_v8k4_step10000/degrid_candidates_temp`
+- `eval_compare_v8k4_step10000/degrid_candidates_highpass`
+- `eval_compare_v8k4_step10000/tile_halo_candidates_temp`
+- `eval_compare_v8k4_step10000/tile_halo_candidates_highpass`
 
 ## Interpretation Note
 
@@ -58,3 +69,25 @@ The visible TensorBoard result differs from older tiled views because the
 real-eval renderer was explicitly switched to `full_halo96`. This changes the
 evaluation/inference context, not the training batch, loss, optimizer, or saved
 weights.
+
+User visual read after the first comparison:
+
+- `aligned_mean` is the original blurry baseline.
+- Legacy `tiled_p192_o128` is clear but has visible grid artifacts.
+- Dense `p192/o160` looks close to the legacy tiled output.
+- `full_halo96` removes the grid, but fine structural lines become swollen and
+  show flocculent texture; this is visually unacceptable.
+
+Mechanism hypothesis:
+
+- The prox UNet is trained and supervised on 192 HR patches.
+- It contains GroupNorm and SE attention, both of which depend on spatial
+  statistics. Running the shared K4 prox on the entire full-frame halo field is
+  therefore a distribution shift, not a neutral boundary-only change.
+- K4 recurrent reuse can amplify this shifted prox response, explaining why
+  `full_halo96` removes the tile boundary while worsening thin structures.
+
+Decision implication: do not use `full_halo96` alone as the main K4 real-eval
+selection view. Prefer tiled views for checkpoint quality judgment, then test
+degrid/tile-halo candidates separately for removing the grid without changing
+the learned structure prior too much.
