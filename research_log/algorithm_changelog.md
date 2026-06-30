@@ -54,6 +54,10 @@
   - `v10_v4_acl027` smooth UNet @40k real artifact `0.2597`, real OOB `1.56e-5`,但 synth PSNR/视觉锐度明显低。
 - 视觉效果: 用户目视确认 v11 相比旧 solver/V10 sharp/纯 UNet 更糊,后期锐度提升有限。当前数字支持该判断:20k 后 synth PSNR 只从 `34.73` 增至 `35.17`,region RMSE 只从 `0.0906` 改至约 `0.085`,real artifact 反而升高。
 - 结论: `noSE+noGN+full_halo96` 成功降低了 halo/tiled 范围漂移风险,但牺牲了拟合/锐化能力;它是"干净但偏保守"的解,不是继续训练即可追上旧 `SE+GN` 或 V10 sharp 的解。后续若要追回锐度,优先考虑在不恢复 GN/SE 的前提下加 prox 容量、改高频残差/低频锚定结构或重新平衡 loss;不建议简单加长训练到 60k 作为主要改进手段。
+- Prompt A 后续 A/B _(2026-07-01,各 5k smoke,固定 seed=42)_:
+  - A 基线 `outputs/solver_v12_promptA_A_nodrizzle_5k`:保持 E3 noSE/noGN/p384/full_halo96,`--solver-no-drizzle`。5k 指标:PSNR `34.0004`,region RMSE `0.103536`,boundary F1 `0.861061`,synth OOB `0.009335`,real artifact `0.414338`,real OOB `0.001536`,DC band `1.21752`,DC full `1.50482`。
+  - B hybrid `outputs/solver_v12_promptA_B_hybrid_aligned_5k`:去掉 `--solver-no-drizzle`,使用 9ch hybrid cond(5 fused + 4 phase-bin drizzle),并设置 `--solver-warmstart aligned_mean` 去 ACL-032 波纹。5k 指标:PSNR `33.8948`,region RMSE `0.102609`,boundary F1 `0.861721`,synth OOB `0.010675`,real artifact `0.400323`,real OOB `0.001317`,DC band `1.21787`,DC full `1.50479`。
+  - 判定:B 没有满足"同时提升 synth PSNR/RMSE/F1、real artifact/OOB 不升、DC band residual 下降"的胜出条件。B 的 real artifact/OOB 略好,region RMSE/F1 略好,但 PSNR 略低、synth OOB 更高,且关键 `real dc_resid_band` 未下降(反而 `1.21752 -> 1.21787`)。结论:给 prox 喂回 phase-bin drizzle 通道没有让 solver 更有效利用真实多帧观测;不把 hybrid 9ch 设为新主线。
 
 **涉及文件**:
 - `algos/ep07_unet_sr/src/unet_sr/config.py`

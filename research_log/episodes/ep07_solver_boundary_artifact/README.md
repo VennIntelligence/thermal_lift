@@ -100,3 +100,42 @@ Decision implication:
 
 - Do not revert blindly to GroupNorm/SE: that restores capacity but reintroduces the extent/halo sensitivity this episode diagnosed.
 - If the next objective is sharper structure, prefer changes that keep the E3 stability premise: wider/deeper prox without GN/SE, high-frequency-residual-only prox with low-frequency anchor, or loss rebalancing aimed at edge strength without restoring the old range-dependent normalization/attention path.
+
+## Prompt A Conditioning A/B: no-drizzle vs hybrid aligned-mean (2026-07-01)
+
+Purpose: test whether feeding the solver prox with the extra phase-bin drizzle channels unlocks useful multi-frame/subpixel information and improves the soft V11 noSE/noGN behavior.
+
+Fixed setup for both 5k smoke runs:
+
+- K2 unroll, noSE/noGN prox, `patch_size_hr=384`, real eval `full_halo96`
+- Fixed seed: `42`
+- Training pool: `data/synthetic/pool_2x_v5_5k`
+
+Compared runs:
+
+- A baseline: `algos/ep07_unet_sr/outputs/solver_v12_promptA_A_nodrizzle_5k`
+  - Keeps `--solver-no-drizzle`
+  - Prox conditioning is the current 5-channel fused/aligned input path.
+- B hybrid: `algos/ep07_unet_sr/outputs/solver_v12_promptA_B_hybrid_aligned_5k`
+  - Removes `--solver-no-drizzle`
+  - Uses the 9-channel hybrid condition (`5 fused/aligned channels + 4 phase-bin drizzle channels`)
+  - Adds `--solver-warmstart aligned_mean` to avoid the old ACL-032 warm-start ripple.
+
+Key 5k metrics:
+
+| metric | A no-drizzle | B hybrid aligned-mean | Desired direction | Read |
+|---|---:|---:|---|---|
+| synth PSNR | 34.0004 | 33.8948 | higher | B worse |
+| synth region RMSE | 0.103536 | 0.102609 | lower | B slightly better |
+| synth boundary F1 | 0.861061 | 0.861721 | higher | B slightly better |
+| synth OOB | 0.009335 | 0.010675 | lower | B worse |
+| real artifact | 0.414338 | 0.400323 | lower | B better |
+| real OOB | 0.001536 | 0.001317 | lower | B better |
+| real DC band residual | 1.21752 | 1.21787 | lower | B not better |
+| real DC full residual | 1.50482 | 1.50479 | lower | tied |
+
+Conclusion:
+
+- B does not satisfy the pre-registered win condition. It improves real artifact/OOB and slightly improves region RMSE/F1, but loses synth PSNR, raises synth OOB, and the key real DC band residual does not decrease.
+- The important negative result is the DC band residual: adding phase-bin drizzle channels did not make the solver demonstrably use real multi-frame observations more effectively.
+- Keep the current no-drizzle E3 mainline for now. Treat hybrid 9-channel conditioning as an informative failed smoke test, not as a new default.
