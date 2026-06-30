@@ -8,9 +8,9 @@ from functools import lru_cache
 from pathlib import Path
 from typing import Any
 
+import matplotlib
 import numpy as np
 import torch
-from matplotlib import colormaps
 from scipy import ndimage
 from scipy.ndimage import zoom as scipy_zoom
 from scipy.ndimage import gaussian_filter, laplace
@@ -24,6 +24,8 @@ from .forward_torch import ScenePSF
 from .inference import infer_from_burst
 from .inference import _positions, _window_2d
 from .metrics import out_of_band_ratio
+
+matplotlib.use("Agg", force=True)
 
 
 @dataclass(frozen=True)
@@ -105,7 +107,7 @@ def _temperature_rgb(
         norm = np.zeros_like(image, dtype=np.float32)
     else:
         norm = np.clip((image - vmin) / (vmax - vmin), 0.0, 1.0).astype(np.float32, copy=False)
-    rgba = colormaps.get_cmap(cmap_name)(norm)
+    rgba = matplotlib.colormaps.get_cmap(cmap_name)(norm)
     return rgba[..., :3].transpose(2, 0, 1).astype(np.float32, copy=False)
 
 

@@ -8,6 +8,35 @@
 
 ## 变更记录
 
+### [ACL-039] 2026-06-30 — 固定 real-eval Matplotlib 为 Agg 后端,避免 Tk 线程析构中断训练
+
+**问题诊断**:
+- solver 训练在中途偶发 `Tcl_AsyncDelete: async handler deleted by the wrong thread` 后进程退出。该错误来自 Tcl/Tk GUI 后端的线程/析构问题,不是 CUDA OOM 的典型报错。
+- 当前 `ep07_unet_sr` 环境默认 Matplotlib backend 为 `tkagg`;`real_eval.py` 在 checkpoint real-eval 保存温度 PNG 时局部 import `matplotlib.pyplot`,会创建 Tk 相关对象。对象析构可延后发生,所以崩溃步数不一定正好落在 `save_every` 节点。
+
+**修改内容**:
+1. `real_eval.py` 在模块初始化时强制 `matplotlib.use("Agg", force=True)`,让训练期间保存 PNG/TensorBoard 图都走非交互后端。
+2. 不改变 solver forward、loss、optimizer、scheduler、halo 推理数学或 TensorBoard scalar/image tag。
+
+**预期效果**:
+- 消除由 Tk GUI 后端造成的随机训练中断。
+- 不影响训练精度;仅影响 Matplotlib PNG 渲染后端。
+- 风险:若有人在训练进程内期待弹出交互式 Matplotlib 窗口,该路径会变为只保存图。训练脚本本来不应弹窗,因此风险可接受。
+
+**推荐参数**:
+```bash
+# 无需新增 CLI 参数;代码固定使用 Agg 后端。
+```
+
+**训练结果**: _(待下一次长训观察)_
+- 输出目录: 待回填。
+- 视觉效果: 不应改变模型输出;若 halo real-eval 仍出现白色絮状背景,应按 solver/数据/色标问题继续诊断,不归因于 Matplotlib 后端。
+- 结论: 待长训验证不再出现 `Tcl_AsyncDelete`。
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/real_eval.py`
+
+---
+
 ### [ACL-038] 2026-06-30 — solver real-eval 支持 full-frame outer halo,避免 prox 边界方框进入可视 FOV
 
 **问题诊断**:
