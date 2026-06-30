@@ -71,3 +71,32 @@ Treat the peak-memory numbers as run-local diagnostics rather than exact scaling
 2. Add an eval path for full-frame halo inference so this is reproducible from CLI, not only from ad hoc diagnostics.
 3. For the training-side fix, consider reflect-padding prox convolutions, valid-center training/inference, and/or an overlap-consistency loss so the model does not learn patch-edge-dependent solutions.
 4. For a cleaner architectural fix, consider splitting the output into a full-frame lowpass anchor plus a learned highpass/residual solver, reducing the prox network's freedom to create low/mid-frequency square illumination.
+
+## V11 noSE/noGN Long-Run Midpoint Read (2026-06-30)
+
+Run under diagnosis:
+
+- Output dir: `algos/ep07_unet_sr/outputs/solver_v11_k2_p384_nogn_halo96_50k`
+- Actual command target: `--total-steps 60000`
+- Current checkpoints at read time: `solver_step_005000.pt` through `solver_step_040000.pt`
+- Architecture/eval: K2, no-drizzle, `patch_size_hr=384`, `solver_prox_use_se=False`, `solver_prox_norm=none`, real eval `full_halo96`
+
+Key metrics at the midpoint:
+
+| run | synth step | PSNR | region RMSE | synth OOB | real step | real artifact | real OOB | DC band |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| V11 noSE/noGN halo96 | 42.5k | 35.17 | 0.0859 | 0.01044 | 40k | 0.4566 | 0.00205 | 1.215 |
+| V9 SE+GN p384 | 16k | 37.52 | 0.0757 | 0.01216 | 15k | 0.4806 | 0.00241 | 1.225 |
+| V10 v5 sharp UNet | 50k | 38.81 | 0.0881 | 0.01576 | 50k | 0.4634 | 0.00219 | n/a |
+| V10 v4 smooth UNet | 40k | 31.75 | 0.1521 | 0.00127 | 40k | 0.2597 | 0.000016 | n/a |
+
+Interpretation:
+
+- The E3 noSE/noGN mainline did what it was meant to do: full-halo evaluation no longer produces the severe GN/SE extent-distribution shift seen in K4/full-halo, and real artifact/OOB are lower than the sharper SE+GN solver baseline.
+- The cost is real: the model is visually softer than the old solver/V10 sharp outputs. Synthetic PSNR/region RMSE also plateau lower than `SE+GN` p384; from 20k to 42.5k PSNR only moved from about 34.73 to 35.17, while real artifact drifted upward.
+- This is therefore a "cleaner but conservative" solver, not an under-trained sharp solver. Continuing to 60k may be useful for completeness, but is unlikely to recover V10/V9-level sharpness by itself.
+
+Decision implication:
+
+- Do not revert blindly to GroupNorm/SE: that restores capacity but reintroduces the extent/halo sensitivity this episode diagnosed.
+- If the next objective is sharper structure, prefer changes that keep the E3 stability premise: wider/deeper prox without GN/SE, high-frequency-residual-only prox with low-frequency anchor, or loss rebalancing aimed at edge strength without restoring the old range-dependent normalization/attention path.

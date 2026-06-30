@@ -42,10 +42,18 @@
 --real-eval-solver-mode full_halo --real-eval-solver-halo-hr 96
 ```
 
-**训练结果**: _(待 50k 长训回填)_
-- 输出目录: 建议 `outputs/solver_v11_k2_p384_nogn_halo96_50k`。
-- 视觉效果: 待回填。
-- 结论: 待回填。
+**训练结果**: _(2026-06-30 中途诊断回填;训练仍在继续到 `--total-steps 60000`)_
+- 输出目录: `outputs/solver_v11_k2_p384_nogn_halo96_50k`。实际运行命令使用 `--synth-eval-holdout 500`, `--num-workers 12`, `--total-steps 60000`;截至本次诊断已有 checkpoint 到 `solver_step_040000.pt`,训练 scalar 到 42.5k。
+- 当前指标:
+  - synth @42.5k: PSNR `35.17`, region RMSE `0.0859`, boundary F1 `0.858`, out-of-band `0.01044`。
+  - real @40k (`full_halo96`): artifact `0.4566`, out-of-band `0.00205`, DC band residual `1.215`, DC full residual `1.509`。
+  - real artifact 最低出现在 10k 左右 (`0.420`),之后缓慢升高到 40k;real DC residual 基本死平在 `1.21` 左右。
+- 与关键对照:
+  - 旧 `solver_v9_k2_p384_nodrizzle` (`SE+GN`, p384) @16k synth PSNR `37.52`, region RMSE `0.0757`,但 @15k real artifact `0.4806`, real OOB `0.00241`。
+  - `v10_v5_sharp` plain UNet @50k synth PSNR `38.81`, visual 更锐,但 real artifact `0.4634`, real OOB `0.00219`。
+  - `v10_v4_acl027` smooth UNet @40k real artifact `0.2597`, real OOB `1.56e-5`,但 synth PSNR/视觉锐度明显低。
+- 视觉效果: 用户目视确认 v11 相比旧 solver/V10 sharp/纯 UNet 更糊,后期锐度提升有限。当前数字支持该判断:20k 后 synth PSNR 只从 `34.73` 增至 `35.17`,region RMSE 只从 `0.0906` 改至约 `0.085`,real artifact 反而升高。
+- 结论: `noSE+noGN+full_halo96` 成功降低了 halo/tiled 范围漂移风险,但牺牲了拟合/锐化能力;它是"干净但偏保守"的解,不是继续训练即可追上旧 `SE+GN` 或 V10 sharp 的解。后续若要追回锐度,优先考虑在不恢复 GN/SE 的前提下加 prox 容量、改高频残差/低频锚定结构或重新平衡 loss;不建议简单加长训练到 60k 作为主要改进手段。
 
 **涉及文件**:
 - `algos/ep07_unet_sr/src/unet_sr/config.py`
