@@ -71,8 +71,8 @@ class TrainingConfig:
     real_eval_zoom: float = 3.0
     real_eval_overlap: int = 128
     real_eval_tile_batch: int = 16
-    real_eval_solver_mode: str = "tiled"
-    real_eval_solver_halo_hr: int = 0
+    real_eval_solver_mode: str = "full_halo"
+    real_eval_solver_halo_hr: int = 96
     # --- Held-out synthetic GT eval (PSNR / region-RMSE / defect boundary-F1 /
     # out-of-band). Eval scenes are a fixed tail of the pool, excluded from
     # training (no leakage). synth_eval_holdout=0 disables it. ---
@@ -100,9 +100,10 @@ class TrainingConfig:
     # so the prox still sees the phase bins but the warm-start is de-waffled. No effect under
     # --solver-no-drizzle (that path already warm-starts from ch0).
     solver_warmstart: str = "phasebin"
-    # E3 prox architecture ablations: defaults preserve historical GroupNorm+SE behavior.
-    solver_prox_use_se: bool = True
-    solver_prox_norm: str = "group"
+    # E3 prox architecture defaults for the solver mainline: remove the extent-dependent SE
+    # global pooling and GroupNorm paths. Use CLI flags to opt back into the historical prox.
+    solver_prox_use_se: bool = False
+    solver_prox_norm: str = "none"
 
     def validate(self) -> None:
         if self.device == "cpu" and self.amp:
@@ -508,15 +509,15 @@ def build_arg_parser() -> argparse.ArgumentParser:
         "--real-eval-solver-mode",
         choices=("tiled", "full_halo"),
         default=TrainingConfig.real_eval_solver_mode,
-        help="Solver real-eval inference mode: tiled (legacy) or full_halo (single full-frame solve "
-             "with outer reflect halo, then crop back to the detector FOV).",
+        help="Solver real-eval inference mode: full_halo (default; single full-frame solve with outer "
+             "reflect halo, then crop back to the detector FOV) or tiled (legacy).",
     )
     parser.add_argument(
         "--real-eval-solver-halo-hr",
         type=int,
         default=TrainingConfig.real_eval_solver_halo_hr,
         help="Outer halo size in HR pixels for --real-eval-solver-mode full_halo. "
-             "Use 96 as the current anti-boundary-artifact setting.",
+             "Default 96 is the current anti-boundary-artifact setting.",
     )
     # --- Held-out synthetic GT eval ---
     parser.add_argument("--synth-eval", action=argparse.BooleanOptionalAction,
@@ -565,13 +566,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Hybrid (9ch) warm-start source for x0: 'phasebin' = first phase-bin drizzle "
                              "channel (ch5, default, carries the 2px coverage waffle); 'aligned_mean' = smooth "
                              "fused aligned-mean (ch0), de-waffled, keeps all 9 cond channels (ACL-032).")
-    parser.add_argument("--solver-prox-no-se", action="store_false", dest="solver_prox_use_se",
+    parser.add_argument("--solver-prox-use-se", action=argparse.BooleanOptionalAction,
                         default=TrainingConfig.solver_prox_use_se,
-                        help="E3 solver prox ablation: disable SE channel attention/global pooling in the prox UNet.")
+                        help="Use SE channel attention/global pooling in the solver prox UNet. Default OFF for "
+                             "the E3 noSE/noGN mainline; pass --solver-prox-use-se to restore the legacy prox.")
+    parser.add_argument("--solver-prox-no-se", action="store_false", dest="solver_prox_use_se",
+                        help="Backward-compatible alias for --no-solver-prox-use-se.")
     parser.add_argument("--solver-prox-norm", choices=("group", "none"),
                         default=TrainingConfig.solver_prox_norm,
-                        help="E3 solver prox normalization: 'group' keeps historical GroupNorm; 'none' removes "
-                             "normalization to test extent-distribution drift.")
+                        help="Solver prox normalization. Default 'none' for the E3 mainline; use 'group' to "
+                             "restore the historical GroupNorm prox.")
     return parser
 
 

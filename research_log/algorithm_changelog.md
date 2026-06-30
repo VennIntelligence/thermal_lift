@@ -8,6 +8,51 @@
 
 ## 变更记录
 
+### [ACL-041] 2026-06-30 — 将 solver 主线默认切到 noSE + noGN + full_halo96 real-eval
+
+**问题诊断**:
+- E3 smoke 对比显示 `noSE+noGN` 的 tiled 与 `full_halo96` 真实推理几乎一致,而 `noSE+GN` 在 halo 下 artifact/out-of-band 更高,符合 GroupNorm/SE 范围分布漂移诊断。
+- 既有 `SE+GN` 结构在合成指标上收敛更快,但真实图上更容易出现 halo 絮状、细线膨胀与推理范围敏感性;当前主目标是工业真实热图干净稳定,不是单纯 synthetic PSNR。
+- 因此 50k 长训不应再靠手动追加 E3 flag,而应把 E3 组合提升为 solver 主线默认,减少命令遗漏风险。
+
+**修改内容**:
+1. `config.py` 默认值调整:
+   - `solver_prox_use_se=False`
+   - `solver_prox_norm="none"`
+   - `real_eval_solver_mode="full_halo"`
+   - `real_eval_solver_halo_hr=96`
+2. `config.py` 新增显式恢复旧结构的 CLI:
+   - `--solver-prox-use-se`
+   - `--solver-prox-norm group`
+   - `--real-eval-solver-mode tiled --real-eval-solver-halo-hr 0`
+3. `tests/test_config.py` 增加两项回归:
+   - 新 solver 主线默认确认为 `noSE/noGN/full_halo96`;
+   - 旧 `SE+GN/tiled` 可通过 CLI 显式恢复。
+
+**预期效果**:
+- 50k solver 长训默认使用范围更稳定的 prox,降低 halo/tiled 分布差导致的絮状与边界位移风险。
+- TensorBoard real-eval 默认直接显示 `full_halo96`,避免 tiled patch 边界方框成为视觉误导。
+- 风险:去掉 GN/SE 后 synthetic PSNR 可能更低、收敛更慢;如果 10k-15k 真实图明显欠锐,优先考虑加宽 prox 或调 loss,不要直接恢复 GN/SE。
+
+**推荐参数**:
+```bash
+# 新默认已经包含 noSE + noGN + full_halo96;主跑无需再显式写这几个 flag。
+--input-mode hybrid_drizzle2x --scale 2 --unroll-steps 2 \
+--solver-no-drizzle --patch-size-hr 384 \
+--real-eval-solver-mode full_halo --real-eval-solver-halo-hr 96
+```
+
+**训练结果**: _(待 50k 长训回填)_
+- 输出目录: 建议 `outputs/solver_v11_k2_p384_nogn_halo96_50k`。
+- 视觉效果: 待回填。
+- 结论: 待回填。
+
+**涉及文件**:
+- `algos/ep07_unet_sr/src/unet_sr/config.py`
+- `algos/ep07_unet_sr/tests/test_config.py`
+
+---
+
 ### [ACL-040] 2026-06-30 — E3 solver prox 架构消融:可关闭 SE 与 GroupNorm 以测试 extent-invariance
 
 **问题诊断**:

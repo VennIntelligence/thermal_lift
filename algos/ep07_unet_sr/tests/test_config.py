@@ -90,6 +90,40 @@ def test_config_parses_solver_prox_e3_arch_args() -> None:
     assert cfg.solver_prox_norm == "none"
 
 
+def test_config_solver_mainline_defaults_are_e3_no_gn_halo96() -> None:
+    cfg = config_from_args([
+        "--training-pool-dir", "dummy_pool",
+        "--input-mode", "hybrid_drizzle2x",
+        "--scale", "2",
+        "--unroll-steps", "2",
+        "--boundary-boost", "3.0",
+    ])
+
+    assert cfg.solver_prox_use_se is False
+    assert cfg.solver_prox_norm == "none"
+    assert cfg.real_eval_solver_mode == "full_halo"
+    assert cfg.real_eval_solver_halo_hr == 96
+
+
+def test_config_can_opt_back_to_legacy_solver_prox_and_tiled_eval() -> None:
+    cfg = config_from_args([
+        "--training-pool-dir", "dummy_pool",
+        "--input-mode", "hybrid_drizzle2x",
+        "--scale", "2",
+        "--unroll-steps", "2",
+        "--solver-prox-use-se",
+        "--solver-prox-norm", "group",
+        "--real-eval-solver-mode", "tiled",
+        "--real-eval-solver-halo-hr", "0",
+        "--boundary-boost", "3.0",
+    ])
+
+    assert cfg.solver_prox_use_se is True
+    assert cfg.solver_prox_norm == "group"
+    assert cfg.real_eval_solver_mode == "tiled"
+    assert cfg.real_eval_solver_halo_hr == 0
+
+
 def test_config_rejects_solver_real_eval_halo_not_divisible_by_scale() -> None:
     with pytest.raises(ValueError, match="divisible by --scale"):
         config_from_args([
