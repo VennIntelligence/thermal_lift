@@ -75,6 +75,21 @@ def test_config_parses_solver_full_halo_real_eval_args() -> None:
     assert cfg.real_eval_solver_halo_hr == 64
 
 
+def test_config_parses_solver_prox_e3_arch_args() -> None:
+    cfg = config_from_args([
+        "--training-pool-dir", "dummy_pool",
+        "--input-mode", "hybrid_drizzle2x",
+        "--scale", "2",
+        "--unroll-steps", "2",
+        "--solver-prox-no-se",
+        "--solver-prox-norm", "none",
+        "--boundary-boost", "3.0",
+    ])
+
+    assert cfg.solver_prox_use_se is False
+    assert cfg.solver_prox_norm == "none"
+
+
 def test_config_rejects_solver_real_eval_halo_not_divisible_by_scale() -> None:
     with pytest.raises(ValueError, match="divisible by --scale"):
         config_from_args([

@@ -8,6 +8,52 @@
 
 ## 变更记录
 
+### [ACL-040] 2026-06-30 — E3 solver prox 架构消融:可关闭 SE 与 GroupNorm 以测试 extent-invariance
+
+**问题诊断**:
+- K4 shared prox 已确认会递归放大 patch 边界响应;K2+p384 2k smoke 虽降低方格,但 15k 后真实评估 `artifact_score` 单调恶化,出现边界位移与白色絮状/细线膨胀。
+- full-halo 能消除显式方框,但会引入更强絮状物和线宽膨胀;结合远场/extent 诊断,最可疑耦合路径是 prox 内部依赖整幅特征统计的模块:SE 的 global average pooling 与 GroupNorm 的 per-sample/channel 归一化。
+- 因此下一步不再继续调 patch size 或 halo,而是做 E3:让 solver prox 结构本身对推理范围/上下文大小更不敏感。
+
+**修改内容**:
+1. `model.py`: `ThermalSRUNet`/`ConvBlock` 新增 `use_se` 与 `norm` 参数;默认仍为历史 `use_se=True,norm="group"`。`norm="none"` 时用 `Identity` 替代 GroupNorm,`use_se=False` 时用 `Identity` 替代 SEBlock。
+2. `unroll.py`: `UnrolledSolver` 新增 `prox_use_se` 与 `prox_norm`,只作用于 solver 的 prox UNet;普通 UNet 训练默认不变。
+3. `config.py` / `solver_train.py`:新增 CLI `--solver-prox-no-se` 与 `--solver-prox-norm {group,none}`,并写入 checkpoint config。
+4. `scripts/render_checkpoint_evolution_drop.py`:读取 checkpoint config 中的 E3 prox 架构字段,保证 E3 checkpoint 后续可正常渲染。
+5. `tests/test_config.py` / `tests/test_model_losses.py`:补 CLI 解析与无 GroupNorm/无 SE forward 回归测试。
+
+**预期效果**:
+- No-SE 版本用于验证 SE global pooling 是否是 full-halo 絮状和细线膨胀的主要来源;风险较低,因为只去掉通道注意力。
+- No-SE + No-GN 版本用于验证 GroupNorm 尺度分布漂移假设;若有效,应表现为 tiled/full-halo 输出更接近、背景絮状下降、边界位移减少。
+- 风险:去掉归一化后训练稳定性可能下降,需要先 2k smoke 再决定是否长训;旧 checkpoint 不能加载到显式 E3 结构,但默认结构仍完全兼容旧实验。
+
+**推荐参数**:
+```bash
+# 低风险 E3a:只关 SE
+--solver-prox-no-se
+
+# 强消融 E3b:关 SE + 去 GroupNorm
+--solver-prox-no-se --solver-prox-norm none
+```
+
+建议仍保持 K2/no-drizzle/p384 做 2k smoke 对照,不要直接开 50k 长训;若 E3b 不稳定,优先回退到 E3a 或降低 `boundary_boost` 后再测。
+
+**训练结果**: _(待 2k/15k smoke 回填)_
+- 输出目录: 待回填。
+- 视觉效果: 重点观察真实 TensorBoard 中背景絮状、细线膨胀、边界位移、tiled vs halo 差异。
+- 结论: 待回填。
+
+**涉及文件**:
+- `algos/ep07_unet_sr/src/unet_sr/model.py`
+- `algos/ep07_unet_sr/src/unet_sr/unroll.py`
+- `algos/ep07_unet_sr/src/unet_sr/config.py`
+- `algos/ep07_unet_sr/src/unet_sr/solver_train.py`
+- `algos/ep07_unet_sr/scripts/render_checkpoint_evolution_drop.py`
+- `algos/ep07_unet_sr/tests/test_config.py`
+- `algos/ep07_unet_sr/tests/test_model_losses.py`
+
+---
+
 ### [ACL-039] 2026-06-30 — 固定 real-eval Matplotlib 为 Agg 后端,避免 Tk 线程析构中断训练
 
 **问题诊断**:

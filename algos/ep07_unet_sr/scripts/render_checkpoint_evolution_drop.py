@@ -124,6 +124,8 @@ def _build_solver(cfg: dict[str, Any], state: dict[str, torch.Tensor]) -> Unroll
         huber_delta=float(cfg.get("solver_huber_delta", 0.0)),
         eta_init=float(cfg.get("solver_eta_init", 0.5)),
         learn_eta=bool(cfg.get("solver_learn_eta", False)),
+        prox_use_se=bool(cfg.get("solver_prox_use_se", True)),
+        prox_norm=str(cfg.get("solver_prox_norm", "group")),
     )
     solver.load_state_dict(state)
     solver.eval()

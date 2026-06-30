@@ -64,6 +64,10 @@ class UnrolledSolver(nn.Module):
         eta_init:      DC step size (softplus-parameterized, per step).
         learn_eta:     if True, eta is a learnable Parameter; default False freezes it (a learnable
                        eta let the optimizer bypass the DC step — ACL-026).
+        prox_use_se:   keep SE channel attention inside the prox UNet. Disable for E3 extent-
+                       invariance tests where global average pooling is a suspected coupling path.
+        prox_norm:     normalization inside the prox UNet ("group" or "none"). "none" removes
+                       GroupNorm for E3 tests of scale/extent distribution drift.
     """
 
     def __init__(
@@ -78,6 +82,8 @@ class UnrolledSolver(nn.Module):
         huber_delta: float = 0.0,
         eta_init: float = 0.5,
         learn_eta: bool = False,
+        prox_use_se: bool = True,
+        prox_norm: str = "group",
     ) -> None:
         super().__init__()
         if n_steps < 1:
@@ -88,13 +94,29 @@ class UnrolledSolver(nn.Module):
         self.cond_channels = int(cond_channels)
         self.band_highpass_sigma_lr_px = float(band_highpass_sigma_lr_px)
         self.huber_delta = float(huber_delta)
+        self.prox_use_se = bool(prox_use_se)
+        self.prox_norm = str(prox_norm)
 
         in_ch = 1 + self.cond_channels  # [current estimate x] ++ conditioning
         if self.share_weights:
-            self.prox = ThermalSRUNet(in_channels=in_ch, out_channels=1, base_channels=base_channels, scale=1)
+            self.prox = ThermalSRUNet(
+                in_channels=in_ch,
+                out_channels=1,
+                base_channels=base_channels,
+                scale=1,
+                norm=self.prox_norm,
+                use_se=self.prox_use_se,
+            )
         else:
             self.prox = nn.ModuleList(
-                ThermalSRUNet(in_channels=in_ch, out_channels=1, base_channels=base_channels, scale=1)
+                ThermalSRUNet(
+                    in_channels=in_ch,
+                    out_channels=1,
+                    base_channels=base_channels,
+                    scale=1,
+                    norm=self.prox_norm,
+                    use_se=self.prox_use_se,
+                )
                 for _ in range(self.n_steps)
             )
         # per-step DC step sizes (softplus-parameterized, positive). FROZEN by default: a learnable

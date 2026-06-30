@@ -100,6 +100,9 @@ class TrainingConfig:
     # so the prox still sees the phase bins but the warm-start is de-waffled. No effect under
     # --solver-no-drizzle (that path already warm-starts from ch0).
     solver_warmstart: str = "phasebin"
+    # E3 prox architecture ablations: defaults preserve historical GroupNorm+SE behavior.
+    solver_prox_use_se: bool = True
+    solver_prox_norm: str = "group"
 
     def validate(self) -> None:
         if self.device == "cpu" and self.amp:
@@ -197,6 +200,8 @@ class TrainingConfig:
                 raise ValueError("solver_m_frames must be >= 1")
             if self.solver_warmstart not in ("phasebin", "aligned_mean"):
                 raise ValueError("solver_warmstart must be 'phasebin' or 'aligned_mean'")
+            if self.solver_prox_norm not in ("group", "none"):
+                raise ValueError("solver_prox_norm must be 'group' or 'none'")
         if self.input_mode == "hybrid_drizzle2x" and self.forward_model_weight > 0 and self.scale != 2:
             raise ValueError(
                 "input_mode='hybrid_drizzle2x' with forward_model_weight > 0 requires --scale 2 "
@@ -560,6 +565,13 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Hybrid (9ch) warm-start source for x0: 'phasebin' = first phase-bin drizzle "
                              "channel (ch5, default, carries the 2px coverage waffle); 'aligned_mean' = smooth "
                              "fused aligned-mean (ch0), de-waffled, keeps all 9 cond channels (ACL-032).")
+    parser.add_argument("--solver-prox-no-se", action="store_false", dest="solver_prox_use_se",
+                        default=TrainingConfig.solver_prox_use_se,
+                        help="E3 solver prox ablation: disable SE channel attention/global pooling in the prox UNet.")
+    parser.add_argument("--solver-prox-norm", choices=("group", "none"),
+                        default=TrainingConfig.solver_prox_norm,
+                        help="E3 solver prox normalization: 'group' keeps historical GroupNorm; 'none' removes "
+                             "normalization to test extent-distribution drift.")
     return parser
 
 
@@ -644,6 +656,8 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         solver_prior_anneal_steps=args.solver_prior_anneal_steps,
         solver_no_drizzle=args.solver_no_drizzle,
         solver_warmstart=args.solver_warmstart,
+        solver_prox_use_se=args.solver_prox_use_se,
+        solver_prox_norm=args.solver_prox_norm,
     )
     cfg.validate()
     return cfg

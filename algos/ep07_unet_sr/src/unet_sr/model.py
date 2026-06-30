@@ -14,6 +14,14 @@ def _group_count(channels: int) -> int:
     return 1
 
 
+def _norm_layer(channels: int, norm: str) -> nn.Module:
+    if norm == "group":
+        return nn.GroupNorm(_group_count(channels), channels)
+    if norm == "none":
+        return nn.Identity()
+    raise ValueError("norm must be 'group' or 'none'")
+
+
 class SEBlock(nn.Module):
     """Squeeze-and-Excitation channel attention.
 
@@ -40,19 +48,26 @@ class SEBlock(nn.Module):
 
 
 class ConvBlock(nn.Module):
-    """Two 3×3 conv layers with GroupNorm + SiLU, followed by SE attention."""
+    """Two 3×3 conv layers with optional normalization and SE attention."""
 
-    def __init__(self, in_channels: int, out_channels: int) -> None:
+    def __init__(
+        self,
+        in_channels: int,
+        out_channels: int,
+        *,
+        norm: str = "group",
+        use_se: bool = True,
+    ) -> None:
         super().__init__()
         self.net = nn.Sequential(
             nn.Conv2d(in_channels, out_channels, kernel_size=3, padding=1),
-            nn.GroupNorm(_group_count(out_channels), out_channels),
+            _norm_layer(out_channels, norm),
             nn.SiLU(inplace=True),
             nn.Conv2d(out_channels, out_channels, kernel_size=3, padding=1),
-            nn.GroupNorm(_group_count(out_channels), out_channels),
+            _norm_layer(out_channels, norm),
             nn.SiLU(inplace=True),
         )
-        self.se = SEBlock(out_channels)
+        self.se = SEBlock(out_channels) if use_se else nn.Identity()
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         return self.se(self.net(x))
@@ -106,6 +121,8 @@ class ThermalSRUNet(nn.Module):
         scale: int = 4,
         hr_upsampler: str = "bilinear",
         hr_res_blocks: int = 0,
+        norm: str = "group",
+        use_se: bool = True,
     ) -> None:
         super().__init__()
         if scale <= 0:
@@ -116,31 +133,35 @@ class ThermalSRUNet(nn.Module):
             raise ValueError("hr_upsampler must be 'bilinear' or 'pixelshuffle'")
         if hr_res_blocks < 0:
             raise ValueError("hr_res_blocks must be >= 0")
+        if norm not in ("group", "none"):
+            raise ValueError("norm must be 'group' or 'none'")
         self.scale = int(scale)
         self.hr_upsampler = str(hr_upsampler)
+        self.norm = str(norm)
+        self.use_se = bool(use_se)
 
         c1 = int(base_channels)
         c2 = c1 * 2
         c3 = c1 * 4
         c4 = c1 * 8
 
-        self.enc1 = ConvBlock(in_channels, c1)
-        self.enc2 = ConvBlock(c1, c2)
-        self.enc3 = ConvBlock(c2, c3)
-        self.bottleneck = ConvBlock(c3, c4)
+        self.enc1 = ConvBlock(in_channels, c1, norm=self.norm, use_se=self.use_se)
+        self.enc2 = ConvBlock(c1, c2, norm=self.norm, use_se=self.use_se)
+        self.enc3 = ConvBlock(c2, c3, norm=self.norm, use_se=self.use_se)
+        self.bottleneck = ConvBlock(c3, c4, norm=self.norm, use_se=self.use_se)
         self.pool = nn.MaxPool2d(kernel_size=2)
 
         self.up3 = nn.Conv2d(c4, c3, kernel_size=1)
-        self.dec3 = ConvBlock(c3 + c3, c3)
+        self.dec3 = ConvBlock(c3 + c3, c3, norm=self.norm, use_se=self.use_se)
         self.up2 = nn.Conv2d(c3, c2, kernel_size=1)
-        self.dec2 = ConvBlock(c2 + c2, c2)
+        self.dec2 = ConvBlock(c2 + c2, c2, norm=self.norm, use_se=self.use_se)
         self.up1 = nn.Conv2d(c2, c1, kernel_size=1)
-        self.dec1 = ConvBlock(c1 + c1, c1)
+        self.dec1 = ConvBlock(c1 + c1, c1, norm=self.norm, use_se=self.use_se)
 
         if self.hr_upsampler == "bilinear":
             self.hr_refine = nn.Sequential(
                 nn.Conv2d(c1, c1, kernel_size=3, padding=1),
-                nn.GroupNorm(_group_count(c1), c1),
+                _norm_layer(c1, self.norm),
                 nn.SiLU(inplace=True),
                 nn.Conv2d(c1, out_channels, kernel_size=3, padding=1),
             )

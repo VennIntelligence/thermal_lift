@@ -144,6 +144,8 @@ def build_solver(config: TrainingConfig, device: torch.device, cond_channels: in
         huber_delta=config.solver_huber_delta,
         eta_init=config.solver_eta_init,
         learn_eta=config.solver_learn_eta,
+        prox_use_se=config.solver_prox_use_se,
+        prox_norm=config.solver_prox_norm,
     ).to(device)
 
 

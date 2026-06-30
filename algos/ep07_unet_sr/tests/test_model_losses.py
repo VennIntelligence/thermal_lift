@@ -7,7 +7,7 @@ import torch.nn as nn
 from torch.amp import GradScaler, autocast
 
 from unet_sr.losses import ContourSRLoss, ThermalSRLoss, forward_model_loss, sobel_edges
-from unet_sr.model import ThermalSRUNet
+from unet_sr.model import SEBlock, ThermalSRUNet
 from unet_sr.mask_weights import compute_boundary_weight_np
 from unet_sr.train import _delta_l1_penalty
 
@@ -37,6 +37,24 @@ def test_unet_pixelshuffle_head_outputs_scaled_patch() -> None:
 
     assert y.shape == (2, 1, 32, 32)
     assert not any(isinstance(module, nn.BatchNorm2d) for module in model.modules())
+
+
+def test_unet_can_disable_groupnorm_and_se_for_solver_prox() -> None:
+    model = ThermalSRUNet(
+        in_channels=6,
+        out_channels=1,
+        base_channels=8,
+        scale=1,
+        norm="none",
+        use_se=False,
+    )
+    x = torch.randn(2, 6, 32, 32)
+
+    y = model(x)
+
+    assert y.shape == (2, 1, 32, 32)
+    assert not any(isinstance(module, nn.GroupNorm) for module in model.modules())
+    assert not any(isinstance(module, SEBlock) for module in model.modules())
 
 
 def test_thermal_sr_loss_is_finite() -> None:
