@@ -57,6 +57,32 @@ def test_unet_can_disable_groupnorm_and_se_for_solver_prox() -> None:
     assert not any(isinstance(module, SEBlock) for module in model.modules())
 
 
+def test_solver_prox_highpass_residual_suppresses_lowfreq_correction() -> None:
+    """D-E (ACL-042): high-passing the prox correction removes its low/mid-freq content.
+
+    A spatially-constant (pure low-freq) correction is fully anchored away; the plain residual
+    prox adds it verbatim. This is the structural guarantee that the prox can only sharpen.
+    """
+    from unet_sr.unroll import UnrolledSolver
+
+    class ConstProx(nn.Module):
+        def forward(self, z: torch.Tensor) -> torch.Tensor:
+            return torch.full((z.shape[0], 1, z.shape[2], z.shape[3]), 0.7)
+
+    x = torch.zeros(1, 1, 48, 48)
+    cond = torch.zeros(1, 5, 48, 48)
+
+    plain = UnrolledSolver(n_steps=1, cond_channels=5, base_channels=8, scale=2,
+                           prox_highpass_residual=False)
+    plain.prox = ConstProx()
+    assert torch.allclose(plain._prox(0, x, cond), x + 0.7, atol=1e-4)
+
+    hp = UnrolledSolver(n_steps=1, cond_channels=5, base_channels=8, scale=2,
+                        prox_highpass_residual=True, prox_highpass_sigma_hr=4.0)
+    hp.prox = ConstProx()
+    assert hp._prox(0, x, cond).abs().mean().item() < 0.02
+
+
 def test_thermal_sr_loss_is_finite() -> None:
     loss = ThermalSRLoss(edge_weight=0.1)
     pred = torch.randn(2, 1, 32, 32, requires_grad=True)

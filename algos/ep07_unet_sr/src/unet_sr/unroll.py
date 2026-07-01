@@ -37,6 +37,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .forward_torch import ScenePSF, data_consistency_grad, prepare_forward_burst_plan
+from .losses import gaussian_blur_2d
 from .model import ThermalSRUNet
 
 _USE_FORWARD_PLAN_DEFAULT = os.environ.get("TL_SOLVER_FORWARD_PLAN", "1") != "0"
@@ -84,6 +85,8 @@ class UnrolledSolver(nn.Module):
         learn_eta: bool = False,
         prox_use_se: bool = True,
         prox_norm: str = "group",
+        prox_highpass_residual: bool = False,
+        prox_highpass_sigma_hr: float = 5.0,
     ) -> None:
         super().__init__()
         if n_steps < 1:
@@ -96,6 +99,13 @@ class UnrolledSolver(nn.Module):
         self.huber_delta = float(huber_delta)
         self.prox_use_se = bool(prox_use_se)
         self.prox_norm = str(prox_norm)
+        # D-E (ACL-042): high-pass the learned prox correction so it only injects high-frequency
+        # detail while the low/mid-frequency field stays anchored to the warm-start + DC. Restores
+        # sharpening capacity lost by removing GroupNorm/SE (E3), without letting the prox re-create
+        # the low/mid-freq extent drift (tile-grid glow / background lift / flocculence). Off by
+        # default -> identical to the plain residual prox.
+        self.prox_highpass_residual = bool(prox_highpass_residual)
+        self.prox_highpass_sigma_hr = float(prox_highpass_sigma_hr)
 
         in_ch = 1 + self.cond_channels  # [current estimate x] ++ conditioning
         if self.share_weights:
@@ -133,8 +143,15 @@ class UnrolledSolver(nn.Module):
         return self.prox if self.share_weights else self.prox[k]
 
     def _prox(self, k: int, x: torch.Tensor, cond: torch.Tensor) -> torch.Tensor:
-        """Residual proximal refinement: x <- x + net([x, cond]) (V10-style, stable)."""
+        """Residual proximal refinement: x <- x + net([x, cond]) (V10-style, stable).
+
+        With ``prox_highpass_residual`` (D-E, ACL-042) the correction is high-pass filtered before
+        it is added, so the prox can only sharpen (inject high-frequency detail) and cannot move the
+        low/mid-frequency field, which stays anchored to the warm-start + DC step.
+        """
         delta = self._prox_net(k)(torch.cat([x, cond], dim=1))
+        if self.prox_highpass_residual and self.prox_highpass_sigma_hr > 0:
+            delta = delta - gaussian_blur_2d(delta, self.prox_highpass_sigma_hr)
         return x + delta
 
     def forward(

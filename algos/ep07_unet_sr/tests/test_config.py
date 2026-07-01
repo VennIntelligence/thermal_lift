@@ -90,6 +90,34 @@ def test_config_parses_solver_prox_e3_arch_args() -> None:
     assert cfg.solver_prox_norm == "none"
 
 
+def test_config_parses_solver_prox_highpass_residual_args() -> None:
+    cfg = config_from_args([
+        "--training-pool-dir", "dummy_pool",
+        "--input-mode", "hybrid_drizzle2x",
+        "--scale", "2",
+        "--unroll-steps", "2",
+        "--solver-prox-highpass-residual",
+        "--solver-prox-highpass-sigma-hr", "6.0",
+        "--boundary-boost", "3.0",
+    ])
+
+    assert cfg.solver_prox_highpass_residual is True
+    assert cfg.solver_prox_highpass_sigma_hr == 6.0
+
+
+def test_config_solver_prox_highpass_residual_default_off() -> None:
+    cfg = config_from_args([
+        "--training-pool-dir", "dummy_pool",
+        "--input-mode", "hybrid_drizzle2x",
+        "--scale", "2",
+        "--unroll-steps", "2",
+        "--boundary-boost", "3.0",
+    ])
+
+    assert cfg.solver_prox_highpass_residual is False
+    assert cfg.solver_prox_highpass_sigma_hr == 5.0
+
+
 def test_config_solver_mainline_defaults_are_e3_no_gn_halo96() -> None:
     cfg = config_from_args([
         "--training-pool-dir", "dummy_pool",

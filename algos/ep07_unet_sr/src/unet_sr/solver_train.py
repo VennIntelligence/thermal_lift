@@ -146,6 +146,8 @@ def build_solver(config: TrainingConfig, device: torch.device, cond_channels: in
         learn_eta=config.solver_learn_eta,
         prox_use_se=config.solver_prox_use_se,
         prox_norm=config.solver_prox_norm,
+        prox_highpass_residual=config.solver_prox_highpass_residual,
+        prox_highpass_sigma_hr=config.solver_prox_highpass_sigma_hr,
     ).to(device)
 
 

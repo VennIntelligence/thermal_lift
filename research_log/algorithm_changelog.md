@@ -8,6 +8,48 @@
 
 ## 变更记录
 
+### [ACL-042] 2026-07-01 — D-E: solver prox 高频残差(low-freq anchor)，在不恢复 SE/GN 的前提下追回锐度
+
+**问题诊断**:
+- ACL-041 的 E3 主线(noSE+noGN)成功压住 extent 漂移(网格/絮状),但代价是 prox 变保守、偏糊:synth PSNR 从 V9(SE+GN) 的 ~37.5 掉到 V11 的 ~35,视觉更糊,后期训练也追不回。
+- 离线信息预算模拟(`outputs/ep07_solver_diag/info_budget2.py`,用真实常数 scale 2 / PSF σ≈0.5 / 噪声 0.0724°C)确认:多帧亚像素信号真实存在(约 +1~+1.5 dB,微扫描采样均匀),它**已经在 phase-bin drizzle 条件通道里**——Prompt A(重加 drizzle)之所以 null,不是输入缺多帧,而是**保守的 noGN/noSE prox 抽不出被噪声埋着的去混叠高频**。瓶颈是 prox 容量,不是输入。
+- 直接恢复 GN/SE 会把 extent 伪影带回来(EP07 诊断 §3:SE 全局池化 + GroupNorm 全局归一化是 extent 耦合路径)。因此需要"在结构上只给高频容量、不给低/中频自由度"的改法。
+
+**修改内容**:
+1. `unroll.py`: `UnrolledSolver` 新增 `prox_highpass_residual`(bool)与 `prox_highpass_sigma_hr`(HR px)。开启时 `_prox` 把学习到的修正做高通:`delta <- delta - gaussian_blur_2d(delta, sigma_hr)`,再 `x <- x + delta`。→ prox 只能注入高频细节;低/中频(extent 网格 glow / 背景抬升 / 絮状所在的频段)钉死到 warm-start + DC,structurally 无法被 prox 移动。
+2. `config.py`: 新增 `solver_prox_highpass_residual`(默认 False)与 `solver_prox_highpass_sigma_hr`(默认 5.0),CLI `--solver-prox-highpass-residual` / `--solver-prox-highpass-sigma-hr`,并写入 checkpoint config。
+3. `solver_train.py` / `scripts/render_checkpoint_evolution_drop.py`: 透传新字段(渲染侧从 checkpoint config 读取,默认 False 向后兼容)。
+4. 测试: `tests/test_config.py` 解析回归;`tests/test_model_losses.py` 单元测试证明常数(纯低频)修正被高通抹掉、plain 残差原样相加。
+
+**预期效果**:
+- 在保持 E3 extent 稳定性的前提下追回锐度:prox 有容量把 drizzle/phase-bin 里的去混叠高频从噪声里抽出来,而不能再制造低/中频方框/絮状/背景抬升。
+- 兑现离线预算里的 ~+1~+1.5 dB(2× 的物理天花板;不解锁 4×,噪声封顶)。
+- 风险:sigma 太大→细节被当低频锚掉(欠锐);太小→仍可能残留中频漂移。sigma 需 smoke 扫(建议 4/5/6/8 HR px)。默认 off,不影响既有实验。
+
+**推荐参数**:
+```bash
+# 在 E3 主线(noSE/noGN/K2/p384/full_halo96)上开高频残差,评测用合成 GT 全帧(不要用被物理地板钉死的 dc_resid 当判据)
+--input-mode hybrid_drizzle2x --scale 2 --unroll-steps 2 \
+--solver-prox-highpass-residual --solver-prox-highpass-sigma-hr 5 \
+--synth-eval-holdout 500 --synth-eval-every 2500
+# 建议 sigma smoke: 4 / 5 / 6 / 8
+```
+
+**训练结果**: _(待远端 smoke/长训回填)_
+- 输出目录: 建议 `outputs/solver_v13_hpres_sigmaX`
+- 判据: synth PSNR/region-RMSE/boundary-F1 相对 V11 回升,real artifact/OOB 不升,视觉不再偏糊且无网格/絮状回潮。**不使用 dc_resid_band 作为主判据(已被 PSF 失配地板钉死在 ~1.21)。**
+- 结论: 待回填。
+
+**涉及文件**:
+- `algos/ep07_unet_sr/src/unet_sr/unroll.py`
+- `algos/ep07_unet_sr/src/unet_sr/config.py`
+- `algos/ep07_unet_sr/src/unet_sr/solver_train.py`
+- `algos/ep07_unet_sr/scripts/render_checkpoint_evolution_drop.py`
+- `algos/ep07_unet_sr/tests/test_config.py`, `algos/ep07_unet_sr/tests/test_model_losses.py`
+- 依据: `outputs/ep07_solver_diag/info_budget2.py`(离线信息预算), `research_log/literature/2026_info_budget_and_why_phone_4x.md`
+
+---
+
 ### [ACL-041] 2026-06-30 — 将 solver 主线默认切到 noSE + noGN + full_halo96 real-eval
 
 **问题诊断**:

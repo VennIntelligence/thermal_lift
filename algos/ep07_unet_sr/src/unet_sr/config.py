@@ -104,6 +104,11 @@ class TrainingConfig:
     # global pooling and GroupNorm paths. Use CLI flags to opt back into the historical prox.
     solver_prox_use_se: bool = False
     solver_prox_norm: str = "none"
+    # D-E (ACL-042): high-pass the learned prox correction so it only adds high-freq detail; the
+    # low/mid-freq stays anchored to the warm-start + DC. Restores sharpness after E3 removed SE/GN,
+    # without reintroducing low/mid-freq extent drift. Off by default (identical to plain residual).
+    solver_prox_highpass_residual: bool = False
+    solver_prox_highpass_sigma_hr: float = 5.0
 
     def validate(self) -> None:
         if self.device == "cpu" and self.amp:
@@ -203,6 +208,8 @@ class TrainingConfig:
                 raise ValueError("solver_warmstart must be 'phasebin' or 'aligned_mean'")
             if self.solver_prox_norm not in ("group", "none"):
                 raise ValueError("solver_prox_norm must be 'group' or 'none'")
+            if self.solver_prox_highpass_sigma_hr < 0:
+                raise ValueError("solver_prox_highpass_sigma_hr must be >= 0")
         if self.input_mode == "hybrid_drizzle2x" and self.forward_model_weight > 0 and self.scale != 2:
             raise ValueError(
                 "input_mode='hybrid_drizzle2x' with forward_model_weight > 0 requires --scale 2 "
@@ -576,6 +583,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         default=TrainingConfig.solver_prox_norm,
                         help="Solver prox normalization. Default 'none' for the E3 mainline; use 'group' to "
                              "restore the historical GroupNorm prox.")
+    parser.add_argument("--solver-prox-highpass-residual", action="store_true",
+                        default=TrainingConfig.solver_prox_highpass_residual,
+                        help="D-E: high-pass the learned prox correction so it only injects high-freq "
+                             "detail; the low/mid-freq stays anchored to the warm-start + DC. Restores "
+                             "sharpness after E3 removed SE/GN, without reintroducing low/mid-freq extent "
+                             "drift (tile-grid glow / background lift / flocculence).")
+    parser.add_argument("--solver-prox-highpass-sigma-hr", type=float,
+                        default=TrainingConfig.solver_prox_highpass_sigma_hr,
+                        help="Gaussian sigma (HR px) for the prox high-pass residual (default 5.0). Detail "
+                             "finer than ~sigma is learnable; coarser structure is anchored to warm-start+DC.")
     return parser
 
 
@@ -662,6 +679,8 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         solver_warmstart=args.solver_warmstart,
         solver_prox_use_se=args.solver_prox_use_se,
         solver_prox_norm=args.solver_prox_norm,
+        solver_prox_highpass_residual=args.solver_prox_highpass_residual,
+        solver_prox_highpass_sigma_hr=args.solver_prox_highpass_sigma_hr,
     )
     cfg.validate()
     return cfg

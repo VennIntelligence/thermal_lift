@@ -126,6 +126,8 @@ def _build_solver(cfg: dict[str, Any], state: dict[str, torch.Tensor]) -> Unroll
         learn_eta=bool(cfg.get("solver_learn_eta", False)),
         prox_use_se=bool(cfg.get("solver_prox_use_se", True)),
         prox_norm=str(cfg.get("solver_prox_norm", "group")),
+        prox_highpass_residual=bool(cfg.get("solver_prox_highpass_residual", False)),
+        prox_highpass_sigma_hr=float(cfg.get("solver_prox_highpass_sigma_hr", 5.0)),
     )
     solver.load_state_dict(state)
     solver.eval()
