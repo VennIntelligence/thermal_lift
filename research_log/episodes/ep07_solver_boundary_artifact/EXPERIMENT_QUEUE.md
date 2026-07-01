@@ -21,13 +21,19 @@ Run from `algos/ep07_unet_sr/`. Steps = **40000** (not 50k). E3 mainline default
   recoverable multi-frame gain at our SNR is only ~+1–1.5 dB @2×. Don't expect a 4×-style jump; the
   win is "clean + as sharp as physics allows," not breaking the ceiling.
 - If a run crashes, capture the traceback, mark it FAILED in the table, and continue to the next.
+- **Use the explicit shared command below, not argparse defaults.** The comparable V11/Prompt-A runs used
+  `batch_size=12`, `solver_m_frames=12`, `solver_dc_weight=0`, and `--compile`; omitting these silently
+  falls back to `batch_size=4`, `M=16`, `dc_weight=0.1`, and no compile, making time and metrics less comparable.
+- Local RTX 5090 sanity check: `outputs/_memtest_b12_de_s5` completed 200 steps with `batch_size=12`,
+  `M=12`, `p384`, D-E sigma 5, and `--compile` without OOM. The temporary output was deleted after the check.
 
 ## Shared base command
 ```bash
 BASE="uv run python -m unet_sr.solver_train \
   --training-pool-dir ../../data/synthetic/pool_2x_v5_5k \
   --input-mode hybrid_drizzle2x --scale 2 --unroll-steps 2 \
-  --patch-size-hr 384 --num-workers 12 \
+  --patch-size-hr 384 --batch-size 12 --solver-m-frames 12 \
+  --solver-dc-weight 0 --num-workers 12 --compile --log-every 500 \
   --synth-eval-holdout 500 --synth-eval-every 2500 \
   --save-every 5000 --total-steps 40000"
 ```
@@ -38,9 +44,12 @@ BASE="uv run python -m unet_sr.solver_train \
 Run with `--total-steps 2000 --save-every 1000 --synth-eval-every 1000` and a throwaway output dir.
 - **S1 (D-E)**: `$BASE --solver-no-drizzle --solver-prox-highpass-residual --solver-prox-highpass-sigma-hr 5`
   → must reach 2k without crash; synth eval finite; PNG saved.
-- **S2 (phasebin-ontf)**: `$BASE --solver-phasebin-ontf --phase-bin-channels 9 --solver-prox-highpass-residual --solver-prox-highpass-sigma-hr 5`
+- **S2 (phasebin-ontf 9-bin)**: `$BASE --solver-phasebin-ontf --phase-bin-channels 9 --solver-warmstart aligned_mean --solver-prox-highpass-residual --solver-prox-highpass-sigma-hr 5`
   → verifies on-the-fly 9-bin drizzle builds (in_ch=14) and trains without shape error.
-If S1/S2 pass, proceed. If S2 fails (data/geom), skip Phase 2 and log it.
+- **S2b (phasebin-ontf 16-bin quick shape check)**: same as S2 but `--phase-bin-channels 16`
+  and `--total-steps 1000`. This is just a shape/memory gate for E5 (in_ch=21).
+If S1/S2 pass, proceed. If S2 fails (data/geom), skip Phase 2 and log it. If S2b fails but S2 passes,
+run E4 and skip E5.
 
 ---
 
@@ -65,8 +74,8 @@ Only if S2 passed. Uses hybrid input (drop `--solver-no-drizzle`) + on-the-fly p
 
 | id | override (σ\* = Phase-1 winner) | output dir |
 |---|---|---|
-| E4 | `--solver-phasebin-ontf --phase-bin-channels 9 --solver-prox-highpass-residual --solver-prox-highpass-sigma-hr σ*` | `outputs/solver_v14_de_pb9` |
-| E5 | `--solver-phasebin-ontf --phase-bin-channels 16 --solver-prox-highpass-residual --solver-prox-highpass-sigma-hr σ*` | `outputs/solver_v14_de_pb16` |
+| E4 | `--solver-phasebin-ontf --phase-bin-channels 9 --solver-warmstart aligned_mean --solver-prox-highpass-residual --solver-prox-highpass-sigma-hr σ*` | `outputs/solver_v14_de_pb9` |
+| E5 | `--solver-phasebin-ontf --phase-bin-channels 16 --solver-warmstart aligned_mean --solver-prox-highpass-residual --solver-prox-highpass-sigma-hr σ*` | `outputs/solver_v14_de_pb16` |
 
 **Decision**: if E4/E5 beat the Phase-1 winner on synth PSNR/F1 with real artifact not worse →
 **richer multi-frame input pays off** (do this as mainline). If E4≈E5≈Phase-1 → the sub-pixel signal
@@ -76,6 +85,10 @@ stop adding bins.
 ---
 
 ## Phase 3 — capacity variant (orthogonal control)
+`--base-channels 96` is expected to be much slower and may OOM at batch 12. First run a short
+200-500 step memory/timing check. If it OOMs, lower only E6 to `--batch-size 6` and mark the
+comparison as not perfectly batch-matched.
+
 | id | override | output dir |
 |---|---|---|
 | E6 | `--solver-no-drizzle --solver-prox-highpass-residual --solver-prox-highpass-sigma-hr σ* --base-channels 96` | `outputs/solver_v15_de_wide` |
