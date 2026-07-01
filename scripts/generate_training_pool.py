@@ -346,11 +346,18 @@ def _generate_one_scene(
     n_frames = _sample_n_frames(rng, config)
 
     t_bg_c = _uniform_range(rng, physics["T_bg_c"], "T_bg_c")
-    delta_t_c = _uniform_range(
-        rng,
-        physics["delta_T_c_by_difficulty"][plan.difficulty],
-        f"delta_T_c_by_difficulty.{plan.difficulty}",
-    )
+    # ΔT (contrast): if a continuous range is configured (v6 CPU redesign), sample it as a
+    # wide per-scene nuisance INDEPENDENT of difficulty; otherwise fall back to the legacy
+    # per-difficulty stepped ranges (byte-identical for pools without the continuous key).
+    dt_continuous = physics.get("delta_T_c_continuous")
+    if dt_continuous is not None:
+        delta_t_c = _uniform_range(rng, dt_continuous, "delta_T_c_continuous")
+    else:
+        delta_t_c = _uniform_range(
+            rng,
+            physics["delta_T_c_by_difficulty"][plan.difficulty],
+            f"delta_T_c_by_difficulty.{plan.difficulty}",
+        )
     psf_cfg = dict(config.get("psf_randomization", {}))
     if psf_cfg.get("enabled", False):
         psf_params = sample_psf_parameters(
@@ -379,6 +386,10 @@ def _generate_one_scene(
     geometry_cfg = dict(config.get("geometry", {}))
     antialias = bool(geometry_cfg.get("antialias", True))
     inscribe_disc = bool(geometry_cfg.get("inscribe_disc", False))
+    # CPU/part geometry family (v6): when present, selects part motifs (die
+    # outlines, fine pad grids, buses, fins) via weighted choice. Absent => the
+    # legacy generic IC-layout composition (v5 and earlier behaviour preserved).
+    motif_weights = geometry_cfg.get("motif_weights")
     # Use the finer SSAA factor on the hardest "stress" scenes to bound
     # rasteriser aliasing on the finest rotated lines.
     if plan.difficulty == "stress":
@@ -397,6 +408,7 @@ def _generate_one_scene(
         antialias=antialias,
         ssaa_factor=ssaa_factor,
         inscribe_disc=inscribe_disc,
+        motif_weights=motif_weights,
     )
     # Realism (synthetic_data_realism.md): inject irregular defects (holes / broken edges /
     # cracks), all > pitch so they stay recoverable. Per-scene severity randomizes counts.

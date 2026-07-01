@@ -31,16 +31,34 @@ CRITICAL = "hr_temperature_2x.npy"
 EXPECT_FILES = [CRITICAL, "phase_bin_drizzle_2x.npy", "obs_features_1x.npz",
                 "lr_burst.npy", "shifts.npy", "hr_mask_4x.png", "metadata.json"]
 V4_REF = 0.00008          # edge_sigma=1.4 reference (the blurry target)
-# Calibrated through the REAL AA+defects pipeline (ACL-030): the SSAA coverage mask softens edges
-# ~0.7 HR px on its own, so edge_sigma 0.8 only reaches ~0.0013 (still soft); 0.6 -> ~0.0039 (edges
-# at ~1 pitch = target); <=0.4 -> >=0.013 (approaches the AA floor = sub-pitch). Target edge_sigma=0.6.
-PASS_MIN = 0.0025         # below -> too soft (e.g. edge_sigma>=0.8, lost to AA) -> sharpen the GT
-PASS_MAX = 0.010          # above -> sub-pitch (edge_sigma<=0.4) -> hallucination / FM-1 beading risk
+# ── Band-aware GT sharpness bounds (ACL-030 + v6 CPU/part fine-array update) ──────────────
+# The GT is at HR (10um pitch, 2x the 20um detector). In HR-pixel cycles the 2D radial frequency
+# runs 0 .. ~0.707 (corner). We split the out-of-band (radial > 0.5/scale = 0.25 = 40um) energy at
+# radial 0.5 into two physically distinct bands and bound them SEPARATELY:
+#
+#   (a) RECOVERABLE 20-40um  = 0.25 < radial <= 0.5  — the true 2x super-resolution band. v6's
+#       legitimate fine pad grids / PGA-BGA lattices (pitch >= 32um) live here, so this bound is
+#       LOOSE. (v6 measured: median ~0.009, single fine-array scenes up to ~0.12; edge_sigma 0.8
+#       too-soft floor ~0.0023.)
+#   (b) SUB-PITCH  <20um     = radial > 0.5          — diagonal-corner detail finer than the HR
+#       pitch: genuinely unrecoverable, the FM-1 beading / hallucination-bait signature. This bound
+#       stays TIGHT (~v5-small). It is the sensitive over-sharpness discriminator: calibrated on the
+#       real AA+defects pipeline the sub-pitch median is edge_sigma 0.8 -> 0.00001, 0.6 -> 0.00023
+#       (target), 0.4 -> 0.00297 (~13x, hallucination regime), 0.3 -> 0.0048. 0.0015 cleanly passes
+#       0.6 (>5x margin) yet fails <=0.4 (>1.9x).
+#
+# The single legacy PASS_MAX=0.010 (calibrated on v5's near-empty SR band) conflated (a) and (b) and
+# so wrongly FAILed v6, whose extra energy is all legitimately in band (a). Splitting fixes that
+# while keeping the sub-pitch guard as tight as v5's.
+PASS_MIN_RECOVERABLE = 0.0025   # below -> too soft (edge_sigma>=0.8, lost to AA) -> sharpen the GT
+PASS_MAX_RECOVERABLE = 0.060    # loose: legit 20-40um fine arrays pass; ceiling is a sanity check
+PASS_MAX_SUBPITCH = 0.0015      # TIGHT: catches sub-pitch (edge_sigma<=0.4) hallucination / beading
 SCALE = 2
 
 
-def out_of_band_ratio(img: np.ndarray, scale: int = SCALE) -> float:
-    """Fraction of spectral energy above the LR-Nyquist (recoverable) cutoff."""
+def band_ratios(img: np.ndarray, scale: int = SCALE) -> tuple[float, float]:
+    """(recoverable, subpitch) fractions of spectral energy. recoverable = the 20-40um 2x SR band
+    (LR-Nyquist 0.25 < radial <= HR-Nyquist 0.5); subpitch = <20um corner detail (radial > 0.5)."""
     arr = np.nan_to_num(np.asarray(img, np.float64))
     arr = arr - arr.mean()
     h, w = arr.shape
@@ -50,7 +68,12 @@ def out_of_band_ratio(img: np.ndarray, scale: int = SCALE) -> float:
     fx = np.fft.fftshift(np.fft.fftfreq(w))[None, :]
     radial = np.sqrt(fy ** 2 + fx ** 2)
     total = float(power.sum())
-    return float(power[radial > 0.5 / scale].sum() / total) if total > 0 else 0.0
+    if total <= 0:
+        return 0.0, 0.0
+    lo = 0.5 / scale                       # LR-Nyquist = 0.25 = 40um (recoverable band floor)
+    recoverable = float(power[(radial > lo) & (radial <= 0.5)].sum() / total)
+    subpitch = float(power[radial > 0.5].sum() / total)
+    return recoverable, subpitch
 
 
 def scan_pool(pool: Path, k: int, seed: int) -> dict:
@@ -61,7 +84,7 @@ def scan_pool(pool: Path, k: int, seed: int) -> dict:
     idx = rng.choice(len(scenes), size=min(k, len(scenes)), replace=False)
     pick = [scenes[int(i)] for i in idx]
 
-    oob, p99, missing, shapes, dtypes, has_defects, crops = [], [], [], set(), set(), 0, []
+    rec, sub, p99, missing, shapes, dtypes, has_defects, crops = [], [], [], [], set(), set(), 0, []
     for sd in pick:
         for f in EXPECT_FILES:
             if not (sd / f).exists():
@@ -73,7 +96,9 @@ def scan_pool(pool: Path, k: int, seed: int) -> dict:
         gt = raw.astype(np.float64)
         shapes.add(tuple(gt.shape))
         dtypes.add(str(raw.dtype))
-        oob.append(out_of_band_ratio(gt))
+        r_rec, r_sub = band_ratios(gt)
+        rec.append(r_rec)
+        sub.append(r_sub)
         gy, gx = np.gradient(gt)
         p99.append(float(np.percentile(np.sqrt(gx * gx + gy * gy), 99)))
         if len(crops) < 4:
@@ -86,8 +111,10 @@ def scan_pool(pool: Path, k: int, seed: int) -> dict:
             # defect_meta is a counts dict: {holes, notches, cracks, severity}
             if isinstance(d, dict) and any(int(d.get(k2, 0) or 0) > 0 for k2 in ("holes", "notches", "cracks")):
                 has_defects += 1
+    rec_a, sub_a = np.array(rec), np.array(sub)
     return {
-        "n_total": len(scenes), "n_checked": len(oob), "oob": np.array(oob),
+        "n_total": len(scenes), "n_checked": len(rec_a),
+        "rec": rec_a, "sub": sub_a, "oob": rec_a + sub_a,
         "p99": np.array(p99), "missing": missing, "shapes": shapes,
         "dtypes": dtypes, "has_defects": has_defects, "crops": crops,
     }
@@ -128,10 +155,13 @@ def main() -> int:
     r = scan_pool(Path(args.pool), args.k, args.seed)
     print(f"\n=== {args.pool}  ({r['n_checked']}/{r['n_total']} scenes sampled) ===")
     print(f"  GT shape(s): {r['shapes']}   dtype(s): {r['dtypes']}")
-    print(f"  out_of_band(GT):  {_summ(r['oob'])}")
+    print(f"  out_of_band(GT) total (>40um):     {_summ(r['oob'])}")
+    print(f"  recoverable  20-40um band:         {_summ(r['rec'])}")
+    print(f"  sub-pitch    <20um band:           {_summ(r['sub'])}")
     print(f"  p99 |grad| (C/px): {_summ(r['p99'])}")
     print(f"  scenes with defects in metadata: {r['has_defects']}/{r['n_checked']}")
-    print(f"  reference: v4 edge_sigma=1.4 ~ {V4_REF}  |  v5 edge_sigma=0.6 expect ~0.003-0.005 (real AA pipeline)")
+    print(f"  bounds: recoverable [{PASS_MIN_RECOVERABLE}, {PASS_MAX_RECOVERABLE}] (loose) | "
+          f"sub-pitch <= {PASS_MAX_SUBPITCH} (tight)")
 
     if args.ref_pool:
         rr = scan_pool(Path(args.ref_pool), args.k, args.seed)
@@ -142,22 +172,27 @@ def main() -> int:
     if args.out and r["crops"]:
         dump_crops(r["crops"], Path(args.out))
 
-    med = float(np.median(r["oob"]))
+    med_rec = float(np.median(r["rec"]))
+    med_sub = float(np.median(r["sub"]))
     ok = True
     if r["missing"]:
         ok = False
         print(f"\n  ! MISSING FILES ({len(r['missing'])}): {r['missing'][:6]}{' ...' if len(r['missing']) > 6 else ''}")
-    if med < PASS_MIN:
+    if med_rec < PASS_MIN_RECOVERABLE:
         ok = False
-        print(f"\n  ! GT out_of_band median {med:.5f} < {PASS_MIN} — sharpening did NOT land "
-              f"(still ~v4-blurry). Check edge_sigma in the config / that the right pool was generated.")
-    elif med > PASS_MAX:
+        print(f"\n  ! recoverable-band median {med_rec:.5f} < {PASS_MIN_RECOVERABLE} — sharpening did "
+              f"NOT land (still ~v4-blurry). Check edge_sigma / that the right pool was generated.")
+    elif med_rec > PASS_MAX_RECOVERABLE:
         ok = False
-        print(f"\n  ! GT out_of_band median {med:.5f} > {PASS_MAX} — GT is sub-pitch sharp; "
-              f"risks hallucination/beading. Consider raising edge_sigma toward 0.8-1.0.")
+        print(f"\n  ! recoverable-band median {med_rec:.5f} > {PASS_MAX_RECOVERABLE} — unexpectedly high "
+              f"20-40um energy; inspect the scene content.")
+    if med_sub > PASS_MAX_SUBPITCH:
+        ok = False
+        print(f"\n  ! sub-pitch(<20um) median {med_sub:.5f} > {PASS_MAX_SUBPITCH} — GT carries "
+              f"sub-pitch detail; risks hallucination/beading. Raise edge_sigma toward 0.8-1.0.")
 
     print(f"\n{'PASS' if ok else 'FAIL'}: GT sharpness "
-          f"({med:.5f}, ~{med / V4_REF:.0f}x v4) + integrity"
+          f"(recoverable {med_rec:.5f} ~{med_rec / V4_REF:.0f}x v4, sub-pitch {med_sub:.5f}) + integrity"
           f"{'' if ok else ' — see warnings above'}\n")
     return 0 if ok else 1
 
