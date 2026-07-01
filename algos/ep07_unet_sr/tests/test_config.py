@@ -105,6 +105,48 @@ def test_config_parses_solver_prox_highpass_residual_args() -> None:
     assert cfg.solver_prox_highpass_sigma_hr == 6.0
 
 
+def test_config_parses_phasebin_ontf_and_channels() -> None:
+    cfg = config_from_args([
+        "--training-pool-dir", "dummy_pool",
+        "--input-mode", "hybrid_drizzle2x",
+        "--scale", "2",
+        "--unroll-steps", "2",
+        "--solver-phasebin-ontf",
+        "--phase-bin-channels", "9",
+        "--boundary-boost", "3.0",
+    ])
+
+    assert cfg.solver_phasebin_ontf is True
+    assert cfg.phase_bin_channels == 9
+    assert cfg.in_channels == 14  # 5 fused + 9 phase-bin
+
+
+def test_config_phasebin_ontf_rejects_non_square_bins() -> None:
+    with pytest.raises(ValueError, match="perfect square"):
+        config_from_args([
+            "--training-pool-dir", "dummy_pool",
+            "--input-mode", "hybrid_drizzle2x",
+            "--scale", "2",
+            "--unroll-steps", "2",
+            "--solver-phasebin-ontf",
+            "--phase-bin-channels", "8",
+            "--boundary-boost", "3.0",
+        ])
+
+
+def test_config_phasebin_ontf_rejects_no_drizzle() -> None:
+    with pytest.raises(ValueError, match="phasebin-ontf requires hybrid input"):
+        config_from_args([
+            "--training-pool-dir", "dummy_pool",
+            "--input-mode", "hybrid_drizzle2x",
+            "--scale", "2",
+            "--unroll-steps", "2",
+            "--solver-phasebin-ontf",
+            "--solver-no-drizzle",
+            "--boundary-boost", "3.0",
+        ])
+
+
 def test_config_solver_prox_highpass_residual_default_off() -> None:
     cfg = config_from_args([
         "--training-pool-dir", "dummy_pool",

@@ -12,7 +12,7 @@ import numpy as np
 import torch
 from torch.utils.data import Dataset, Sampler
 
-from tcforge.classical_sr import drizzle_features
+from tcforge.classical_sr import drizzle_features, phase_bin_drizzle
 from tcforge.reconstruct import reconstruct_hr_temperature
 from tcforge.storage import load_scene_compact
 
@@ -243,6 +243,8 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         provide_burst: bool = False,
         solver_m_frames: int = 16,
         solver_no_drizzle: bool = False,
+        phasebin_ontf: bool = False,
+        phase_bin_channels: int = 4,
     ) -> None:
         if scale <= 0:
             raise ValueError("scale must be positive")
@@ -261,6 +263,13 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         self.provide_burst = bool(provide_burst)
         self.solver_m_frames = int(solver_m_frames)
         self.solver_no_drizzle = bool(solver_no_drizzle)
+        # On-the-fly phase-bin drizzle: compute the phase-bin channels from the saved lr_burst with
+        # `phase_bin_channels` bins instead of reading the fixed precomputed drizzle from disk. Lets
+        # us feed the prox RICHER multi-frame sub-pixel structure (more bins = finer phase resolution)
+        # without regenerating the pool. Must match real_eval, which already builds phase_bin_channels
+        # bins on the fly (ACL-043).
+        self.phasebin_ontf = bool(phasebin_ontf)
+        self.phase_bin_channels = int(phase_bin_channels)
         if self.provide_burst and input_mode != "hybrid_drizzle2x":
             raise ValueError("provide_burst (unrolled solver) requires input_mode='hybrid_drizzle2x'")
         if self.input_mode == "hybrid_drizzle2x" and patch_size_hr % self.data_scale != 0:
@@ -402,6 +411,21 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
                 # Lean solver input: 5ch upsampled fused only. The DC term (raw burst) carries the
                 # multi-frame SR signal, so no drizzle is built. x0 = upsampled aligned_mean (obs ch0).
                 packed["obs_features"] = obs_up
+            elif self.phasebin_ontf:
+                # On-the-fly RICHER phase-bin drizzle from the saved burst (ACL-043): compute
+                # `phase_bin_channels` bins directly, so we can feed more sub-pixel structure than the
+                # fixed 4-bin precomputed drizzle without regenerating the pool. Matches real_eval.
+                lr_burst = scene.get("lr_burst")
+                if lr_burst is None:
+                    raise ValueError(
+                        f"scene {scene['scene_dir']} has no lr_burst; phasebin_ontf requires save_lr_burst=true"
+                    )
+                sc_shifts = np.asarray(scene["shifts"], dtype=np.float32)
+                pbd = phase_bin_drizzle(
+                    np.asarray(lr_burst, dtype=np.float32), sc_shifts,
+                    scale=self.data_scale, n_bins=self.phase_bin_channels,
+                ).astype(np.float32, copy=False)
+                packed["obs_features"] = np.concatenate([obs_up, pbd], axis=0)
             else:
                 # Hybrid input: 5ch fused↑2x + the PRECOMPUTED phase-bin drizzle (n_bins ch @2x, read
                 # from disk — no on-the-fly scatter, no drizzle_variants). cond = 5 + n_bins.

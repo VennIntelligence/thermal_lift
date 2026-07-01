@@ -93,6 +93,10 @@ class TrainingConfig:
     solver_dc_weight: float = 0.1
     solver_prior_anneal_steps: int = 0
     solver_no_drizzle: bool = False
+    # ACL-043: compute phase-bin drizzle on-the-fly from the saved burst with `phase_bin_channels`
+    # bins (richer multi-frame sub-pixel input) instead of the fixed 4-bin precomputed drizzle. No
+    # pool regeneration; requires hybrid input (drop --solver-no-drizzle). Matches real_eval.
+    solver_phasebin_ontf: bool = False
     # Warm-start source for x0 in the hybrid (9ch) path. "phasebin" seeds x0 from the first
     # phase-bin drizzle channel (ch5) — the historical default, but it carries the phase-bin
     # coverage waffle (a 2-HR-px = 1-pitch checkerboard on flat background; ACL-032). "aligned_mean"
@@ -208,6 +212,18 @@ class TrainingConfig:
                 raise ValueError("solver_warmstart must be 'phasebin' or 'aligned_mean'")
             if self.solver_prox_norm not in ("group", "none"):
                 raise ValueError("solver_prox_norm must be 'group' or 'none'")
+            if self.solver_phasebin_ontf and self.solver_no_drizzle:
+                raise ValueError(
+                    "--solver-phasebin-ontf requires hybrid input; do not combine with --solver-no-drizzle")
+            if self.solver_phasebin_ontf:
+                nb = int(self.phase_bin_channels)
+                if int(nb ** 0.5) ** 2 != nb:
+                    raise ValueError(
+                        f"phase_bin_channels={nb} must be a perfect square (4/9/16) for phase-bin drizzle")
+            elif int(self.phase_bin_channels) != 4:
+                raise ValueError(
+                    "phase_bin_channels != 4 requires --solver-phasebin-ontf (the pool only has the "
+                    "precomputed 4-bin drizzle; on-the-fly is needed for more bins)")
             if self.solver_prox_highpass_sigma_hr < 0:
                 raise ValueError("solver_prox_highpass_sigma_hr must be >= 0")
         if self.input_mode == "hybrid_drizzle2x" and self.forward_model_weight > 0 and self.scale != 2:
@@ -374,6 +390,10 @@ def build_arg_parser() -> argparse.ArgumentParser:
              "(9ch 2x: 5ch fused↑2x + 4ch precomputed phase-bin drizzle@2x). "
              "Hybrid requires training pool with phase_bin_drizzle_2x.npy.",
     )
+    parser.add_argument("--phase-bin-channels", type=int, default=TrainingConfig.phase_bin_channels,
+                        help="Number of phase-bin drizzle channels in hybrid input (default 4). Only takes "
+                             "effect >4 together with --solver-phasebin-ontf (on-the-fly from the burst); "
+                             "otherwise the pool's precomputed 4-bin drizzle is used.")
     parser.add_argument("--lr-warmup-steps", type=int, default=TrainingConfig.lr_warmup_steps,
                         help="Linear LR warmup from 0 to target LR over this many steps (default: 500).")
     parser.add_argument("--log-every", type=int, default=TrainingConfig.log_every)
@@ -568,6 +588,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         help="Lean solver input: drop the drizzle entirely (no on-the-fly cost, no precomputed "
                              "variants/disk). Warm-start from upsampled aligned_mean; the DC term carries the "
                              "multi-frame SR signal. cond becomes 5ch (vs 9ch hybrid).")
+    parser.add_argument("--solver-phasebin-ontf", action="store_true",
+                        default=TrainingConfig.solver_phasebin_ontf,
+                        help="Compute phase-bin drizzle on-the-fly from the saved burst with "
+                             "--phase-bin-channels bins (richer multi-frame sub-pixel input) instead of the "
+                             "fixed 4-bin precomputed drizzle. Requires hybrid input (do NOT pass "
+                             "--solver-no-drizzle); no pool regeneration. Pair with --phase-bin-channels 8/12.")
     parser.add_argument("--solver-warmstart", choices=("phasebin", "aligned_mean"),
                         default=TrainingConfig.solver_warmstart,
                         help="Hybrid (9ch) warm-start source for x0: 'phasebin' = first phase-bin drizzle "
@@ -630,6 +656,7 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         forward_model_band=args.forward_model_band,
         forward_model_band_sigma=args.forward_model_band_sigma,
         input_mode=args.input_mode,
+        phase_bin_channels=args.phase_bin_channels,
         lr_warmup_steps=args.lr_warmup_steps,
         log_every=args.log_every,
         save_every=args.save_every,
@@ -676,6 +703,7 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         solver_dc_weight=args.solver_dc_weight,
         solver_prior_anneal_steps=args.solver_prior_anneal_steps,
         solver_no_drizzle=args.solver_no_drizzle,
+        solver_phasebin_ontf=args.solver_phasebin_ontf,
         solver_warmstart=args.solver_warmstart,
         solver_prox_use_se=args.solver_prox_use_se,
         solver_prox_norm=args.solver_prox_norm,

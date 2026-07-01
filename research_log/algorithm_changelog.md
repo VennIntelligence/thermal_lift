@@ -8,6 +8,41 @@
 
 ## 变更记录
 
+### [ACL-043] 2026-07-01 — 输入侧多帧增强：on-the-fly phase-bin drizzle（可调 bins，免重生成数据）
+
+**问题诊断**:
+- 用户核心诉求:把多帧真正用到输入侧(当前 no_drizzle 只喂 aligned_mean 一张聚合图,hybrid 也只有固定 4-bin drizzle)。
+- 离线信息预算(`outputs/ep07_solver_diag/info_budget2.py`)证明多帧亚像素信号真实(~+1~+1.5 dB @2×,微扫描采样均匀),更细的相位分桶能保留更多去混叠结构。但原 hybrid 路径从磁盘读**固定 4-bin** 预计算 drizzle,想加 bins 就得重生成整个 pool。
+
+**修改内容**:
+1. `dataset.py`: 新增 `phasebin_ontf` / `phase_bin_channels`。开启时在 `_load_cached` 里用保存的 `lr_burst`+`shifts` 现场 `phase_bin_drizzle(..., n_bins=phase_bin_channels)`,替代读磁盘 4-bin。**复用已测的 tcforge drizzle,不重生成数据。**
+2. `config.py`: 新增 `solver_phasebin_ontf`(默认 False)与 CLI `--solver-phasebin-ontf` / `--phase-bin-channels`;校验:ontf 需 hybrid(禁与 --solver-no-drizzle 合用)、`phase_bin_channels` 必须是完全平方数(4/9/16,phase_bin_drizzle 要求),非 4 必须配 ontf。
+3. `synth_eval.py` / `solver_train.py`: 训练与合成 GT 评测两路 dataset 都透传 ontf+bins,保证 cond 通道一致;`real_eval.py` 本就按 `phase_bin_channels` 现场算,天然对齐。
+4. 测试: `tests/test_config.py` 解析 + 非平方数/与 no_drizzle 互斥的拒绝回归。
+
+**预期效果**:
+- 让 prox 看到更细相位分桶的多帧亚像素结构(4→9→16 bins),验证"输入侧多帧"是否兑现 +dB。**与 ACL-042(D-E,给容量抽信号)组合最有意义**——先有容量,再喂更丰富的多帧。
+- 风险:bins 越多 cond 通道越多(in_ch=5+bins)、算力/显存略升;on-the-fly drizzle 有 CPU 成本(每 scene 一次,LRU 缓存摊薄)。**先 2k smoke 确认不崩再长训。** 默认 off,不影响既有实验。
+
+**推荐参数**:
+```bash
+# 输入侧多帧(9-bin)+ D-E 高频残差,K2/noGN/noSE/p384,40k
+--input-mode hybrid_drizzle2x --scale 2 --unroll-steps 2 \
+--solver-phasebin-ontf --phase-bin-channels 9 \
+--solver-prox-highpass-residual --solver-prox-highpass-sigma-hr 5 \
+--synth-eval-holdout 500 --synth-eval-every 2500 --total-steps 40000
+```
+
+**训练结果**: _(待远端 smoke/长训回填)_
+- 判据: 相对 D-E-only(4-bin)是否再提 synth PSNR/锐度且 real artifact 不升;**不用 dc_resid_band**(被 PSF 失配地板钉死)。若 9-bin 无增益,说明信号早已在 4-bin 里、瓶颈仍是容量(印证信息预算结论)。
+- 结论: 待回填。
+
+**涉及文件**:
+- `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `config.py`, `synth_eval.py`, `solver_train.py`
+- `algos/ep07_unet_sr/tests/test_config.py`
+
+---
+
 ### [ACL-042] 2026-07-01 — D-E: solver prox 高频残差(low-freq anchor)，在不恢复 SE/GN 的前提下追回锐度
 
 **问题诊断**:

@@ -53,6 +53,8 @@ def build_eval_loader(
     provide_burst: bool,
     solver_m_frames: int,
     solver_no_drizzle: bool,
+    phasebin_ontf: bool = False,
+    phase_bin_channels: int = 4,
 ) -> DataLoader:
     """Held-out (tail-slice) eval loader matching the training input contract."""
 
@@ -69,6 +71,8 @@ def build_eval_loader(
         provide_burst=provide_burst,
         solver_m_frames=solver_m_frames,
         solver_no_drizzle=solver_no_drizzle,
+        phasebin_ontf=phasebin_ontf,
+        phase_bin_channels=phase_bin_channels,
         holdout_tail=eval_config.holdout_tail,
         holdout_role="eval",
     )

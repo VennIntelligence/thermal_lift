@@ -232,6 +232,8 @@ def train(config: TrainingConfig) -> Path:
         provide_burst=True,
         solver_m_frames=config.solver_m_frames,
         solver_no_drizzle=config.solver_no_drizzle,
+        phasebin_ontf=config.solver_phasebin_ontf,
+        phase_bin_channels=config.phase_bin_channels,
     )
     # cond/warm-start channels: lean path uses 5ch upsampled fused + aligned_mean (ch0);
     # hybrid path uses 9ch obs and warm-starts from the first phase-bin channel (ch5) by default,
@@ -313,6 +315,7 @@ def train(config: TrainingConfig) -> Path:
         synth_loader = build_eval_loader(
             config, synth_eval_cfg, input_mode="hybrid_drizzle2x", provide_burst=True,
             solver_m_frames=config.solver_m_frames, solver_no_drizzle=config.solver_no_drizzle,
+            phasebin_ontf=config.solver_phasebin_ontf, phase_bin_channels=config.phase_bin_channels,
         )
         print(f"Synthetic held-out eval: {synth_eval_cfg.holdout_tail} tail scenes, "
               f"<= {synth_eval_cfg.max_patches} patches every "
