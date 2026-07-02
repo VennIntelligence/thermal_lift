@@ -58,3 +58,30 @@ CUDA_VISIBLE_DEVICES=0 uv run python scripts/run_m4_deconv_anchor.py --chunk-siz
 Default M4 settings use the M1 grid scale, 248 clean main-session frames, contour-refined shifts, PSF sigma scan `0.2,0.3,0.4,0.5`, lambda scan `3e-4,1e-3,3e-3`, FISTA MAP-TV with 150 iterations, and detector-aperture box integration via `avg_pool2d`. `--no-box` is only for ablation and skips the strict EP06 box-model smoke comparison.
 
 Outputs are written to `output/ep15_info_limit/m4_deconv_anchor/`. `parameter_selection.csv` records every sigma/lambda split-half selection run plus per-sigma full-run timings; `convergence_curves.csv` records the per-sigma full selected-lambda runs. The four-arm comparison uses the EP07 v6 checkpoint at `../ep07_unet_sr/outputs/ep07_v6_physics/model_final.pt` when available.
+
+## Stage 0b Info Budget2 Shift Sweep
+
+Synthetic replacement scaffold for the historical `info_budget2.py` artifact:
+
+```bash
+uv run python scripts/run_stage0b_info_budget2_shift_sweep.py
+```
+
+Useful MVP smoke:
+
+```bash
+uv run python scripts/run_stage0b_info_budget2_shift_sweep.py \
+  --lr-size 64 \
+  --scene-seeds 11,23 \
+  --frame-budgets 16,64 \
+  --shift-error-seeds 401
+```
+
+Outputs are written to `output/ep15_info_limit/stage0b_info_budget2/`.
+The script reads the corrected 20 um detector pitch from
+`configs/stage_calibration.json`, accepts `--psf-sigmas-lr-px`, and sweeps
+`--shift-error-grid` over LR-pixel Gaussian shift errors for Stage 1a DR
+calibration. It reports both a spatial drizzle/Wiener baseline and a Fourier
+alias ridge oracle (`alias_multiframe_wiener_*`). For DR calibration, prefer
+the full or near-full frame-budget oracle delta columns; tiny budgets can be
+conditioning diagnostics rather than monotonic robustness curves.
