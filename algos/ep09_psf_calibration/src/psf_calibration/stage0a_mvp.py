@@ -550,6 +550,62 @@ def _summary_for_candidate(sweep: pd.DataFrame, candidate: PsfCandidate, split: 
     return {str(k): (v.item() if isinstance(v, np.generic) else v) for k, v in row.to_dict().items()}
 
 
+def _bootstrap_val_improvement_ci(
+    frame_scores: pd.DataFrame,
+    baseline: PsfCandidate,
+    best: PsfCandidate,
+    *,
+    n_boot: int = 2000,
+    seed: int = 0,
+) -> dict:
+    """Paired frame-level bootstrap CI for the val band-MSE improvement percentage.
+
+    Resamples val frames with replacement and recomputes
+    ``100 * (mean(baseline) - mean(best)) / mean(baseline)`` over the SAME resampled
+    frames each time, preserving the per-frame pairing (shared content/noise). The
+    best candidate was selected on the train split, so this CI on the held-out val
+    split is not inflated by the selection itself.
+    """
+
+    def _val_series(candidate: PsfCandidate, refine_mode: str) -> pd.Series:
+        rows = frame_scores[
+            frame_scores["split"].eq("val")
+            & frame_scores["refine_mode"].eq(refine_mode)
+            & np.isclose(frame_scores["sigma_x_lr_px"], candidate.sigma_x_lr_px)
+            & np.isclose(frame_scores["sigma_y_lr_px"], candidate.sigma_y_lr_px)
+            & np.isclose(frame_scores["angle_deg"], candidate.angle_deg)
+        ]
+        return rows.set_index("frame_index")["band_mse"]
+
+    base = _val_series(baseline, "none")
+    bst = _val_series(best, "bounded")
+    common = base.index.intersection(bst.index)
+    if len(common) < 3:
+        return {
+            "n_val_frames": int(len(common)),
+            "note": "too few paired val frames for a bootstrap CI",
+        }
+    base_mse = base.loc[common].to_numpy(dtype=float)
+    best_mse = bst.loc[common].to_numpy(dtype=float)
+    rng = np.random.default_rng(seed)
+    n = len(common)
+    stats = np.empty(int(n_boot), dtype=float)
+    for i in range(int(n_boot)):
+        idx = rng.integers(0, n, size=n)
+        mean_base = base_mse[idx].mean()
+        stats[i] = 100.0 * (mean_base - best_mse[idx].mean()) / mean_base if mean_base > 0 else np.nan
+    stats = stats[np.isfinite(stats)]
+    lo, hi = np.percentile(stats, [2.5, 97.5])
+    return {
+        "n_val_frames": int(n),
+        "n_boot": int(n_boot),
+        "point_pct": float(100.0 * (base_mse.mean() - best_mse.mean()) / base_mse.mean()),
+        "ci95_low_pct": float(lo),
+        "ci95_high_pct": float(hi),
+        "improvement_significant_at_95": bool(lo > 0.0),
+    }
+
+
 def run_stage0a_mvp(
     *,
     output_dir: str | Path = DEFAULT_STAGE0A_OUTPUT_DIR,
@@ -729,6 +785,7 @@ def run_stage0a_mvp(
             "baseline_val_band_rms_from_mean_mse": float(baseline_val.get("band_rms_from_mean_mse", np.nan)),
             "best_val_band_rms_from_mean_mse": float(best_val.get("band_rms_from_mean_mse", np.nan)),
             "val_band_mse_improvement_pct": float(val_improvement_pct),
+            "val_band_mse_improvement_bootstrap": _bootstrap_val_improvement_ci(frame_scores, baseline, best),
             "interpretation": "diagnostic floor movement only; not a resolution or temperature-metrology claim",
         },
         "outputs": {

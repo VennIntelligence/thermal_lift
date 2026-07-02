@@ -101,3 +101,48 @@ def test_stage0a_shift_refine_recovers_synthetic_offset() -> None:
         truth_shift,
         atol=1e-6,
     )
+
+
+def test_stage0a_bootstrap_ci_detects_real_and_null_improvement() -> None:
+    import pandas as pd
+
+    from psf_calibration.stage0a_mvp import _bootstrap_val_improvement_ci
+
+    baseline = PsfCandidate(0.5, 0.5, 0.0)
+    best = PsfCandidate(0.2, 0.2, 0.0)
+    rng = np.random.default_rng(7)
+    n = 40
+    base_mse = rng.uniform(0.010, 0.014, size=n)
+
+    def _rows(candidate: PsfCandidate, refine_mode: str, mse: np.ndarray) -> pd.DataFrame:
+        return pd.DataFrame(
+            {
+                "frame_index": np.arange(n),
+                "split": ["val"] * n,
+                "refine_mode": [refine_mode] * n,
+                "sigma_x_lr_px": candidate.sigma_x_lr_px,
+                "sigma_y_lr_px": candidate.sigma_y_lr_px,
+                "angle_deg": candidate.angle_deg,
+                "band_mse": mse,
+            }
+        )
+
+    # Real paired improvement: every frame drops ~8%, plus small noise.
+    improved = base_mse * rng.uniform(0.90, 0.94, size=n)
+    frame_scores = pd.concat(
+        [_rows(baseline, "none", base_mse), _rows(best, "bounded", improved)],
+        ignore_index=True,
+    )
+    result = _bootstrap_val_improvement_ci(frame_scores, baseline, best, n_boot=500, seed=1)
+    assert result["improvement_significant_at_95"]
+    assert result["ci95_low_pct"] > 0
+    assert 4.0 < result["point_pct"] < 12.0
+
+    # Null case: pure noise around the baseline should not be significant.
+    null = base_mse * rng.uniform(0.97, 1.03, size=n)
+    frame_scores_null = pd.concat(
+        [_rows(baseline, "none", base_mse), _rows(best, "bounded", null)],
+        ignore_index=True,
+    )
+    result_null = _bootstrap_val_improvement_ci(frame_scores_null, baseline, best, n_boot=500, seed=1)
+    assert not result_null["improvement_significant_at_95"]

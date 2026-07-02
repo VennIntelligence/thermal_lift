@@ -245,6 +245,9 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         solver_no_drizzle: bool = False,
         phasebin_ontf: bool = False,
         phase_bin_channels: int = 4,
+        dc_shift_jitter_std_px: float = 0.0,
+        dc_psf_sigma_jitter_frac: float = 0.0,
+        dc_psf_angle_jitter_deg: float = 0.0,
     ) -> None:
         if scale <= 0:
             raise ValueError("scale must be positive")
@@ -270,6 +273,13 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         # bins on the fly (ACL-043).
         self.phasebin_ontf = bool(phasebin_ontf)
         self.phase_bin_channels = int(phase_bin_channels)
+        # Stage 1a operator DR: the burst pixels are rendered with the TRUE shifts/PSF; only the
+        # shift/PSF parameters handed to the solver's DC term are jittered, so the solver trains
+        # against a controlled operator mismatch (real data: shift residuals + uncertain PSF).
+        # All three default to 0.0 = exact operator; eval loaders never set them.
+        self.dc_shift_jitter_std_px = float(dc_shift_jitter_std_px)
+        self.dc_psf_sigma_jitter_frac = float(dc_psf_sigma_jitter_frac)
+        self.dc_psf_angle_jitter_deg = float(dc_psf_angle_jitter_deg)
         if self.provide_burst and input_mode != "hybrid_drizzle2x":
             raise ValueError("provide_burst (unrolled solver) requires input_mode='hybrid_drizzle2x'")
         if self.input_mode == "hybrid_drizzle2x" and patch_size_hr % self.data_scale != 0:
@@ -541,11 +551,16 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         self, sample: dict[str, Any], scene: dict[str, Any], index: int,
         y_lr: int, x_lr: int, p_hr: int,
     ) -> None:
-        """Crop M burst frames at the SAME scale-aligned LR ROI as the HR patch, with EXACT
-        shifts (no noise) + per-scene PSF, for the unrolled solver's data-consistency term.
+        """Crop M burst frames at the SAME scale-aligned LR ROI as the HR patch, plus the
+        shift/PSF operator parameters for the unrolled solver's data-consistency term.
         Scale-aligned integer crop => forward_burst(HR_patch) == burst_patch in the interior
         (validated; the DC term masks an ~8 LR-px rim). M is fixed (collation needs constant M;
-        every v3 scene has >= 24 frames)."""
+        every v3 scene has >= 24 frames).
+
+        Stage 1a DR: when dc_*_jitter is enabled, the shifts/PSF handed to the DC term are
+        perturbed while the burst pixels stay rendered with the TRUE parameters — a controlled
+        render-vs-DC mismatch the solver must learn to tolerate (real shift residuals exceed
+        0.05 LR px and the real PSF is uncertain; see stage0a/0b, ACL-044/045)."""
         burst = scene["_lr_burst"]
         sc_shifts = scene["_shifts"]
         n = int(burst.shape[0])
@@ -559,11 +574,28 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
             raise ValueError(f"burst patch shape {burst_patch.shape} != {(m, p1, p1)}")
         md = scene["metadata"]
         sy = md.get("psf_sigma_y_lr_px")
+        shifts_sel = np.asarray(sc_shifts[sel], dtype=np.float32)
+        sigma_x = float(md["psf_sigma_lr_px"])
+        sigma_y = float(sy) if sy is not None else sigma_x
+        angle = float(md.get("psf_angle_deg", 0.0))
+        if self.dc_shift_jitter_std_px > 0:
+            shifts_sel = shifts_sel + rng.normal(
+                0.0, self.dc_shift_jitter_std_px, size=shifts_sel.shape
+            ).astype(np.float32)
+        if self.dc_psf_sigma_jitter_frac > 0:
+            # One factor for both axes: jitters the overall PSF width, preserves the
+            # anisotropy ratio (the calibration uncertainty is width, not aspect).
+            factor = float(rng.uniform(1.0 - self.dc_psf_sigma_jitter_frac,
+                                       1.0 + self.dc_psf_sigma_jitter_frac))
+            sigma_x *= factor
+            sigma_y *= factor
+        if self.dc_psf_angle_jitter_deg > 0:
+            angle += float(rng.normal(0.0, self.dc_psf_angle_jitter_deg))
         sample["lr_burst_patch"] = torch.from_numpy(burst_patch)
-        sample["burst_shifts"] = torch.from_numpy(np.asarray(sc_shifts[sel], dtype=np.float32))
-        sample["psf_sigma_lr_px"] = float(md["psf_sigma_lr_px"])
-        sample["psf_sigma_y_lr_px"] = float(sy) if sy is not None else float(md["psf_sigma_lr_px"])
-        sample["psf_angle_deg"] = float(md.get("psf_angle_deg", 0.0))
+        sample["burst_shifts"] = torch.from_numpy(shifts_sel)
+        sample["psf_sigma_lr_px"] = sigma_x
+        sample["psf_sigma_y_lr_px"] = sigma_y
+        sample["psf_angle_deg"] = angle
         sample["psf_shape"] = str(md.get("psf_shape", "gaussian"))
 
     def __getitem__(self, index: int) -> dict[str, Any]:

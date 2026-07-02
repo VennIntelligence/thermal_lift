@@ -6,7 +6,11 @@ import numpy as np
 from scipy import ndimage
 
 DEFAULT_CANVAS_SHAPE = (960, 1280)
-DEFAULT_PIXEL_SIZE_UM = 10.0
+# LR detector pitch (um/pixel); the HR canvas pitch is this divided by `scale`.
+# 20.0 per the corrected project truth (the historical 10.0 was a 2x BMP scale-bar
+# misread, ACL-023/AGENTS.md). Pool configs pass pixel_size_um explicitly; this
+# default only guards bare calls.
+DEFAULT_PIXEL_SIZE_UM = 20.0
 DEFAULT_SCALE = 2
 CANVAS_SHAPE_4X = (1920, 2560)
 SCALE_4X = 4

@@ -113,6 +113,14 @@ class TrainingConfig:
     # without reintroducing low/mid-freq extent drift. Off by default (identical to plain residual).
     solver_prox_highpass_residual: bool = False
     solver_prox_highpass_sigma_hr: float = 5.0
+    # Stage 1a operator DR (solver_v2 proposal §1, ACL-045): jitter the shift/PSF parameters fed
+    # to the DC term while the burst pixels stay rendered with the TRUE operator, so the solver
+    # learns to work with a mismatched operator (the real-data regime: contour-refined shift
+    # residuals exceed 0.05 LR px and the PSF is uncertain; stage0b measured -1.4 dB oracle loss
+    # at 0.1 px). All default 0.0 = exact operator (pre-1a behaviour). Calibrated start: 0.1 px.
+    solver_dc_shift_jitter_std_px: float = 0.0
+    solver_dc_psf_sigma_jitter_frac: float = 0.0
+    solver_dc_psf_angle_jitter_deg: float = 0.0
 
     def validate(self) -> None:
         if self.device == "cpu" and self.amp:
@@ -226,6 +234,12 @@ class TrainingConfig:
                     "precomputed 4-bin drizzle; on-the-fly is needed for more bins)")
             if self.solver_prox_highpass_sigma_hr < 0:
                 raise ValueError("solver_prox_highpass_sigma_hr must be >= 0")
+            if self.solver_dc_shift_jitter_std_px < 0:
+                raise ValueError("solver_dc_shift_jitter_std_px must be >= 0")
+            if not 0.0 <= self.solver_dc_psf_sigma_jitter_frac < 1.0:
+                raise ValueError("solver_dc_psf_sigma_jitter_frac must be in [0, 1)")
+            if self.solver_dc_psf_angle_jitter_deg < 0:
+                raise ValueError("solver_dc_psf_angle_jitter_deg must be >= 0")
         if self.input_mode == "hybrid_drizzle2x" and self.forward_model_weight > 0 and self.scale != 2:
             raise ValueError(
                 "input_mode='hybrid_drizzle2x' with forward_model_weight > 0 requires --scale 2 "
@@ -619,6 +633,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         default=TrainingConfig.solver_prox_highpass_sigma_hr,
                         help="Gaussian sigma (HR px) for the prox high-pass residual (default 5.0). Detail "
                              "finer than ~sigma is learnable; coarser structure is anchored to warm-start+DC.")
+    parser.add_argument("--solver-dc-shift-jitter-std-px", type=float,
+                        default=TrainingConfig.solver_dc_shift_jitter_std_px,
+                        help="Stage 1a DR: per-frame Gaussian jitter (LR px) added to the shifts the DC term "
+                             "sees; the burst stays rendered with the true shifts. 0 = exact operator "
+                             "(default). Calibrated start 0.1 px (stage0b: -1.4 dB oracle @0.1, -3.5 @0.2).")
+    parser.add_argument("--solver-dc-psf-sigma-jitter-frac", type=float,
+                        default=TrainingConfig.solver_dc_psf_sigma_jitter_frac,
+                        help="Stage 1a DR: uniform +/-frac multiplicative jitter on the PSF sigma fed to the "
+                             "DC term (one factor for both axes, preserves anisotropy). 0 = exact (default).")
+    parser.add_argument("--solver-dc-psf-angle-jitter-deg", type=float,
+                        default=TrainingConfig.solver_dc_psf_angle_jitter_deg,
+                        help="Stage 1a DR: Gaussian jitter (deg) on the PSF angle fed to the DC term. "
+                             "0 = exact (default).")
     return parser
 
 
@@ -709,6 +736,9 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         solver_prox_norm=args.solver_prox_norm,
         solver_prox_highpass_residual=args.solver_prox_highpass_residual,
         solver_prox_highpass_sigma_hr=args.solver_prox_highpass_sigma_hr,
+        solver_dc_shift_jitter_std_px=args.solver_dc_shift_jitter_std_px,
+        solver_dc_psf_sigma_jitter_frac=args.solver_dc_psf_sigma_jitter_frac,
+        solver_dc_psf_angle_jitter_deg=args.solver_dc_psf_angle_jitter_deg,
     )
     cfg.validate()
     return cfg

@@ -4,6 +4,8 @@ import csv
 from pathlib import Path
 
 import numpy as np
+import pytest
+import torch
 from torch.utils.data import DataLoader
 
 from tcforge.reconstruct import reconstruct_hr_temperature
@@ -244,6 +246,38 @@ def test_hybrid_provide_burst_attaches_solver_inputs(tmp_path: Path) -> None:
 
     assert sample["lr_burst_patch"].shape == (12, 4, 4)
     assert sample["burst_shifts"].shape == (12, 2)
+
+
+def test_operator_dr_jitters_dc_params_but_not_burst(tmp_path: Path) -> None:
+    """Stage 1a DR: shifts/PSF fed to the DC term are jittered; burst pixels are untouched."""
+    pool = _make_pool(tmp_path, scale=2, with_burst=True)
+    kwargs = dict(
+        patch_size_hr=8, scale=2, seed=5, patches_per_scene=2,
+        input_mode="hybrid_drizzle2x", provide_burst=True, solver_m_frames=12,
+    )
+    exact = ThermalSRDataset(pool, **kwargs)[0]
+    jittered_ds = ThermalSRDataset(
+        pool, **kwargs,
+        dc_shift_jitter_std_px=0.1,
+        dc_psf_sigma_jitter_frac=0.2,
+        dc_psf_angle_jitter_deg=5.0,
+    )
+    jittered = jittered_ds[0]
+
+    assert torch.equal(exact["lr_burst_patch"], jittered["lr_burst_patch"])
+    delta = (jittered["burst_shifts"] - exact["burst_shifts"]).numpy()
+    assert np.any(np.abs(delta) > 0)
+    assert np.all(np.abs(delta) < 0.1 * 6)  # N(0, 0.1) stays well inside 6 sigma
+    assert jittered["psf_sigma_lr_px"] != exact["psf_sigma_lr_px"]
+    ratio = jittered["psf_sigma_lr_px"] / exact["psf_sigma_lr_px"]
+    assert 0.8 <= ratio <= 1.2
+    # One factor for both axes: anisotropy ratio preserved.
+    assert jittered["psf_sigma_y_lr_px"] / exact["psf_sigma_y_lr_px"] == pytest.approx(ratio)
+    assert jittered["psf_angle_deg"] != exact["psf_angle_deg"]
+    # Same dataset, same index, same epoch => deterministic jitter (resume-safe).
+    again = jittered_ds[0]
+    assert torch.equal(again["burst_shifts"], jittered["burst_shifts"])
+    assert again["psf_sigma_lr_px"] == jittered["psf_sigma_lr_px"]
 
 
 def test_lr_mode_unchanged_with_input_mode_default(tmp_path: Path) -> None:

@@ -234,6 +234,11 @@ def train(config: TrainingConfig) -> Path:
         solver_no_drizzle=config.solver_no_drizzle,
         phasebin_ontf=config.solver_phasebin_ontf,
         phase_bin_channels=config.phase_bin_channels,
+        # Stage 1a operator DR — training only; the synth_eval loader below never jitters,
+        # so held-out metrics stay comparable across DR and no-DR arms.
+        dc_shift_jitter_std_px=config.solver_dc_shift_jitter_std_px,
+        dc_psf_sigma_jitter_frac=config.solver_dc_psf_sigma_jitter_frac,
+        dc_psf_angle_jitter_deg=config.solver_dc_psf_angle_jitter_deg,
     )
     # cond/warm-start channels: lean path uses 5ch upsampled fused + aligned_mean (ch0);
     # hybrid path uses 9ch obs and warm-starts from the first phase-bin channel (ch5) by default,
@@ -268,9 +273,17 @@ def train(config: TrainingConfig) -> Path:
     criterion = build_criterion(config)
     n_params = sum(p.numel() for p in solver.parameters())
     warmstart_label = "aligned_mean(ch0)" if mean_ch == 0 else f"phasebin(ch{mean_ch})"
+    dr_label = "off" if (
+        config.solver_dc_shift_jitter_std_px == 0
+        and config.solver_dc_psf_sigma_jitter_frac == 0
+        and config.solver_dc_psf_angle_jitter_deg == 0
+    ) else (f"shift±{config.solver_dc_shift_jitter_std_px:g}px "
+            f"psfσ±{config.solver_dc_psf_sigma_jitter_frac:.0%} "
+            f"angle±{config.solver_dc_psf_angle_jitter_deg:g}°")
     print(f"UnrolledSolver: K={config.unroll_steps} steps, M={config.solver_m_frames} frames, "
           f"{n_params:,} params, cond={cond_channels}ch, no_drizzle={config.solver_no_drizzle}, "
-          f"warmstart x0={warmstart_label}, band_sigma={config.solver_band_sigma}, device={device}")
+          f"warmstart x0={warmstart_label}, band_sigma={config.solver_band_sigma}, "
+          f"operator_DR={dr_label}, device={device}")
 
     optimizer = torch.optim.AdamW(solver.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, config.total_steps))

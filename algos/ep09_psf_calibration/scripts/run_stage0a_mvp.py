@@ -89,6 +89,13 @@ def main() -> None:
         f"{probe['best_val_band_rms_from_mean_mse']:.6g} "
         f"({probe['val_band_mse_improvement_pct']:.3f}% MSE change)"
     )
+    boot = probe.get("val_band_mse_improvement_bootstrap", {})
+    if "ci95_low_pct" in boot:
+        print(
+            f"Bootstrap 95% CI over {boot['n_val_frames']} val frames: "
+            f"[{boot['ci95_low_pct']:.3f}%, {boot['ci95_high_pct']:.3f}%] "
+            f"(significant: {boot['improvement_significant_at_95']})"
+        )
     print(f"Best candidate: {result.summary['best_train_selected']['candidate']}")
     print(f"Saved: {relative(args.output_dir / 'stage0a_summary.json')}")
 
