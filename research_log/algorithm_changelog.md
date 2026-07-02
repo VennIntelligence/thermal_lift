@@ -33,9 +33,15 @@
 --synth-eval-holdout 500 --synth-eval-every 2500 --total-steps 40000
 ```
 
-**训练结果**: _(待远端 smoke/长训回填)_
-- 判据: 相对 D-E-only(4-bin)是否再提 synth PSNR/锐度且 real artifact 不升;**不用 dc_resid_band**(被 PSF 失配地板钉死)。若 9-bin 无增益,说明信号早已在 4-bin 里、瓶颈仍是容量(印证信息预算结论)。
-- 结论: 待回填。
+**训练结果**: 2026-07-02 回填
+- 输出目录:
+  - E4 9-bin: `algos/ep07_unet_sr/outputs/solver_v14_de_pb9`
+  - E5 16-bin: `algos/ep07_unet_sr/outputs/solver_v14_de_pb16`
+- 关键指标:
+  - E4 40k: synth PSNR 32.47, region RMSE 0.1208, boundary F1 0.864, synth OOB 0.0103, real artifact 0.436, real OOB 0.0018.
+  - E5 5k: synth PSNR 31.997, region RMSE 0.1342, boundary F1 0.858, synth OOB 0.0127, real artifact 0.398, real OOB 0.0013;因 5k 早期指标无改善且显存/时间成本更高而中止。
+- 视觉效果: E4 的 real proxy 更干净,但合成 GT fidelity 低于 D-E/no-drizzle winner(E2:PSNR 32.53/RMSE 0.1191/F1 0.864);E5 早期未显示追赶趋势。
+- 结论: on-the-fly richer phase-bin input 没有在 D-E 基础上兑现额外可用锐度。继续加 phase bins 不是主线。
 
 **涉及文件**:
 - `algos/ep07_unet_sr/src/unet_sr/dataset.py`, `config.py`, `synth_eval.py`, `solver_train.py`
@@ -70,10 +76,20 @@
 # 建议 sigma smoke: 4 / 5 / 6 / 8
 ```
 
-**训练结果**: _(待远端 smoke/长训回填)_
-- 输出目录: 建议 `outputs/solver_v13_hpres_sigmaX`
-- 判据: synth PSNR/region-RMSE/boundary-F1 相对 V11 回升,real artifact/OOB 不升,视觉不再偏糊且无网格/絮状回潮。**不使用 dc_resid_band 作为主判据(已被 PSF 失配地板钉死在 ~1.21)。**
-- 结论: 待回填。
+**训练结果**: 2026-07-02 回填
+- 输出目录:
+  - E1 sigma=5: `algos/ep07_unet_sr/outputs/solver_v13_de_s5`
+  - E2 sigma=4: `algos/ep07_unet_sr/outputs/solver_v13_de_s4`
+  - E3 sigma=8: `algos/ep07_unet_sr/outputs/solver_v13_de_s8`
+  - E6 width control: `algos/ep07_unet_sr/outputs/solver_v15_de_wide`
+- 关键指标:
+  - V11 reference: synth PSNR 35.17, region RMSE 0.0859, boundary F1 0.858, real artifact 0.457.
+  - E1 40k: PSNR 32.51, RMSE 0.1191, F1 0.863, real artifact 0.461.
+  - E2 40k: PSNR 32.53, RMSE 0.1191, F1 0.864, real artifact 0.460.
+  - E3 40k: PSNR 32.50, RMSE 0.1189, F1 0.863, real artifact 0.458.
+  - E6 40k (`base_channels=96`, `batch_size=8`): PSNR 32.58, RMSE 0.1176, F1 0.863, real artifact 0.465.
+- 视觉效果: D-E variants stayed broadly clean but did not become materially sharper than the V11 noSE/noGN baseline; E6 gave a tiny PSNR/RMSE bump at the cost of slightly worse real artifact.
+- 结论: D-E 高频残差没有追回 V9/V11 合成 fidelity。推荐若保留 D-E,使用 E2 `sigma_hr=4` 作为当前最平衡配置;但 ACL-042 的主要结论是负面的:简单 high-pass residual 与加宽 prox 都不是当前主瓶颈,下一步应转向采集/噪声/alignment 或更大的低频锚定建模改动。
 
 **涉及文件**:
 - `algos/ep07_unet_sr/src/unet_sr/unroll.py`

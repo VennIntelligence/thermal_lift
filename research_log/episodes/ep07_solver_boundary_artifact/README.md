@@ -139,3 +139,26 @@ Conclusion:
 - B does not satisfy the pre-registered win condition. It improves real artifact/OOB and slightly improves region RMSE/F1, but loses synth PSNR, raises synth OOB, and the key real DC band residual does not decrease.
 - The important negative result is the DC band residual: adding phase-bin drizzle channels did not make the solver demonstrably use real multi-frame observations more effectively.
 - Keep the current no-drizzle E3 mainline for now. Treat hybrid 9-channel conditioning as an informative failed smoke test, not as a new default.
+
+## ACL-042/043 Unattended Queue Final Read (2026-07-02)
+
+Purpose: close the D-E high-pass-residual prox, richer phase-bin input, and 96-channel capacity queue from `EXPERIMENT_QUEUE.md` under the pre-registered decision rules.  All long runs used held-out synthetic GT as the primary quantitative gate and real-data `full_halo96` PNG/proxy metrics as the artifact gate; `eval_real/dc_resid_band` remains a diagnostic only, because it is floored by PSF/alignment misspecification.
+
+Final metrics:
+
+| id | run | synth PSNR | region RMSE | boundary F1 | synth OOB | real artifact | real OOB | read |
+|---|---|---:|---:|---:|---:|---:|---:|---|
+| V11 ref | `solver_v11_k2_p384_nogn_halo96_50k` | 35.17 | 0.0859 | 0.858 | 0.0104 | 0.457 | 0.0021 | clean but soft baseline |
+| E1 | `solver_v13_de_s5` | 32.51 | 0.1191 | 0.863 | 0.0102 | 0.461 | 0.0021 | sigma=5 no recovery |
+| E2 | `solver_v13_de_s4` | 32.53 | 0.1191 | 0.864 | 0.0098 | 0.460 | 0.0022 | best Phase-1 balance |
+| E3 | `solver_v13_de_s8` | 32.50 | 0.1189 | 0.863 | 0.0102 | 0.458 | 0.0021 | sigma=8 no recovery |
+| E4 | `solver_v14_de_pb9` | 32.47 | 0.1208 | 0.864 | 0.0103 | 0.436 | 0.0018 | cleaner real proxy, softer synth |
+| E5 | `solver_v14_de_pb16` | 31.997 at 5k | 0.1342 at 5k | 0.858 at 5k | 0.0127 at 5k | 0.398 at 5k | 0.0013 at 5k | aborted, no early improvement |
+| E6 | `solver_v15_de_wide` | 32.58 | 0.1176 | 0.863 | 0.0096 | 0.465 | 0.0022 | width gives only marginal PSNR/RMSE and worsens artifact |
+
+Decision:
+
+1. D-E high-pass residual did not recover V9/V11-level synthetic fidelity.  The sigma sweep plateaued near 32.5 dB, far below V11's 35.17 dB and V9's sharper but artifact-prone ~37.5 dB reference.  E2 (`sigma_hr=4`) is the best Phase-1 balance because it has the highest PSNR/F1 pair without an artifact penalty relative to the other D-E settings.
+2. Richer multi-frame input did not add useful recoverable signal on top of D-E.  E4 9-bin phase-bin input improved real artifact proxy but reduced synthetic PSNR/RMSE, while E5 16-bin was stopped at 5k after worse early synthetic metrics.  This supports the info-budget read that adding finer phase-bin conditioning is not the next useful lever.
+3. Width is not the primary limiter.  E6 increased the prox from 7.22M to 16.24M parameters and used `base_channels=96` with `batch_size=8`; it reached the best PSNR/RMSE in the D-E queue, but the gain over E2 was only +0.05 dB PSNR and real artifact worsened to 0.465.
+4. Recommended mainline for this branch of work: keep the E2 D-E/no-drizzle `sigma_hr=4` setting if a D-E variant must be used, but treat the whole ACL-042/043 queue as a negative result for "more network/bins" as the next lever.  The next credible improvement path is acquisition/noise/alignment quality or a larger modeling change such as a low-frequency anchor split, not more bins or simple width scaling.

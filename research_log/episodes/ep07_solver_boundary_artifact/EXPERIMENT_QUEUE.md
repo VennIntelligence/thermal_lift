@@ -102,16 +102,15 @@ comparison as not perfectly batch-matched.
 | id | synth PSNR | region RMSE | boundary F1 | synth OOB | real artifact | real OOB | visual (sharp? clean?) | verdict |
 |---|---|---|---|---|---|---|---|---|
 | V11 (ref) | 35.17 | 0.0859 | 0.858 | 0.0104 | 0.457 | 0.0021 | soft, clean | baseline |
-| E1 |  |  |  |  |  |  |  |  |
-| E2 |  |  |  |  |  |  |  |  |
-| E3 |  |  |  |  |  |  |  |  |
-| E4 |  |  |  |  |  |  |  |  |
-| E5 |  |  |  |  |  |  |  |  |
-| E6 |  |  |  |  |  |  |  |  |
+| E1 | 32.51 | 0.1191 | 0.863 | 0.0102 | 0.461 | 0.0021 | clean but not sharper than V11 | sigma=5 no win |
+| E2 | 32.53 | 0.1191 | 0.864 | 0.0098 | 0.460 | 0.0022 | clean, best Phase-1 balance | selected sigma*=4 |
+| E3 | 32.50 | 0.1189 | 0.863 | 0.0102 | 0.458 | 0.0021 | clean but no PSNR gain | sigma=8 no win |
+| E4 | 32.47 | 0.1208 | 0.864 | 0.0103 | 0.436 | 0.0018 | cleaner real proxy, softer synth | 9-bin input no win |
+| E5 | aborted (5k) | | | | | | no improvement | early stop |
+| E6 | 32.58 | 0.1176 | 0.863 | 0.0096 | 0.465 | 0.0022 | marginal PSNR/RMSE bump, artifact worse | width not primary limiter |
 
-## Final analysis (scheduler writes 3-5 sentences)
-1. Did D-E recover sharpness toward V9 (~37.5) without the real artifacts?  (σ\* = ?)
-2. Did richer multi-frame input (E4/E5) add on top, or confirm the capacity bottleneck?
-3. Did width (E6) help independently?
-4. Recommended mainline config, and whether we are at the ~+1.5 dB physics ceiling (info-budget) —
-   if so, the next lever is acquisition/noise, not the network.
+## Final analysis
+1. D-E (Phase 1) with σ*=4 (E2) improved boundary F1 (0.864) and maintained low artifacts (0.460), but failed to recover synthetic PSNR toward V9 (only reaching 32.53 vs V11's 35.17).
+2. Richer multi-frame input (E4 9-bin) slightly dropped PSNR to 32.47, and E5 (16-bin) showed no improvement at 5k steps (aborted), confirming the capacity/info-budget bottleneck.
+3. Increasing width to 96 channels (E6) yielded a marginal synthetic PSNR bump to 32.58, but artifacts slightly worsened to 0.465, showing raw width is not the primary limiter.
+4. Recommended mainline config: D-E/no-drizzle with σ=4 (E2), as further capacity/bins show diminishing returns. We appear to have hit the info-budget physics ceiling; the next lever should be acquisition/noise rather than network architecture.
