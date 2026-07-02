@@ -175,16 +175,16 @@ from thermal_core.ep03 import (
 )
 
 sampling_resolution = build_sampling_resolution_table(
-    detector_pitch_um=10.0,
+    detector_pitch_um=20.0,
     spatial_resolution_um=20.0,
-    target_grid_um=5.0,
+    target_grid_um=10.0,
 )
 
 fig = plot_sampling_resolution_diagram(
     sampling_resolution,
-    detector_pitch_um=10.0,
+    detector_pitch_um=20.0,
     spatial_resolution_um=20.0,
-    target_grid_um=5.0,
+    target_grid_um=10.0,
     annotation_fontsize=9.0,
 )
 fig.savefig(
