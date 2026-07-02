@@ -8,6 +8,49 @@
 
 ## 变更记录
 
+### [ACL-045] 2026-07-02 — Stage 1a operator DR 实现 + 0a bootstrap CI + TCForge 默认 pitch 修正
+
+**问题诊断**:
+- roadmap 风险 #1（shift 误差）的缓解措施从未实现：训练里渲染 y_i 的 shift 与喂给 A_i 的 shift 逐字节相同（`dataset.py _add_burst_to_sample` "EXACT shifts"），solver 从没见过"算子不准"。Stage 0 已实测真实算子误差显著（见 ACL-044：0a 精修在 ±0.4 px 盒仍边界饱和；0b 表明 0.1 px 误差吃掉 1.4 dB oracle）。
+- 0a 的 `val_band_mse_improvement_pct` 无置信区间（`utils.py bootstrap_curve_minima` 现成未用），小样本下无法断言显著性。
+- `tcforge/geometry.py DEFAULT_PIXEL_SIZE_UM=10.0` 是旧 2× 标尺误读残留；正式 pool 均显式传 20.0 不受影响，但裸调用会拿到错误物理标尺。
+
+**修改内容**:
+1. **Stage 1a operator DR**（proposal §1"求解器中间步"）：`dataset.py` 新增 `dc_shift_jitter_std_px` / `dc_psf_sigma_jitter_frac` / `dc_psf_angle_jitter_deg`（默认全 0=旧行为）。`_add_burst_to_sample` 里只扰动喂给 DC 的 shift（每帧 N(0,σ)）与 PSF（双轴同因子 ×U(1±frac)、角度 N(0,deg)）；**burst 像素保持真值渲染**——受控的 render-vs-DC 失配。同一 (seed,index,epoch) 下确定性（resume 安全）。
+2. `config.py`：对应 `solver_dc_*` 字段 + CLI `--solver-dc-shift-jitter-std-px` 等三旗标 + 校验；`solver_train.py` 只给**训练** dataset 透传（synth_eval loader 不扰动，DR/no-DR 臂指标可比），banner 打印 `operator_DR=...`。
+3. **0a bootstrap CI**：`stage0a_mvp.py` 新增 `_bootstrap_val_improvement_ci`（val 帧成对重采样 2000 次，95% CI + 显著性判定；best 在 train 上选出，val CI 不受选择污染），写入 `dc_resid_floor_probe.val_band_mse_improvement_bootstrap`，runner 打印。
+4. **TCForge**：`DEFAULT_PIXEL_SIZE_UM` 10.0 → 20.0（LR pitch 语义，HR pitch=÷scale；含注释）。tcforge 测试全部显式传 pitch，不受影响。
+5. 测试：`test_dataset.py::test_operator_dr_jitters_dc_params_but_not_burst`（burst 不变/参数确变/各向异性比保持/确定性）、`test_psf_calibration.py::test_stage0a_bootstrap_ci_detects_real_and_null_improvement`（真改善显著、纯噪声不显著）。本地 ep07 39 passed、ep09 7 passed、tcforge 12 passed。
+
+**预期效果**:
+- 1a DR 臂据此起跑：`--solver-dc-shift-jitter-std-px 0.1`（0b 定标），PSF jitter 首轮不开（单变量纪律）。
+- 风险：DR 过强会教 prox 忽略多帧证据（V11 式保守化）——0.2 px 档已被 0b 证明破坏性大，不作起点。
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/{dataset,config,solver_train}.py`、`algos/ep07_unet_sr/tests/test_dataset.py`、`algos/ep09_psf_calibration/{src/psf_calibration/stage0a_mvp.py,scripts/run_stage0a_mvp.py,tests/test_psf_calibration.py}`、`tcforge/src/tcforge/geometry.py`
+
+---
+
+### [ACL-044] 2026-07-02 — Stage 0 gate review：已验证运行数字落盘 + 判据决策（进入 1a）
+
+**问题诊断**: Stage 0 四个 scaffold（41b4732/fa45253/d0566bc/12fa269）只提交了代码，运行数字散落在 5090 的 `output/`，changelog 无记录（违反"截断必 log"）。本条把 owner review + 当晚补跑的全部实测数字落盘。
+
+**已验证数字**（全部跑在 5090，20µm pitch 契约，248 真实帧）:
+1. **0a MVP**（`output/ep09_psf_calibration/stage0a_mvp/`）：实际参数远小于默认——train 8 / val 4 帧、σ 网格 {0.2,0.5}、精修半径 0.05。val band-MSE 改善 **6.39%**（4 帧，无 CI，不可单独引用）。关键副产品：shift 精修 p95=0.0707=0.05√2 **顶到边界盒角**。
+2. **0a full-grid**（`stage0a_fullgrid/`，198 train/50 val 全帧、σ 0.15-0.5、半径 0.4 步长 0.1、81 offsets、2738s）：val band-MSE 改善 **19.34%**（0.01231→0.00993，RMS 0.1110→0.0996）。best=σ0.15 iso——**又在网格边缘**；shift 精修 mean 0.35-0.40 px、p95=0.5657=0.4√2 **再次边界饱和** → 真实算子误差（shift+x̂ 系统差合并）≥0.4 px 量级，远超 2× 去混叠的 0.25 px 要求。**警告**：x̂ 是同源 SAA（含一次 PSF），σ 估计天然偏低，0.15 不作物理 σ̂ 认定；本数字只作"模型误差可修"的 floor probe 证据。
+3. **0b 全量**（`output/ep15_info_limit/stage0b_info_budget2/`，288 runs，6 scene×3 error-seed）：248 帧档 alias-oracle PSNR delta vs 零误差 = **+0.27 dB @0.05px（噪声级）/ −1.39 dB @0.1px / −3.54 dB @0.2px**。16 帧档全正 delta=conditioning 伪影，弃用。
+4. **0c 多 seed**（`output/stage0c_real_split_frc_v2_multiseed/`，5 seeds×both split）：drizzle 1/7 cutoff = **27.1–29.7 µm（mean≈28.2，±1.3µm）**，odd_even 26.9 一致 → 指标可复现。aligned_mean 全 seed"到 20µm 不过阈"且 FRC@20µm≈0.9995 非单调回升 = **插值核相关伪影，aligned_mean cutoff 一律不采信**。已知未缓解偏差：两半共享全帧拟合的 contour 对齐、splat/zoom 核相关、FPN 共模 → cutoff 绝对值偏乐观，**只作方法间相对比较**。
+5. **0d**（`output/ep07_solver_regression_suite/local_baseline_report.json`，已知坏例 V8/K4 数组）：4/4 probe FAIL——坏例判别力成立。seam autocorr 全候选 0.74-0.86（阈 0.35），疑对共享结构过敏，**好例（V11/E2）校准完成前不作硬门**。
+
+**判据决策**:
+- Gate：**条件通过，进入 1a**。DR σ_shift 起点 **0.1 px**（0b 定标；0.05 无压力、0.2 破坏性大）。
+- 主判据换轨确认：0c 以 **drizzle 锚点（≈28.2µm）为参照的相对 FRC** + 0d 套件（好例校准后）+ synth 不塌；below-20µm 只作 audit。
+- **池变更纪律**：合成池已从 v3→v5_sharp→v6_cpu（真实 248 帧未变）。1a 在 v6 上训练，但历史 V11 checkpoint 早于 v6 → **必须先在 v6 上重训 no-DR 控制臂**，否则池+DR 两变量混杂。
+- dc_resid 继续冻结为非判据，直到 0a 非退化标定（交替更新 x̂ 或联合优化）给出可信 σ̂。
+
+**涉及文件**: 无代码变更（记录条目）。执行任务包：`handoff/stage1a_remote_tasks.md`。
+
+---
+
 ### [ACL-043] 2026-07-01 — 输入侧多帧增强：on-the-fly phase-bin drizzle（可调 bins，免重生成数据）
 
 **问题诊断**:
