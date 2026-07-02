@@ -18,6 +18,7 @@ uv pip install -e core/
 uv run python algos/ep09_psf_calibration/scripts/run_forward_residual.py
 uv run python algos/ep09_psf_calibration/scripts/run_esf_fitting.py
 uv run python algos/ep09_psf_calibration/scripts/run_joint_estimation.py
+uv run python algos/ep09_psf_calibration/scripts/run_stage0a_mvp.py
 uv run python algos/ep09_psf_calibration/scripts/summarize_calibration.py
 ```
 
@@ -29,3 +30,8 @@ Outputs are written to `output/ep09_psf_calibration/`. The summary script also u
 All sigma values are reported in LR detector pixels unless the field name says `hr_px_at_2x`.
 Route A is the primary estimate because it directly scores the EP06 forward model against held-out LR
 observations. Routes B and C are independent cross-checks and gate diagnostics.
+
+`run_stage0a_mvp.py` is a Solver V2 redesign scaffold, not a replacement for the EP09 report. It
+loads the corrected 248 clean real frames, asserts the current `20 um/pixel` detector-pitch contract,
+builds a fixed SAA highpass estimate, and compares a `sigma=0.5` no-refine baseline against a small
+bounded PSF/shift-refinement sweep using band-limited DC residuals.
