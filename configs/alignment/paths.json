@@ -1,5 +1,12 @@
 {
-  "schema_version": "0.1",
-  "description": "Git-tracked alignment artifacts used as defaults across TCForge synthetic generation and SR pipelines.",
-  "contour_alignment_results_csv": "configs/alignment/contour_alignment_results.csv"
+  "schema_version": "0.2",
+  "description": "Git-tracked alignment artifacts used as defaults across TCForge synthetic generation and SR pipelines. As of ACL-048 the default is the Stage 0f refined alignment: contour_refined shifts corrected by the Stage 0a per-frame refinement (centered forward convention, |delta| mean 0.288 px / p95 0.447 px, zero-mean). Validated by convergence (iter2 residual 0.012/0.071 px), drizzle split-half FRC cutoff 29.67->26.28 um, and EP15 M2 authoritative cutoff 34.07->25.45 um with negative controls holding (ACL-047/048).",
+  "contour_alignment_results_csv": "configs/alignment/stage0f_refined_alignment.csv",
+  "contour_alignment_results_csv_pre_stage0f": "configs/alignment/contour_alignment_results.csv",
+  "provenance": {
+    "built_by": "algos/ep09_psf_calibration/scripts/build_refined_alignment.py",
+    "refinements_source": "output/ep09_psf_calibration/stage0f_centered_full/stage0a_best_shift_refinements.csv (remote 5090 run, 2026-07-04)",
+    "base_alignment": "configs/alignment/contour_alignment_results.csv",
+    "acl_entries": ["ACL-046", "ACL-047", "ACL-048"]
+  }
 }

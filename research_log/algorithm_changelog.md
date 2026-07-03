@@ -8,6 +8,31 @@
 
 ## 变更记录
 
+### [ACL-048] 2026-07-05 — Stage 0g 判定：精修 shift = 真信息增益，权威频带 34.07→25.45µm；精修对齐升级为 repo 默认资产；V11 网格偏移嫌疑（C/D 不适用）；新增偏移探针 + 文档纠偏 + Stage 0h
+
+**问题诊断 / 0g 已核验结果**（产物 `remote_inbox/20260705_stage0g/`，数字均已对 CSV/JSON 复核）:
+1. **Task 1 shift 反馈回路三信号全正**：(a) iter2 收敛——残余 delta 0.012/0.071px（iter1 0.288/0.447），每轴均值≈0，improvement 缩至 6.9%（剩余为 σ/形状项）；(b) drizzle 分半 cutoff：phase_stratified 29.67→26.28µm、odd_even 26.9→20.6µm；(c) **EP15 M2 权威频带 34.07→25.45µm（±0.73，3 seeds）**，带内负对照压死（24µm：main 0.197 vs shuffle 0.020 vs bicubic 0.002），且 **aperture dip 首次 visible（margin 0.205）**——FRC 现在能看到 20µm 探测器孔径零点的物理特征，独立佐证对齐质量。**判定：精修 shift 为真信息增益；真实可恢复带 ~25.5–40µm 周期。** 0e 的 34µm 作废（那是"坏对齐下的频带"）。
+2. **Task 2 同半幅对照——判决拆开**（本地对曲线做了 45–21µm 符号翻转计数，远端 REPORT 只给了"定罪缓议"的整体结论）：tgv×drz 0 次翻转（锚，@30µm 0.590）；**c_nodr×drz 仅 2 次、平滑衰减但低（@30µm 0.185 < drizzle 跨半自洽 0.377）→ 对 C/D 的"带内内容被先验替换"定罪成立**；v11×drz 14 次、v11×tgv 41 次高幅振荡（0.53→0.22→0.43）→ **V11 输出网格有刚性亚像素偏移嫌疑，对 V11 定罪缓议**。
+3. 重要缓刑理由：0f/0g 的神经臂分半重建 DC 喂的仍是旧对齐（0.29px 误差在毒害 DC）——公平重审需用精修对齐重渲染（Stage 0h Task 2/3）。
+4. 上轮 inbox 欠账：stage0g_iter2 的 summary json 未随包传回（数字自 REPORT 转录），0h 补交。
+
+**修改内容**:
+1. **精修对齐升级为 repo 默认资产**：`configs/alignment/stage0f_refined_alignment.csv` 入库（由本地 build_refined_alignment 从 t1a 精修表构建，与远端产物同源同参数）；`configs/alignment/paths.json` schema 0.2——`contour_alignment_results_csv` 指向精修 CSV，旧 CSV 保留为 `contour_alignment_results_csv_pre_stage0f`，附 provenance。已验证 loader 默认路径取回的 248 帧 dx/dy 与精修值逐帧一致。**影响面**：所有 `load_alignment_shifts`/`default_contour_alignment_csv` 消费者（0a、FRC、M2、SAA、tcforge real-like constellation）默认吃精修 shift。
+2. **偏移探针** `algos/ep15_info_limit/scripts/probe_pair_offset.py`：加窗相位相关（两遍迭代 + 抛物线亚像素）估计全局偏移 → Fourier 反移 → 前后 FRC/cutoff/符号翻转对比。合成验证：注入 (+0.7,−0.7)px 恢复 (+0.710,−0.678)，无偏移对照 |0.018|px。
+3. **文档纠偏（防误导清理）**：删除已完成任务包 handoff/stage1a、stage0f、stage0g（git 历史保留）；`solver_v2_redesign_proposal.md` 与 `network_upgrade_roadmap.md` 顶部加状态更新块（split-half FRC 判据废止→cross-FRC、DR 降级、shift 主线、25.45µm 权威频带、σ=0.2257 不可信、0a 早期数字污染警示）。
+4. Stage 0h 任务包 `handoff/stage0h_remote_tasks.md`：Task 1=偏移探针裁决 V11；Task 2=精修对齐重渲染 V11/C/D 分半（GPU 推理）；Task 3=全精修口径 cross-FRC 排行榜 v3（经典臂也重建）。
+
+**预期效果 / 决策树**:
+- 0h 回答三个问题：(a) 精修对齐下神经臂 cross-FRC 是否回升（回升=旧 shift 毒害 DC 为主因，重训方向=精修 shift 喂 DC；不回升=prox 先验替换实锤，Stage 2 改架构方向）；(b) C vs D 是否仍平；(c) 经典臂新基线。
+- **重训数据集决策（owner 问）**：合成池 shift 本就是精确真值，精修对齐不影响池——**继续用 v6**（C 臂已是 v6 基线，单变量可比）。DR 若再开，量级按实测残余 ~0.05–0.07px，不是 0.1px。v7 仅当后续决定把训练频谱对准实测 25–40µm 带时才立项。
+- dc_resid 解冻评估推迟到 0h 后（σ 仍未标定，但精修对齐下的 DC 残差首次具备相对比较意义）。
+
+**训练结果**: 待 Stage 0h 远端结果回填。
+
+**涉及文件**: `configs/alignment/{paths.json,stage0f_refined_alignment.csv}`、`algos/ep15_info_limit/scripts/probe_pair_offset.py`、`research_log/{solver_v2_redesign_proposal,network_upgrade_roadmap}.md`、`handoff/{stage0h_remote_tasks.md,-stage1a,-stage0f,-stage0g}`
+
+---
+
 ### [ACL-047] 2026-07-04 — Stage 0f 结果核验：逐帧 shift 误差 ~0.29px 实锤为头号瓶颈；神经臂带内净破坏（cross-FRC）；权威频带 ≈34µm；新增 shift 反馈工具 + Stage 0g 任务
 
 **问题诊断 / 0f 已核验结果**（产物 `remote_inbox/20260704_stage0f/`，远端 REPORT 有两处错误见文末勘误）:
