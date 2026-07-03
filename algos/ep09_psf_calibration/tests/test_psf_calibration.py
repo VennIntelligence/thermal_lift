@@ -231,6 +231,62 @@ def test_stage0a_split_source_routes_frames_to_opposite_xhat() -> None:
     assert all(row["band_mse"] > 1e-4 for row in wrong_rows)
 
 
+def test_build_refined_alignment_merges_and_guards(tmp_path: Path) -> None:
+    import pandas as pd
+
+    from psf_calibration.refined_alignment import build_refined_alignment
+
+    base = pd.DataFrame(
+        {
+            "file": ["a.txt", "b.txt", "c.txt"],
+            "refined_align_dx_px": [1.00, -0.50, 0.25],
+            "refined_align_dy_px": [-2.00, 0.75, 0.10],
+            "success": [True, True, True],
+        }
+    )
+    refinements = pd.DataFrame(
+        {
+            "file": ["a.txt", "b.txt", "c.txt"],
+            "initial_dx_px": [1.00, -0.50, 0.25],
+            "initial_dy_px": [-2.00, 0.75, 0.10],
+            "delta_dx_px": [0.10, -0.20, 0.00],
+            "delta_dy_px": [-0.05, 0.15, 0.30],
+            "refined_dx_px": [1.10, -0.70, 0.25],
+            "refined_dy_px": [-2.05, 0.90, 0.40],
+        }
+    )
+    base_csv = tmp_path / "base.csv"
+    ref_csv = tmp_path / "refinements.csv"
+    base.to_csv(base_csv, index=False)
+    refinements.to_csv(ref_csv, index=False)
+
+    out = build_refined_alignment(
+        refinements_csv=ref_csv,
+        base_alignment_csv=base_csv,
+        expected_frames=3,
+    )
+    np.testing.assert_allclose(out["refined_align_dx_px"], [1.10, -0.70, 0.25])
+    np.testing.assert_allclose(out["refined_align_dy_px"], [-2.05, 0.90, 0.40])
+    np.testing.assert_allclose(out["stage0a_delta_dx_px"], [0.10, -0.20, 0.00])
+    assert "success" in out.columns
+
+    # Refinements computed from a DIFFERENT alignment must be rejected.
+    wrong = refinements.copy()
+    wrong["initial_dx_px"] = wrong["initial_dx_px"] + 0.3
+    wrong_csv = tmp_path / "wrong.csv"
+    wrong.to_csv(wrong_csv, index=False)
+    try:
+        build_refined_alignment(
+            refinements_csv=wrong_csv,
+            base_alignment_csv=base_csv,
+            expected_frames=3,
+        )
+    except ValueError as exc:
+        assert "not computed from this base alignment" in str(exc)
+    else:
+        raise AssertionError("mismatched refinements were accepted")
+
+
 def test_stage0a_bootstrap_ci_detects_real_and_null_improvement() -> None:
     import pandas as pd
 

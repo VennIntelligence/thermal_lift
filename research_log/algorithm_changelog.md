@@ -8,6 +8,31 @@
 
 ## 变更记录
 
+### [ACL-047] 2026-07-04 — Stage 0f 结果核验：逐帧 shift 误差 ~0.29px 实锤为头号瓶颈；神经臂带内净破坏（cross-FRC）；权威频带 ≈34µm；新增 shift 反馈工具 + Stage 0g 任务
+
+**问题诊断 / 0f 已核验结果**（产物 `remote_inbox/20260704_stage0f/`，远端 REPORT 有两处错误见文末勘误）:
+1. **Task 1（0a centered 重跑 ×2）**：约定修复在真实数据生效——系统偏置从 −0.24px 归零（axis means +0.010/+0.007）。诚实改善 12.62% CI[11.77,13.49]（full）/ 12.44% CI[11.61,13.31]（split_half），比带 bug 的 20.07% 挤掉约 7.5 个点。**关键分布事实**（本地复核 t1a/t1b CSV）：精修量是均值为零、模长集中 0.25–0.40px 的环状分布（248 帧仅 17 帧 <0.05px；mean |Δ|=0.288，p95=0.447，max=0.566）；仅 42/248 落在 0.25 格点（非插值伪影）；full 与 split_half 两个独立 x̂ 逐帧几乎一致 → **真实逐帧 shift 误差 ~0.29px（约 0.2px/轴）**。对照 0b（0.2px→−3.5dB），不修 shift 则 2× 去混叠预算基本不存在——**shift 校正取代 DR 成为头号杠杆**。σ̂ 两个变体都卡 0.05 下边缘：SAA x̂ 自带模糊，本仪器测不了 σ（预期内）。
+2. **Task 2（cross-FRC）修正读数**（可信段 24–30µm；20µm 恰在探测器孔径零点、数值不可用）：@30µm tgv×maptv 0.70 > tgv×drz 0.558 > drizzle self 0.377 ≈ maptv×drz 0.374 ≫ **V11 0.108 / C 0.098 / D 0.118**；@24µm 同序。神经臂在带内携带的真实可复现信息**低于 drizzle 本身**，self-FRC 0.99+ 全是共享先验复现。**C vs D 统计上平 → DR 0.1px null 在可信仪器下确认**。存疑点：神经×经典的 cross 可能被网格约定偏移衰减（0a 刚出过同类 bug）——0g Task 2 同半幅对照裁决。
+3. **Task 3（0d 分布）**：仅 extent 探针可靠分离（nrmse 2.86×、p95 2.36×）；flat_roi/beading 分离边距仅 1.06–1.15× 且坏例 n=1（checkpoint 加载失败回退预渲染数组，出处降级已记）；seam 探针好坏不可分（坏例 0.857 反而低于好例 0.86–0.87）。阈值决定权在 owner；建议方向：extent 收紧为唯一硬门，flat/beading 趋势跟踪，seam 废弃或重设计。
+4. **Task 0e（EP15 M1+M2 @20µm）**：M2 first-crossing 1/7 cutoff **34.07µm**（3 seeds std 1.61µm）；20µm 处 main FRC 0.897 但负对照同高（shuffle 0.867/drift 0.887）→ 高频 re-rise 是伪影。M1 相位覆盖 stage lattice 25/25 但 detector bin 仅 11/25。**权威可恢复频带 ≈34µm**，与 drizzle 分半 28–30µm、cross cutoff 26–30µm 三角互证：真实增益带在 ~30–40µm 周期，2× 的"20µm"是重建网格不是信息声明（与 AGENTS.md 契约一致）。远端顺手修的 M2 aperture-zero 10→20µm（commit 0fc51c8，越权 push 但 diff 已审、正确）。
+5. **REPORT.md 勘误**：(a) Task 2 全部"FRC@20µm"数字实为 CSV `frc_at_30um` 列、"@16µm"实为 24µm 列——排行榜必须按 24–30µm 读，本条 §2 为正确读数；(b) Task 3"建议阈值可直接替换硬编码"过头，仅 extent 成立。
+
+**修改内容**:
+1. 新增 `psf_calibration/refined_alignment.py` + 薄壳 `scripts/build_refined_alignment.py`：把 stage0a 逐帧精修 shift 合并回 contour 对齐 CSV schema（`refined_align_dx_px/dy_px`），下游全部 `--alignment-csv` 消费者（0a/run_real_split_frc_v2/run_m2_frc/SAA）即插即用。守卫：initial 必须与 base 对齐逐帧一致（防止喂错源精修）、248 行契约、重复 file 拒绝。已用真实 t1a 数据端到端验证（248 行，applied delta mean 0.2878/p95 0.4472，loader 往返 dx/dy 精确一致）。
+2. 测试 `test_build_refined_alignment_merges_and_guards`（合并正确性 + 错源拒绝），ep09 11 passed。
+3. Stage 0g 任务包 `handoff/stage0g_remote_tasks.md`：Task 1=shift 反馈回路（build → 0a iter2 收敛检查 → drizzle 分半 FRC → M2 重跑，全 CPU）；Task 2=同半幅跨方法对照（裁决"神经带内破坏 vs 网格约定偏移"）。
+
+**预期效果**:
+- 若 drizzle cutoff 从 29.7µm 下移、M2 cutoff 从 34µm 下移且负对照差距保持，精修 shift 升级为新对齐资产，所有方法输入受益；0a iter2 的残余 delta 给出收敛性与剩余误差。
+- 自拟合风险纪律：精修 shift 对共享 SAA x̂ 拟合，下游 FRC 增益必须对照 M2 负对照（shuffle/drift）解读，不得单独作为证据。
+- 训练臂继续冻结；若 0g 成立，下一个训练动作是把精修 shift 喂进 DC / 提前 proposal 2c 的 test-time shift refinement，而不是调 DR。
+
+**训练结果**: 待 Stage 0g 远端结果回填。
+
+**涉及文件**: `algos/ep09_psf_calibration/{src/psf_calibration/refined_alignment.py,scripts/build_refined_alignment.py,tests/test_psf_calibration.py}`、`handoff/stage0g_remote_tasks.md`
+
+---
+
 ### [ACL-046] 2026-07-03 — Stage 1a 判定=仪表失效（inconclusive）；0a 半像素约定 bug 实锤；新增 Stage 0f 仪表修复（0a centered forward + split-source x̂、cross-method FRC、0d 分布对比工具）
 
 **问题诊断**（对 20260703 remote run 的本地复核，产物见 `remote_inbox/20260703_stage1a/`）:
