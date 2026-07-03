@@ -49,6 +49,27 @@ def _scene_paths(training_pool_dir: str | Path) -> list[Path]:
     return paths
 
 
+def _select_m_indices(n_frames: int, m_frames: int, rng: np.random.Generator) -> np.ndarray:
+    """Pick exactly ``m_frames`` burst indices so collation always stacks a constant M.
+
+    Without replacement when the scene has enough frames; when ``n_frames <
+    m_frames`` (v3+ pools have per-scene random N, minimum 24), every frame is
+    kept once and the remainder is drawn with replacement — duplicates only
+    re-weight DC evidence, they don't fabricate observations.  A variable M
+    would crash the default collate ("stack expects each tensor to be equal
+    size", first hit by the solver_m_frames=32 ablation, ACL-051).
+    """
+
+    n = int(n_frames)
+    m = int(m_frames)
+    if n <= 0 or m <= 0:
+        raise ValueError(f"n_frames and m_frames must be positive, got {n}, {m}")
+    if n >= m:
+        return np.sort(rng.choice(n, size=m, replace=False))
+    extra = rng.choice(n, size=m - n, replace=True)
+    return np.sort(np.concatenate([np.arange(n), extra]))
+
+
 def _metadata_float(metadata: dict[str, Any], key: str, default: float) -> float:
     return float(metadata.get(key, default))
 
@@ -554,8 +575,9 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         """Crop M burst frames at the SAME scale-aligned LR ROI as the HR patch, plus the
         shift/PSF operator parameters for the unrolled solver's data-consistency term.
         Scale-aligned integer crop => forward_burst(HR_patch) == burst_patch in the interior
-        (validated; the DC term masks an ~8 LR-px rim). M is fixed (collation needs constant M;
-        every v3 scene has >= 24 frames).
+        (validated; the DC term masks an ~8 LR-px rim). M is constant across samples
+        (collation requirement): scenes with fewer than solver_m_frames frames are
+        topped up with replacement (see _select_m_indices).
 
         Stage 1a DR: when dc_*_jitter is enabled, the shifts/PSF handed to the DC term are
         perturbed while the burst pixels stay rendered with the TRUE parameters — a controlled
@@ -564,9 +586,9 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         burst = scene["_lr_burst"]
         sc_shifts = scene["_shifts"]
         n = int(burst.shape[0])
-        m = min(self.solver_m_frames, n)
+        m = int(self.solver_m_frames)
         rng = np.random.default_rng(self.seed + int(index) + self._epoch * len(self) + 17)
-        sel = np.sort(rng.choice(n, size=m, replace=False))
+        sel = _select_m_indices(n, m, rng)
         ds = self.data_scale
         y1, x1, p1 = y_lr // ds, x_lr // ds, p_hr // ds
         burst_patch = np.asarray(burst[sel][:, y1 : y1 + p1, x1 : x1 + p1], dtype=np.float32)

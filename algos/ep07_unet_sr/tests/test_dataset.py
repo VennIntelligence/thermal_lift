@@ -432,3 +432,20 @@ def test_hybrid_dataset_epoch_changes_crop_or_augmentation(tmp_path: Path) -> No
     dataset._cache.clear()
     s_epoch1 = dataset[0]["obs_features"].numpy()
     assert not np.allclose(s_epoch0, s_epoch1)
+
+
+def test_select_m_indices_constant_m_with_and_without_replacement() -> None:
+    from unet_sr.dataset import _select_m_indices
+
+    rng = np.random.default_rng(0)
+    # Enough frames: unique selection.
+    sel = _select_m_indices(40, 16, rng)
+    assert sel.shape == (16,)
+    assert len(np.unique(sel)) == 16
+    assert sel.max() < 40
+    # Scene smaller than requested M (the m32-vs-N24 crash case): every frame
+    # kept once, padded with replacement, constant M preserved.
+    sel_small = _select_m_indices(26, 32, rng)
+    assert sel_small.shape == (32,)
+    assert set(np.unique(sel_small)) == set(range(26))
+    assert (np.sort(sel_small) == sel_small).all()
