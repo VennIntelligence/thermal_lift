@@ -1,7 +1,0 @@
-[offset-probe] v11_new_vs_drz: offset=(+0.587, +0.400) HR px (|0.711|), cutoff 29.97 -> 22.80 um, sign changes 26 -> 0
-[offset-probe] c_nodr_new_vs_drz: offset=(+0.564, +0.398) HR px (|0.691|), cutoff 26.67 -> 25.38 um, sign changes 21 -> 0
-[offset-probe] d_dr01_new_vs_drz: offset=(+0.583, +0.407) HR px (|0.711|), cutoff 26.67 -> 25.45 um, sign changes 23 -> 0
-[offset-probe] tgv_new_vs_drz: offset=(-0.004, +0.004) HR px (|0.005|), cutoff 21.38 -> 21.38 um, sign changes 0 -> 0
-[offset-probe] maptv_new_vs_drz: offset=(+0.004, -0.005) HR px (|0.007|), cutoff 20.00 -> 20.00 um, sign changes 0 -> 0
-[offset-probe] v11_new_vs_tgv: offset=(+0.646, +0.309) HR px (|0.717|), cutoff 29.97 -> 20.00 um, sign changes 28 -> 0
-[offset-probe] wrote output/stage0h_offset_probe_rerender/offset_probe_summary.csv

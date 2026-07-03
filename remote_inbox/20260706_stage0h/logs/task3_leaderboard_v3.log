@@ -1,6 +1,0 @@
-[stage0c] output_dir=output/stage0h_frc_leaderboard
-[stage0c] methods=['none'], split_mode=phase_stratified, frame_domain=offset, scale=2
-[stage0c] wrote output/stage0h_frc_leaderboard/method_summary.csv
-[stage0c] wrote output/stage0h_frc_leaderboard/frc_curves_long.csv
-[stage0c] wrote output/stage0h_frc_leaderboard/run_manifest.json
-[stage0c] status=success, elapsed=1.72s
