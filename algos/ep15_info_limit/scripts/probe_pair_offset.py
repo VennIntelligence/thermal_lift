@@ -196,6 +196,16 @@ def probe_pair(
         labeled.to_csv(curve_dir / f"{name}_offset_{tag}_frc_curve.csv", index=False)
         curves.append(labeled)
 
+    corrected_path = ""
+    if args.save_corrected_dir is not None:
+        out_dir = Path(args.save_corrected_dir)
+        if not out_dir.is_absolute():
+            out_dir = PROJECT_ROOT / out_dir
+        out_dir.mkdir(parents=True, exist_ok=True)
+        corrected_file = out_dir / f"{name}_corrected.npy"
+        np.save(corrected_file, corrected_b.astype(np.float32, copy=False))
+        corrected_path = rel(corrected_file)
+
     hr_pitch_um = pixel_size_um / float(scale)
     periods = tuple(float(p) for p in args.periods_um)
     row: dict[str, Any] = {
@@ -203,6 +213,7 @@ def probe_pair(
         "status": "success",
         "path_a": rel(path_a),
         "path_b": rel(path_b),
+        "corrected_b_npy": corrected_path,
         "scale": int(scale),
         "hr_pitch_um": hr_pitch_um,
         "offset_dx_hr_px": offset["dx_px"],
@@ -236,6 +247,13 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--crop-lr-px", type=int, default=16)
     parser.add_argument("--tukey-alpha", type=float, default=0.25)
     parser.add_argument("--max-offset-px", type=float, default=4.0)
+    parser.add_argument(
+        "--save-corrected-dir",
+        type=Path,
+        default=None,
+        help="If set, save each pair's offset-corrected b array as <dir>/<name>_corrected.npy "
+        "for downstream registration-fair comparisons (e.g. cross-method FRC).",
+    )
     parser.add_argument(
         "--periods-um",
         type=lambda text: tuple(float(v) for v in text.split(",") if v.strip()),
