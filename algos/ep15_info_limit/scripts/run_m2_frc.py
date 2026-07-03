@@ -44,7 +44,7 @@ from thermal_core.plotting import FIGURE_SIZES, get_method_style, savefig_academ
 
 EXPECTED_CLEAN_SR_FRAMES = 248
 DEFAULT_SEEDS = (42, 123, 456)
-PERIODS_OF_INTEREST_UM = (20.0, 16.0, 14.0, 12.0, 11.0, 10.0, 9.0, 8.0)
+PERIODS_OF_INTEREST_UM = (24.0, 20.0, 16.0, 14.0, 12.0, 11.0, 10.0, 9.0, 8.0)
 NOISE_FLOOR_C = 0.0724
 PIXEL_SIZE_UM = 20.0
 
@@ -397,10 +397,14 @@ def make_band_table(curves: dict[str, pd.DataFrame]) -> pd.DataFrame:
 
 def aperture_dip_visible(band_table: pd.DataFrame) -> tuple[bool, float]:
     values = band_table.set_index("period_um")["main_frc"]
-    if not {8.0, 10.0, 12.0}.issubset(values.index):
+    aperture_zero_um = PIXEL_SIZE_UM
+    lower_shoulder_um = 0.8 * aperture_zero_um
+    upper_shoulder_um = 1.2 * aperture_zero_um
+    required = {lower_shoulder_um, aperture_zero_um, upper_shoulder_um}
+    if not required.issubset(values.index):
         return False, float("nan")
-    shoulder = min(float(values.loc[8.0]), float(values.loc[12.0]))
-    margin = shoulder - float(values.loc[10.0])
+    shoulder = min(float(values.loc[lower_shoulder_um]), float(values.loc[upper_shoulder_um]))
+    margin = shoulder - float(values.loc[aperture_zero_um])
     return bool(np.isfinite(margin) and margin >= 0.03), float(margin)
 
 
@@ -420,7 +424,13 @@ def plot_frc_curve(curve: pd.DataFrame, cutoff: Cutoff, output_path: Path) -> No
     ax.axhline(1.0 / 7.0, color="#C44E52", linestyle="--", linewidth=0.9, label="1/7 threshold")
     if np.isfinite(cutoff.period_um):
         ax.axvline(cutoff.period_um, color="#4C72B0", linestyle=":", linewidth=1.0, label=f"f_c={cutoff.period_um:.2f} um")
-    ax.axvline(10.0, color="#222222", linestyle="-.", linewidth=0.9, label="10 um aperture zero")
+    ax.axvline(
+        PIXEL_SIZE_UM,
+        color="#222222",
+        linestyle="-.",
+        linewidth=0.9,
+        label=f"{PIXEL_SIZE_UM:g} um detector aperture zero",
+    )
     ax.set_xlabel("Spatial period [um]")
     ax.set_ylabel("FRC")
     ax.set_title("M2 FRC Information Cutoff")
@@ -453,7 +463,13 @@ def plot_controls(curves: dict[str, pd.DataFrame], output_path: Path) -> None:
             label=labels.get(name, name),
         )
     ax.axhline(1.0 / 7.0, color="#666666", linestyle="--", linewidth=0.9, label="1/7 threshold")
-    ax.axvline(10.0, color="#222222", linestyle="-.", linewidth=0.9, label="10 um aperture zero")
+    ax.axvline(
+        PIXEL_SIZE_UM,
+        color="#222222",
+        linestyle="-.",
+        linewidth=0.9,
+        label=f"{PIXEL_SIZE_UM:g} um detector aperture zero",
+    )
     ax.set_xlabel("Spatial period [um]")
     ax.set_ylabel("FRC")
     ax.set_title("M2 FRC Controls")
