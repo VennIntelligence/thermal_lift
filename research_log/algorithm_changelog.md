@@ -26,6 +26,13 @@
 - 1a DR 臂据此起跑：`--solver-dc-shift-jitter-std-px 0.1`（0b 定标），PSF jitter 首轮不开（单变量纪律）。
 - 风险：DR 过强会教 prox 忽略多帧证据（V11 式保守化）——0.2 px 档已被 0b 证明破坏性大，不作起点。
 
+**训练结果**: 2026-07-03 回填（Stage 1a remote run audit）
+- **Task A / 0a 去饱和重跑**: `output/ep09_psf_calibration/stage0a_fullgrid_r08`。248 clean 帧、198/50 train/val、36 candidates × 2 splits。best=`sigma_x_lr_px=0.1, sigma_y_lr_px=0.1, angle_deg=0.0`；val band-MSE improvement `20.074%`，bootstrap 95% CI `[18.164%, 22.063%]`，显著。解释仍限于 floor probe，不作为物理 PSF σ̂。
+- **Task C / v6 no-DR control**: `algos/ep07_unet_sr/outputs/solver_v13_v6_nodr_ctrl`，`solver_step_020000.pt` 与 `solver_final.pt` 均为 `step=20000`，`solver_dc_shift_jitter_std_px=0.0`。TensorBoard final: synth `psnr=31.2635`, `region_rmse=0.1718`, `boundary_f1=0.8245`, `out_of_band_ratio=0.04293`; real `artifact_score=0.4253`, `out_of_band_ratio=0.001691`, `dc_resid_band=1.2409`, `dc_resid_full=1.5268`。
+- **Task D / v6 DR 0.1**: `algos/ep07_unet_sr/outputs/solver_v13_v6_dr01`，`solver_step_020000.pt` 与 `solver_final.pt` 均为 `step=20000`，`solver_dc_shift_jitter_std_px=0.1`。TensorBoard final: synth `psnr=31.2306`, `region_rmse=0.1767`, `boundary_f1=0.8246`, `out_of_band_ratio=0.04191`; real `artifact_score=0.4195`, `out_of_band_ratio=0.001701`, `dc_resid_band=1.2406`, `dc_resid_full=1.5281`。
+- **Task E / split-half FRC leaderboard**: `output/stage0c_frc_leaderboard`，single phase-stratified `seed=42` split，6 methods all `success`。FRC @20µm / cutoff: drizzle `-0.429 / 29.67µm`, MAP-TV `-0.620 / 21.23µm`, TGV `-0.403 / 20.0µm`, V11 `0.9998 / no cutoff`, C no-DR `0.9311 / no cutoff`, D DR 0.1 `0.9975 / no cutoff`。Neural methods 的 A/B 半幅高度相关，不采信为真实 20µm 高频增益。
+- **结论**: DR 0.1 相对 v6 no-DR final synth PSNR 仅 `-0.033 dB`，artifact score final 点小幅下降 `0.4253 -> 0.4195`，但 real FRC 与 reconstruction 差异未显示可信正收益；Stage 1a 不应判为成功，只能记为“训练完成、DR 未带来可采信收益”。原远端 `REPORT.md` 的 Task C 数字错误，已在 `remote_inbox/20260703_stage1a/REPORT.md` 校正。
+
 **涉及文件**: `algos/ep07_unet_sr/src/unet_sr/{dataset,config,solver_train}.py`、`algos/ep07_unet_sr/tests/test_dataset.py`、`algos/ep09_psf_calibration/{src/psf_calibration/stage0a_mvp.py,scripts/run_stage0a_mvp.py,tests/test_psf_calibration.py}`、`tcforge/src/tcforge/geometry.py`
 
 ---

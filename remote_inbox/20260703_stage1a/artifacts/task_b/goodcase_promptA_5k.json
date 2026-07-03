@@ -1,0 +1,198 @@
+{
+  "audit": {
+    "detector_pitch_um_per_pixel": 20.0,
+    "historical_10um_policy": "Historical 10um-derived physical thresholds are not used. The probes use degC, unitless ratios, or HR-pixel periodicity; the physical truth audited for this run is 20um/pixel and 20um spatial resolution.",
+    "noise_floor_c": 0.0724,
+    "spatial_resolution_um": 20.0
+  },
+  "cases": [
+    {
+      "metrics": {
+        "candidates": {
+          "full_halo96": {
+            "lowpass_p95_abs_delta_c": 0.10796747179975383,
+            "lowpass_range_c": 0.04188234383414467,
+            "lowpass_std_delta_c": 0.007777113950340013,
+            "status": "fail"
+          },
+          "tiled": {
+            "lowpass_p95_abs_delta_c": 0.10577170834662883,
+            "lowpass_range_c": 0.06809608877378001,
+            "lowpass_std_delta_c": 0.016647422357503872,
+            "status": "fail"
+          }
+        },
+        "lowpass_sigma_hr_px": 16.0,
+        "reference": "aligned_mean",
+        "roi": {
+          "size_hr_px": 96,
+          "x": 242,
+          "y": 861
+        }
+      },
+      "name": "flat_roi_artifact",
+      "notes": [],
+      "skip_reason": "",
+      "status": "fail",
+      "thresholds": {
+        "flat_lowpass_p95_delta_c": 0.08,
+        "flat_lowpass_std_delta_c": 0.04
+      }
+    },
+    {
+      "metrics": {
+        "crop_margin_hr_px": 0,
+        "full_halo_label": "full_halo96",
+        "mean_diff_c": -0.013028444865097603,
+        "nrmse_vs_tiled_std": 0.052775562382720936,
+        "p95_abs_diff_c": 0.08019638061523438,
+        "rms_diff_c": 0.03791838513616794,
+        "tiled_label": "tiled"
+      },
+      "name": "tiled_full_halo_extent_consistency",
+      "notes": [],
+      "skip_reason": "",
+      "status": "pass",
+      "thresholds": {
+        "extent_nrmse": 0.15,
+        "extent_p95_abs_diff_c": 0.15
+      }
+    },
+    {
+      "metrics": {
+        "candidates": {
+          "full_halo96": {
+            "autocorr_x": {
+              "128": 0.4408126348905346,
+              "32": 0.8743415775203411,
+              "64": 0.7324302182426109,
+              "96": 0.572279030127049
+            },
+            "autocorr_y": {
+              "128": 0.3130588612860304,
+              "32": 0.8182242681982188,
+              "64": 0.6813723007401298,
+              "96": 0.48313701732002756
+            },
+            "checked_lags_hr_px": [
+              32,
+              64,
+              96,
+              128
+            ],
+            "diff_highpass_std_c": 0.05572634549950415,
+            "max_abs_autocorr": 0.8743415775203411,
+            "status": "fail",
+            "tile_step_hr_px": 64
+          },
+          "tiled": {
+            "autocorr_x": {
+              "128": 0.2704182020635349,
+              "32": 0.7178989708173801,
+              "64": 0.5311740609030795,
+              "96": 0.38025590067420423
+            },
+            "autocorr_y": {
+              "128": 0.12592904131887173,
+              "32": 0.5305040387071976,
+              "64": 0.3382604805831244,
+              "96": 0.19958508989973614
+            },
+            "checked_lags_hr_px": [
+              32,
+              64,
+              96,
+              128
+            ],
+            "diff_highpass_std_c": 0.06069880880682294,
+            "max_abs_autocorr": 0.7178989708173801,
+            "status": "fail",
+            "tile_step_hr_px": 64
+          }
+        },
+        "highpass_sigma_hr_px": 12.0,
+        "reference": "aligned_mean"
+      },
+      "name": "seam_spectrum",
+      "notes": [],
+      "skip_reason": "",
+      "status": "fail",
+      "thresholds": {
+        "seam_autocorr": 0.35
+      }
+    },
+    {
+      "metrics": {
+        "candidates": {
+          "full_halo96": {
+            "edge_excess_p95_c": 0.5860988062165127,
+            "edge_signal_p95_c": 0.6438726820945753,
+            "edge_signal_ratio_vs_reference": 7.673053908672002,
+            "edge_to_flat_signal_ratio": 79.91912302874476,
+            "reference_edge_signal_p95_c": 0.08391348343934836,
+            "status": "fail"
+          },
+          "tiled": {
+            "edge_excess_p95_c": 0.586631240580003,
+            "edge_signal_p95_c": 0.6457363674726633,
+            "edge_signal_ratio_vs_reference": 7.695263514348008,
+            "edge_to_flat_signal_ratio": 71.07591404578716,
+            "reference_edge_signal_p95_c": 0.08391348343934836,
+            "status": "fail"
+          }
+        },
+        "edge_pixels": 167633,
+        "reference": "aligned_mean"
+      },
+      "name": "beading_probe",
+      "notes": [],
+      "skip_reason": "",
+      "status": "fail",
+      "thresholds": {
+        "bead_edge_ratio": 4.0,
+        "bead_excess_p95_c": 0.04
+      }
+    }
+  ],
+  "created_utc": "2026-07-02T14:49:22+00:00",
+  "inputs": {
+    "labels": [
+      "aligned_mean",
+      "tiled",
+      "full_halo96"
+    ],
+    "notes": [
+      "rendered checkpoint algos/ep07_unet_sr/outputs/solver_v12_promptA_A_nodrizzle_5k/solver_step_005000.pt step=5000 patch=384 overlap=128 full_halo=96 device=cpu seconds=41.0"
+    ],
+    "shapes": {
+      "aligned_mean": [
+        960,
+        1280
+      ],
+      "full_halo96": [
+        960,
+        1280
+      ],
+      "tiled": [
+        960,
+        1280
+      ]
+    }
+  },
+  "run": {
+    "checkpoint": "algos/ep07_unet_sr/outputs/solver_v12_promptA_A_nodrizzle_5k/solver_step_005000.pt",
+    "command": "scripts/solver_regression_suite.py --checkpoint algos/ep07_unet_sr/outputs/solver_v12_promptA_A_nodrizzle_5k/solver_step_005000.pt --fail-on-skip --output-json output/ep07_solver_regression_suite/goodcase_promptA_5k.json",
+    "cwd": "/home/ujs/thermal_lift/algos/ep07_unet_sr",
+    "device": "cpu",
+    "git_sha": "94795141b9c5a86b8ecfb5430bebc580a630a5c5",
+    "project_root": "/home/ujs/thermal_lift",
+    "tile_step_hr_px": 64
+  },
+  "schema_version": 1,
+  "suite_status": "fail",
+  "summary": {
+    "fail": 3,
+    "pass": 1,
+    "skip": 0
+  }
+}
