@@ -27,7 +27,11 @@
 - 自拟合风险纪律：精修 shift 对共享 SAA x̂ 拟合，下游 FRC 增益必须对照 M2 负对照（shuffle/drift）解读，不得单独作为证据。
 - 训练臂继续冻结；若 0g 成立，下一个训练动作是把精修 shift 喂进 DC / 提前 proposal 2c 的 test-time shift refinement，而不是调 DR。
 
-**训练结果**: 待 Stage 0g 远端结果回填。
+**训练结果**: 2026-07-03 回填（Stage 0g remote inbox 本地复核，产物 `remote_inbox/20260705_stage0g/`）
+- **Task 1 / shift 反馈回路**: 精修对齐资产生成 248 行，applied delta `mean=0.2878px`, `p95=0.4472px`, axis means `(+0.0103,+0.0069)`。Iter2 残余显著收敛：train delta norm `mean=0.0123px`, `p95=0.0707px`; val `mean=0.00924px`, `p95=0.0500px`; 新对齐 baseline 下 val band-MSE improvement `6.897%`，bootstrap 95% CI `[6.590%, 7.179%]`。这说明一轮精修后没有继续追逐同量级 shift，剩余项更像模型/σ/score floor。
+- **Task 1 / FRC 证据**: drizzle split-half 1/7 cutoff 下移：phase_stratified `29.67µm -> 26.276µm`，odd_even `26.9µm -> 20.598µm`。M2 权威重跑 cutoff `34.07µm -> 25.455µm`，3 seeds std `0.730µm`。负对照审计：24µm band table `main=0.1975 > drift=0.1852 > shuffle=0.0200`，20µm 处 `main=-0.285` 而 shift-shuffle `0.917`，仍标记为 aperture/伪影区；在 24–40µm sampled rings 中 shift-shuffle 全部低于 main，drift control 大体低于 main，但有 3/149 个近 24.15–24.35µm 的小幅反超（最差 margin `-0.0104`）。因此结论应是**精修 shift 具备升级为新对齐资产的候选资格**，不是"彻底排除伪影"；升级前应保留负对照 caveat。
+- **Task 2 / 同半幅跨方法对照**: 经典锚点正常：`tgv_a_vs_drz_a` @30/@24µm = `0.590/0.197`。神经臂同半幅仍低：`v11_a_vs_drz_a` = `0.113/0.097`，`c_nodr_a_vs_drz_a` = `0.185/0.103`，`d_dr01_a_vs_drz_a` = `0.199/0.103`。但 `v11_a_vs_drz_a` 与 `c_nodr_a_vs_drz_a` 在 36–20µm 曲线中呈强非单调规律振荡（本地复核约 110 次一阶差分变号），不像单纯信息单调丢失。**结论：神经臂带内破坏定罪缓议，网格约定/配准偏移嫌疑需要单独定位。**
+- **归档/流程复核**: remote inbox 中的 summary/curve CSV 与本地 `output/` 对应文件逐字节一致；`configs/` 与 tracked code 无 diff。流程问题：远端 REPORT 日期与本机日期不一致，长任务使用 `setsid nohup` 而非 AGENTS.md 要求的 Tmux 0 窗口；remote inbox 未包含 1.2 全量 summary/log 源产物副本。后续任务包需修正为 Tmux 运行并归档 stdout log、summary JSON 和关键输入 CSV。
 
 **涉及文件**: `algos/ep09_psf_calibration/{src/psf_calibration/refined_alignment.py,scripts/build_refined_alignment.py,tests/test_psf_calibration.py}`、`handoff/stage0g_remote_tasks.md`
 
