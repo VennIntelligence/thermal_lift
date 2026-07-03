@@ -23,6 +23,27 @@
 
 ## 变更记录
 
+### [ACL-051] 2026-07-07（凌晨，主智能体夜间自主执行）— Stage 0k 消融三箭齐平：便宜路线（迭代深度/证据预算）无肉；m32 变长 burst collate bug 修复；E0 推理期扩帧为负；裁决 = Stage 2a E1 逐帧融合立项开工
+
+**问题诊断 / 实验记录**（owner 睡前授权整夜自主；所有远端任务 tmux+log，产物 `remote_inbox/20260709_stage0k/`）:
+1. **unroll4 臂**（`solver_v15_unroll4_20k`，K=2→4，其余与 v14/C 同参同 seed）：synth PSNR 31.8（+0.55dB vs C）**但真实 cross-FRC 平**——0.660@30µm / 0.335@24µm / cutoff 25.75µm（v14 基线 0.649/0.335/25.45）。迭代深度不是瓶颈；synth 增益再次与真实域脱钩（ACL-032 模式重现）。
+2. **m32 臂**（`solver_v15_m32_20k`，训练期 DC 帧 16→32）：首启崩溃——`stack expects each tensor to be equal size, [26,…] vs [32,…]`。根因：v3+ 池每景帧数随机（最小 24），`m = min(m_frames, n)` 使 M 随景变化破坏 collate 常量假设（m=16 时从未触发）。**修复 commit 72ed441**：`_select_m_indices` 不足时带放回补齐（重复帧只重加权 DC 证据），+回归测试，ep07 18 passed。重训后：0.636@30µm / 0.345@24µm / 25.45µm——**平**；且 synth PSNR 掉到 26.47（vs C 31.26）。**待查发现**：帧数翻倍 + 冻结 eta=0.5 疑似 DC 梯度随 M 缩放（sum vs mean 未归一），已交 E1 实现者核查现状（只报告不改动，checkpoint 兼容性优先）。
+3. **E0 零训练消融**（v14_50k checkpoint 推理期 m 16→64）：**负**——0.616@30µm / 0.269@24µm（基线 0.649/0.335）。网络按 m=16 的 DC 统计收敛，推理期改证据预算破坏平衡；其 cutoff=229µm 系低频毛刺误触发 first-crossing（曲线非单调），点值可信、cutoff 弃用。
+4. **对照行核验**：三次独立跑的 tgv_x_drz 均复现 0.702/0.356/23.03，判据管线稳定。centered 出口残余偏移 0.06–0.11 HR px（符合 ~0.05 LR px 预期）。
+
+**裁决**（预注册规则：任一臂 @30µm ≥0.67 才算有肉）:
+- unroll4 +0.011、m32 −0.013、E0 −0.033 → **便宜路线证伪**。差距（TGV 0.702 vs ~0.65 @30µm、23.03 vs 25.45µm cutoff）不是训练成熟度（0j）、不是迭代预算、不是证据帧数——指向**输入端聚合抹平子像素相位**（Stage 2a 设计稿的核心论断）。
+- **Stage 2a E1（逐帧融合）立项**：后台 Fable 按 `research_log/stage2a_perframe_fusion_design_draft.md` 实现中（fusion.py + 接线 + 5 测试，默认关闭=字节级旧行为），完成即在 5090 开 `solver_v16_e1fusion_20k`（v6 池、20k、seed 42）。
+
+**预期效果**: E1 若在校正 cross-FRC 上突破 0.67@30µm（+0.02 判据），逐帧融合方向确认，续接 E2（IRLS 鲁棒 DC）/E3（band-gated loss）；若平，按设计稿风险清单逐项排查（容量→per-pixel LN 候选 E1'）。
+
+**训练结果**: 待 E1 训练回填。
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/dataset.py`（72ed441）、`algos/ep07_unet_sr/tests/test_dataset.py`；E1 实现文件清单见后续回填。
+
+---
+
+
 ### [ACL-050] 2026-07-06 — 对比层永久修正（real_eval 中心网格选项）+ 文档纠偏（速览块/旧结论软化）+ inbox 传输硬规则 + Stage 0j：v6+E3 主线 50k 成熟度臂
 
 **问题诊断**:
