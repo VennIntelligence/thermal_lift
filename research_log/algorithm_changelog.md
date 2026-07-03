@@ -40,7 +40,12 @@
 - v5 排行榜回答："成熟度补齐后 v6+E3 距 TGV（0.702@30µm / 23.03µm）还差多少"。追平/超过 → 路径明确（更长训练/loss band 微调）；仍差且 50k 曲线已平 → 容量/先验问题坐实，才立项 Stage 2 架构（逐帧融合）。
 - 20k checkpoint 的 eval_synth 应≈C 的 31.26 PSNR（同 seed 同参），偏差大=复现性问题优先排查。
 
-**训练结果**: 待 Stage 0j 回填。
+**训练结果**: 2026-07-06 回填（Stage 0j，产物 `remote_inbox/20260708_stage0j/`，已本地核验 CSV；⚠️ 远端 REPORT.md 的散文数字第三次出错——把 `__xb_ya` 单方向曲线的 @30µm 值当 @24µm 报，以下为 mean 曲线核验值）
+- **复现性 PASS**：v14_20k×drz = 0.641@30µm / 0.343@24µm / cutoff 25.45µm，与 C（0.649/0.342/25.45）吻合。
+- **成熟度不是差距来源**：50k vs 20k 几乎零提升（0.649 vs 0.641 @30µm，cutoff 同 25.45µm）——v6+E3 主线在 20k 已收敛。V11(v5 池) cutoff 23.03 的优势是池差异故事，另案。
+- **主裁决**：v14_50k 0.649@30µm / 25.45µm，仍落后 TGV（0.702 / 23.03µm）约 0.05@30µm 与 2.4µm cutoff；v14×TGV 一致性 0.871/0.849（两者重建内容高度相同，TGV 对 drizzle 锚多抽出一点真实逐半信息）。
+- **centered 出口生效**：残余偏移 ~0.09-0.10 HR px（≈0.05 LR px 内容残差，符合预期）。
+- **结论**：ACL-050 决策树走"仍差且曲线已平"分支 → Stage 2 架构工作正式立项；先跑两个廉价消融（unroll_steps 2→4、solver_m_frames 16→32，各 ~1h@20k）区分"优化/证据预算不足"与"架构上限"。
 
 **涉及文件**: `algos/ep07_unet_sr/{src/unet_sr/real_eval.py,tests/test_center_grid.py}`、`AGENTS.md`、`research_log/{algorithm_changelog,solver_v2_redesign_proposal,network_upgrade_roadmap}.md`、`handoff/stage0j_remote_tasks.md`
 
