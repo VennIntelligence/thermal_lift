@@ -148,6 +148,9 @@ def build_solver(config: TrainingConfig, device: torch.device, cond_channels: in
         prox_norm=config.solver_prox_norm,
         prox_highpass_residual=config.solver_prox_highpass_residual,
         prox_highpass_sigma_hr=config.solver_prox_highpass_sigma_hr,
+        fusion=config.solver_fusion,
+        fusion_channels=config.solver_fusion_channels,
+        fusion_frame_chunk=config.solver_fusion_frame_chunk,
     ).to(device)
 
 
@@ -280,10 +283,13 @@ def train(config: TrainingConfig) -> Path:
     ) else (f"shift±{config.solver_dc_shift_jitter_std_px:g}px "
             f"psfσ±{config.solver_dc_psf_sigma_jitter_frac:.0%} "
             f"angle±{config.solver_dc_psf_angle_jitter_deg:g}°")
+    fusion_label = "off" if config.solver_fusion == "none" else (
+        f"{config.solver_fusion}(E={config.solver_fusion_channels}, "
+        f"+{3 * config.solver_fusion_channels}ch, chunk={config.solver_fusion_frame_chunk})")
     print(f"UnrolledSolver: K={config.unroll_steps} steps, M={config.solver_m_frames} frames, "
           f"{n_params:,} params, cond={cond_channels}ch, no_drizzle={config.solver_no_drizzle}, "
           f"warmstart x0={warmstart_label}, band_sigma={config.solver_band_sigma}, "
-          f"operator_DR={dr_label}, device={device}")
+          f"operator_DR={dr_label}, fusion={fusion_label}, device={device}")
 
     optimizer = torch.optim.AdamW(solver.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, config.total_steps))

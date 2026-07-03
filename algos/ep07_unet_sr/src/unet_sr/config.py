@@ -121,6 +121,13 @@ class TrainingConfig:
     solver_dc_shift_jitter_std_px: float = 0.0
     solver_dc_psf_sigma_jitter_frac: float = 0.0
     solver_dc_psf_angle_jitter_deg: float = 0.0
+    # Stage 2a E1 (ACL-051 pending, design draft stage2a_perframe_fusion_design_draft.md):
+    # per-frame corner-grid lift + permutation/M-invariant fusion feeding the prox, so the
+    # solver finally sees per-frame sub-pixel phase instead of only 5 aggregated statistics.
+    # "none" (default) keeps the legacy solver byte-identical.
+    solver_fusion: str = "none"
+    solver_fusion_channels: int = 16
+    solver_fusion_frame_chunk: int = 8
 
     def validate(self) -> None:
         if self.device == "cpu" and self.amp:
@@ -240,6 +247,12 @@ class TrainingConfig:
                 raise ValueError("solver_dc_psf_sigma_jitter_frac must be in [0, 1)")
             if self.solver_dc_psf_angle_jitter_deg < 0:
                 raise ValueError("solver_dc_psf_angle_jitter_deg must be >= 0")
+            if self.solver_fusion not in ("none", "perframe"):
+                raise ValueError("solver_fusion must be 'none' or 'perframe'")
+            if self.solver_fusion_channels < 1:
+                raise ValueError("solver_fusion_channels must be >= 1")
+            if self.solver_fusion_frame_chunk < 1:
+                raise ValueError("solver_fusion_frame_chunk must be >= 1")
         if self.input_mode == "hybrid_drizzle2x" and self.forward_model_weight > 0 and self.scale != 2:
             raise ValueError(
                 "input_mode='hybrid_drizzle2x' with forward_model_weight > 0 requires --scale 2 "
@@ -646,6 +659,19 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         default=TrainingConfig.solver_dc_psf_angle_jitter_deg,
                         help="Stage 1a DR: Gaussian jitter (deg) on the PSF angle fed to the DC term. "
                              "0 = exact (default).")
+    parser.add_argument("--solver-fusion", choices=("none", "perframe"),
+                        default=TrainingConfig.solver_fusion,
+                        help="Stage 2a E1: 'perframe' lifts each burst frame onto the solver's "
+                             "corner HR grid, encodes it with its sub-pixel phase, and pools "
+                             "mean/max/std across frames into extra prox conditioning channels "
+                             "(3*fusion_channels). 'none' (default) = legacy solver, byte-identical.")
+    parser.add_argument("--solver-fusion-channels", type=int,
+                        default=TrainingConfig.solver_fusion_channels,
+                        help="E per-frame encoder channels for --solver-fusion perframe "
+                             "(pooled cond adds 3*E channels; default 16 -> +48ch).")
+    parser.add_argument("--solver-fusion-frame-chunk", type=int,
+                        default=TrainingConfig.solver_fusion_frame_chunk,
+                        help="Frames per streaming chunk in the fusion pooling (VRAM knob; default 8).")
     return parser
 
 
@@ -736,6 +762,9 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         solver_prox_norm=args.solver_prox_norm,
         solver_prox_highpass_residual=args.solver_prox_highpass_residual,
         solver_prox_highpass_sigma_hr=args.solver_prox_highpass_sigma_hr,
+        solver_fusion=args.solver_fusion,
+        solver_fusion_channels=args.solver_fusion_channels,
+        solver_fusion_frame_chunk=args.solver_fusion_frame_chunk,
         solver_dc_shift_jitter_std_px=args.solver_dc_shift_jitter_std_px,
         solver_dc_psf_sigma_jitter_frac=args.solver_dc_psf_sigma_jitter_frac,
         solver_dc_psf_angle_jitter_deg=args.solver_dc_psf_angle_jitter_deg,

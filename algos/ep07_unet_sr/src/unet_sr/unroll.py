@@ -37,6 +37,7 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 from .forward_torch import ScenePSF, data_consistency_grad, prepare_forward_burst_plan
+from .fusion import PerFrameFusion
 from .losses import gaussian_blur_2d
 from .model import ThermalSRUNet
 
@@ -87,10 +88,15 @@ class UnrolledSolver(nn.Module):
         prox_norm: str = "group",
         prox_highpass_residual: bool = False,
         prox_highpass_sigma_hr: float = 5.0,
+        fusion: str = "none",
+        fusion_channels: int = 16,
+        fusion_frame_chunk: int = 8,
     ) -> None:
         super().__init__()
         if n_steps < 1:
             raise ValueError("n_steps must be >= 1")
+        if fusion not in ("none", "perframe"):
+            raise ValueError(f"fusion must be 'none' or 'perframe', got {fusion!r}")
         self.n_steps = int(n_steps)
         self.scale = int(scale)
         self.share_weights = bool(share_weights)
@@ -107,7 +113,18 @@ class UnrolledSolver(nn.Module):
         self.prox_highpass_residual = bool(prox_highpass_residual)
         self.prox_highpass_sigma_hr = float(prox_highpass_sigma_hr)
 
-        in_ch = 1 + self.cond_channels  # [current estimate x] ++ conditioning
+        # Stage 2a E1 (draft §2 candidate A): per-frame lift + permutation-invariant
+        # fusion feeding the prox. fusion="none" keeps the legacy graph byte-identical
+        # (no extra module registered, so parameter init RNG order is unchanged).
+        self.fusion_mode = str(fusion)
+        if self.fusion_mode == "perframe":
+            self.fusion = PerFrameFusion(feat_channels=int(fusion_channels), frame_chunk=int(fusion_frame_chunk))
+            fusion_out = self.fusion.out_channels
+        else:
+            self.fusion = None
+            fusion_out = 0
+
+        in_ch = 1 + self.cond_channels + fusion_out  # [x] ++ [fusion feats] ++ conditioning
         if self.share_weights:
             self.prox = ThermalSRUNet(
                 in_channels=in_ch,
@@ -180,6 +197,12 @@ class UnrolledSolver(nn.Module):
             raise ValueError(f"x0 must be (B,1,H,W); got {tuple(x0.shape)}")
         if cond.shape[1] != self.cond_channels:
             raise ValueError(f"cond must have {self.cond_channels} channels; got {cond.shape[1]}")
+        if self.fusion is not None:
+            # Shared across the K steps (cond is step-invariant, matching the legacy path).
+            fused = self.fusion(
+                y_burst, shifts, self.scale, tuple(map(int, x0.shape[-2:])), frame_mask=frame_mask
+            )
+            cond = torch.cat([fused, cond], dim=1)
         create_graph = self.training
         huber = self.huber_delta if self.huber_delta > 0 else None
         forward_plan = None
