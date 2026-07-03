@@ -22,7 +22,21 @@
 
 **Linux 大 CPU core 计算资源规则**：在具备大 CPU core 的 Linux 计算环境中，计算型任务可使用最多 `60` 个 CPU 核心；脚本和命令应通过 `--workers`、`--n-jobs`、`OMP_NUM_THREADS` 等显式参数设置核心数，并在日志或报告中记录实际使用值，避免默认无界占用或复现实验时资源口径不一致。
 
-**后台与长时间任务显示规则**：所有时间比较长的后台任务（如超过数分钟的评测、预处理等），都必须放到 `Tmux 0` 会话中新开一个窗口运行（例如 `tmux new-window -t 0 -n task_name "command 2>&1 | tee log_file"`）。这样人类实验员和智能体都能直观地看到实验进度。
+**后台与长时间任务显示规则**：所有时间比较长的后台任务（如超过数分钟的评测、预处理等），都必须放到 `Tmux 0` 会话中新开一个窗口运行。注意 `tmux` 默认 `remain-on-exit off` 时，`tmux new-window ... "command 2>&1 | tee log_file"` 会在命令结束后自动关闭窗口，导致人类实验员看起来像“输出被吞掉”。正确模式是用 `0:` 明确追加窗口，并在命令结束后留住 shell，同时打印 exit code 和 log 路径：
+
+```bash
+tmux new-window -t 0: -n task_name 'bash -lc '"'"'
+set -o pipefail
+cd /home/ujs/thermal_lift
+command 2>&1 | tee output/task_name/stdout.log
+rc=${PIPESTATUS[0]}
+echo
+echo "[tmux done] exit_code=${rc} log=output/task_name/stdout.log"
+exec bash -l
+'"'"''
+```
+
+这样任务运行时可直接 attach 到窗口看进度，任务结束后 pane 不会消失；实验员确认输出后可手动 `exit` 或 `tmux kill-window -t 0:task_name` 关闭窗口。智能体报告中必须保留 stdout log 路径和实际 exit code。
 
 ---
 

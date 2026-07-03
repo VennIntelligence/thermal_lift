@@ -74,6 +74,22 @@ print(run("cd ~/thermal_lift && git pull --ff-only && nvidia-smi -L"))
 
 复杂、长时间、需要远端智能体持续判断的任务，不由本地直接遥控执行。由本地一次性写好 handoff prompt，用户手动贴给远端智能体执行。
 
+长任务应在 `tmux` 的 `0` session 中留窗运行，而不是直接用 one-shot 窗口命令。项目已实测：在默认 `remain-on-exit off` 下，`tmux new-window ... "command | tee log"` 会在命令结束后自动关闭 pane，导致用户无法回看屏幕输出。推荐模板：
+
+```bash
+tmux new-window -t 0: -n task_name 'bash -lc '"'"'
+set -o pipefail
+cd /home/ujs/thermal_lift
+command 2>&1 | tee output/task_name/stdout.log
+rc=${PIPESTATUS[0]}
+echo
+echo "[tmux done] exit_code=${rc} log=output/task_name/stdout.log"
+exec bash -l
+'"'"''
+```
+
+执行中可用 `tmux attach -t 0` 查看窗口，或用 `tmux capture-pane -pt 0:task_name -S -200` 快速取最近输出。任务结束后窗口会停在 shell，方便人工检查；检查完再手动 `exit` 或 `tmux kill-window -t 0:task_name`。
+
 推荐流程：
 
 1. 本地在 **git 跟踪的目录**写清任务提示词(如 `docs/REMOTE_ORDERS.md`)。**不要放 `tmp/`** —— 它被 `.gitignore` 忽略,无法随仓库同步到远端;`tmp/` 仅用于不需要同步的临时脚本/探针。
