@@ -4,6 +4,12 @@ import sys
 from pathlib import Path
 
 import numpy as np
+from scipy import ndimage
+
+
+def ndimage_gaussian(image: np.ndarray, sigma: float) -> np.ndarray:
+    return ndimage.gaussian_filter(image, sigma=sigma, mode="reflect").astype(np.float32)
+
 
 ROOT = Path(__file__).resolve().parents[3]
 for path in [ROOT / "algos" / "ep09_psf_calibration" / "src", ROOT / "algos" / "ep06_sr_poc" / "src", ROOT / "core" / "src"]:
@@ -101,6 +107,128 @@ def test_stage0a_shift_refine_recovers_synthetic_offset() -> None:
         truth_shift,
         atol=1e-6,
     )
+
+
+def test_stage0a_forward_centered_matches_saa_grid_on_ramp() -> None:
+    """Centered blocks must average to the SAA scatter position scale*(i+shift)."""
+
+    h, w = 32, 40
+    yy, xx = np.meshgrid(np.arange(h, dtype=np.float64), np.arange(w, dtype=np.float64), indexing="ij")
+    hr = (2.0 * yy + 3.0 * xx).astype(np.float32)
+    shift = np.array([0.15, -0.10], dtype=np.float32)  # (dx, dy)
+
+    centered = forward_block_average_shifted(hr, shift, scale=2, block_convention="centered")
+    legacy = forward_block_average_shifted(hr, shift, scale=2, block_convention="legacy_corner")
+
+    i = np.arange(h // 2, dtype=np.float64)
+    j = np.arange(w // 2, dtype=np.float64)
+    expected = 2.0 * (2.0 * (i[:, None] + float(shift[1]))) + 3.0 * (2.0 * (j[None, :] + float(shift[0])))
+    interior = (slice(2, -2), slice(2, -2))
+    np.testing.assert_allclose(centered[interior], expected[interior], atol=1e-4)
+    # Legacy corner convention is exactly +0.5 HR px off in both axes on a ramp.
+    np.testing.assert_allclose((legacy - centered)[interior], 0.5 * (2.0 + 3.0), atol=1e-4)
+
+
+def test_stage0a_centered_convention_removes_spurious_quarter_pixel_refinement() -> None:
+    """Regression for ACL-046: scoring an SAA x̂ with the legacy corner forward
+    makes every frame prefer a constant ~-0.25 LR px shift correction; the
+    centered convention must prefer the true (zero) correction instead."""
+
+    from saa.saa import reconstruct_saa
+
+    rng = np.random.default_rng(3)
+    hr_truth = ndimage_gaussian(rng.normal(size=(64, 64)).astype(np.float32), 2.0)
+    shifts = np.column_stack(
+        [rng.uniform(-0.9, 0.9, size=16), rng.uniform(-0.9, 0.9, size=16)]
+    ).astype(np.float32)
+    frames = np.stack(
+        [forward_block_average_shifted(hr_truth, s, scale=2, block_convention="centered") for s in shifts]
+    )
+    xhat = reconstruct_saa(frames, shifts, scale=2, fill_missing=True).astype(np.float32)
+
+    offsets = shift_refine_offsets(0.375, 0.125)
+
+    def _best_delta(block_convention: str) -> np.ndarray:
+        score = _score_one_frame(
+            frame_idx=0,
+            split="train",
+            refine_mode="bounded",
+            blurred_hr=xhat,
+            frame=frames[0],
+            initial_shift=shifts[0],
+            file_name="synthetic.txt",
+            candidate=PsfCandidate(0.0, 0.0, 0.0),
+            offsets=offsets,
+            scale=2,
+            crop_margin=4,
+            band_sigma_lr_px=0.0,
+            huber_delta=0.0,
+            block_convention=block_convention,
+        )
+        return np.array([score.delta_dx_px, score.delta_dy_px])
+
+    delta_centered = _best_delta("centered")
+    delta_legacy = _best_delta("legacy_corner")
+    assert np.linalg.norm(delta_centered) <= 0.126, delta_centered
+    assert np.linalg.norm(delta_legacy) >= 0.24, delta_legacy
+    # The legacy bias points to negative deltas in both axes (compensating +0.5 HR px).
+    assert delta_legacy[0] < 0 and delta_legacy[1] < 0
+
+
+def test_stage0a_split_source_routes_frames_to_opposite_xhat() -> None:
+    """Frames must be scored against the x̂ selected by frame_xhat_idx."""
+
+    import pandas as pd
+
+    from psf_calibration.stage0a_mvp import score_candidate
+
+    rng = np.random.default_rng(11)
+    hr_a = ndimage_gaussian(rng.normal(size=(32, 32)).astype(np.float32), 1.5)
+    hr_b = ndimage_gaussian(rng.normal(size=(32, 32)).astype(np.float32), 1.5)
+    shifts = np.zeros((4, 2), dtype=np.float32)
+    # Frames 0/2 come from hr_a, frames 1/3 from hr_b.
+    frames = np.stack(
+        [
+            forward_block_average_shifted(hr_a if k % 2 == 0 else hr_b, shifts[k], scale=2)
+            for k in range(4)
+        ]
+    )
+    metadata = pd.DataFrame({"file": [f"f{k}.txt" for k in range(4)]})
+    summary_rows, frame_rows = score_candidate(
+        PsfCandidate(0.0, 0.0, 0.0),
+        refine_mode="none",
+        hr_images=[hr_a, hr_b],
+        frame_xhat_idx=np.array([0, 1, 0, 1]),
+        frames_raw=frames,
+        metadata=metadata,
+        shifts=shifts,
+        split_indices={"train": np.arange(4)},
+        offsets=shift_refine_offsets(0.0, 0.1),
+        scale=2,
+        crop_margin=2,
+        band_sigma_lr_px=0.0,
+        huber_delta=0.0,
+        workers=1,
+    )
+    assert all(row["band_mse"] < 1e-8 for row in frame_rows), frame_rows
+    # Cross-routing the same frames must NOT score near zero.
+    _, wrong_rows = score_candidate(
+        PsfCandidate(0.0, 0.0, 0.0),
+        refine_mode="none",
+        hr_images=[hr_a, hr_b],
+        frame_xhat_idx=np.array([1, 0, 1, 0]),
+        frames_raw=frames,
+        metadata=metadata,
+        shifts=shifts,
+        split_indices={"train": np.arange(4)},
+        offsets=shift_refine_offsets(0.0, 0.1),
+        scale=2,
+        crop_margin=2,
+        band_sigma_lr_px=0.0,
+        huber_delta=0.0,
+        workers=1,
+    )
+    assert all(row["band_mse"] > 1e-4 for row in wrong_rows)
 
 
 def test_stage0a_bootstrap_ci_detects_real_and_null_improvement() -> None:

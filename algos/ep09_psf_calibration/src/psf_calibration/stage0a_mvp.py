@@ -304,8 +304,25 @@ def blur_hr_anisotropic(hr_image: np.ndarray, candidate: PsfCandidate, *, scale:
     return ndimage.convolve(x, kernel, mode="constant", cval=0.0).astype(np.float32, copy=False)
 
 
-def forward_block_average_shifted(blurred_hr: np.ndarray, shift: np.ndarray, *, scale: int = 2) -> np.ndarray:
-    """Block-average a pre-blurred HR image at one shifted LR detector grid."""
+FORWARD_BLOCK_CONVENTIONS = ("centered", "legacy_corner")
+
+
+def forward_block_average_shifted(
+    blurred_hr: np.ndarray,
+    shift: np.ndarray,
+    *,
+    scale: int = 2,
+    block_convention: str = "centered",
+) -> np.ndarray:
+    """Block-average a pre-blurred HR image at one shifted LR detector grid.
+
+    ``block_convention='centered'`` places the LR pixel center at HR coordinate
+    ``scale * (i + shift)``, matching the ``reconstruct_saa`` scatter grid this
+    module scores against.  ``'legacy_corner'`` reproduces the pre-ACL-046
+    behavior (samples at ``scale * (i + shift) + {0..scale-1}``, block center
+    ``+ (scale-1)/2`` HR px in both axes), which made every shift refinement
+    absorb a spurious constant ``-(scale-1)/(2*scale)`` LR-px correction.
+    """
 
     image = np.asarray(blurred_hr, dtype=np.float32)
     if image.ndim != 2:
@@ -313,16 +330,19 @@ def forward_block_average_shifted(blurred_hr: np.ndarray, shift: np.ndarray, *, 
     scale = int(scale)
     if scale <= 0:
         raise ValueError("scale must be positive")
+    if block_convention not in FORWARD_BLOCK_CONVENTIONS:
+        raise ValueError(f"block_convention must be one of {FORWARD_BLOCK_CONVENTIONS}, got {block_convention!r}")
     h_hr, w_hr = image.shape
     h_lr, w_lr = h_hr // scale, w_hr // scale
     dx, dy = np.asarray(shift, dtype=np.float64)
     out = np.zeros((h_lr, w_lr), dtype=np.float32)
     base_y = scale * (np.arange(h_lr, dtype=np.float64) + dy)
     base_x = scale * (np.arange(w_lr, dtype=np.float64) + dx)
+    center_offset = 0.0 if block_convention == "legacy_corner" else (scale - 1) / 2.0
     for oy in range(scale):
-        yy = base_y + float(oy)
+        yy = base_y + float(oy) - center_offset
         for ox in range(scale):
-            xx = base_x + float(ox)
+            xx = base_x + float(ox) - center_offset
             coords = np.meshgrid(yy, xx, indexing="ij")
             out += ndimage.map_coordinates(
                 image,
@@ -369,8 +389,9 @@ def _score_shift(
     crop_margin: int,
     band_sigma_lr_px: float,
     huber_delta: float,
+    block_convention: str = "centered",
 ) -> tuple[float, float]:
-    pred = forward_block_average_shifted(blurred_hr, shift, scale=scale)
+    pred = forward_block_average_shifted(blurred_hr, shift, scale=scale, block_convention=block_convention)
     residual_full = pred - np.asarray(frame, dtype=np.float32)
     sl_y, sl_x = crop_slices(tuple(residual_full.shape), crop_margin)
     full_mse = _mse_or_huber(residual_full[sl_y, sl_x], huber_delta=huber_delta)
@@ -394,6 +415,7 @@ def _score_one_frame(
     crop_margin: int,
     band_sigma_lr_px: float,
     huber_delta: float,
+    block_convention: str = "centered",
 ) -> FrameScore:
     best: tuple[float, float, np.ndarray] | None = None
     for delta in offsets:
@@ -406,6 +428,7 @@ def _score_one_frame(
             crop_margin=crop_margin,
             band_sigma_lr_px=band_sigma_lr_px,
             huber_delta=huber_delta,
+            block_convention=block_convention,
         )
         if best is None or band_mse < best[0]:
             best = (band_mse, full_mse, shift)
@@ -439,7 +462,8 @@ def score_candidate(
     candidate: PsfCandidate,
     *,
     refine_mode: str,
-    hr_image: np.ndarray,
+    hr_images: list[np.ndarray],
+    frame_xhat_idx: np.ndarray,
     frames_raw: np.ndarray,
     metadata: pd.DataFrame,
     shifts: np.ndarray,
@@ -450,10 +474,19 @@ def score_candidate(
     band_sigma_lr_px: float,
     huber_delta: float,
     workers: int,
+    block_convention: str = "centered",
 ) -> tuple[list[dict], list[dict]]:
-    """Score one PSF candidate across deterministic train/validation frames."""
+    """Score one PSF candidate across deterministic train/validation frames.
 
-    blurred = blur_hr_anisotropic(hr_image, candidate, scale=scale)
+    ``hr_images`` holds one or more x̂ estimates and ``frame_xhat_idx[i]``
+    selects which estimate frame ``i`` is scored against.  The single-x̂
+    same-source mode passes one image and an all-zero index; the split-source
+    mode passes two half-burst SAA estimates so no frame is scored against an
+    x̂ that contains itself.
+    """
+
+    xhat_idx = np.asarray(frame_xhat_idx, dtype=int)
+    blurred_list = [blur_hr_anisotropic(img, candidate, scale=scale) for img in hr_images]
     tasks = []
     for split, indices in split_indices.items():
         for frame_idx in indices:
@@ -462,7 +495,7 @@ def score_candidate(
                     frame_idx=int(frame_idx),
                     split=split,
                     refine_mode=refine_mode,
-                    blurred_hr=blurred,
+                    blurred_hr=blurred_list[int(xhat_idx[int(frame_idx)])],
                     frame=frames_raw[int(frame_idx)],
                     initial_shift=shifts[int(frame_idx)],
                     file_name=str(metadata.iloc[int(frame_idx)]["file"]),
@@ -472,6 +505,7 @@ def score_candidate(
                     crop_margin=crop_margin,
                     band_sigma_lr_px=band_sigma_lr_px,
                     huber_delta=huber_delta,
+                    block_convention=block_convention,
                 )
             )
     n_workers = min(max(1, int(workers)), max(1, len(tasks)))
@@ -631,6 +665,8 @@ def run_stage0a_mvp(
     scale: int = 2,
     huber_delta: float = 0.0,
     save_xhat: bool = False,
+    forward_convention: str = "centered",
+    xhat_source: str = "full",
 ) -> Stage0aResult:
     """Run the bounded Stage 0a MVP diagnostic.
 
@@ -639,6 +675,14 @@ def run_stage0a_mvp(
     sub-sampled by default; set ``max_train_score=None`` and
     ``max_val_score=None`` from Python, or use the CLI's ``--use-all-score``,
     for a slower full-score pass.
+
+    ``forward_convention='centered'`` (default) scores with the block center
+    aligned to the SAA scatter grid; ``'legacy_corner'`` reproduces the
+    pre-ACL-046 half-HR-pixel mismatch for regression comparisons only.
+    ``xhat_source='split_half'`` builds two SAA estimates from even/odd frame
+    parities and scores each frame against the opposite half's x̂, removing the
+    same-source degeneracy where a frame is compared against an estimate that
+    already contains it.
     """
 
     start = time.perf_counter()
@@ -661,13 +705,49 @@ def run_stage0a_mvp(
         max_val_score=max_val_score,
     )
     split_indices = {"train": train_idx, "val": val_idx}
-    xhat = reconstruct_saa(
-        inputs.frames_highpass,
-        inputs.shifts,
-        scale=scale,
-        workers=workers,
-        fill_missing=True,
-    ).astype(np.float32, copy=False)
+    if xhat_source not in ("full", "split_half"):
+        raise ValueError(f"xhat_source must be 'full' or 'split_half', got {xhat_source!r}")
+    n_frames = len(inputs.metadata)
+    if xhat_source == "full":
+        xhat_images = [
+            reconstruct_saa(
+                inputs.frames_highpass,
+                inputs.shifts,
+                scale=scale,
+                workers=workers,
+                fill_missing=True,
+            ).astype(np.float32, copy=False)
+        ]
+        frame_xhat_idx = np.zeros(n_frames, dtype=int)
+        xhat_meta = {
+            "method": "SAA over loaded clean highpass frames",
+            "source": "full",
+            "n_frames_per_xhat": [int(n_frames)],
+        }
+    else:
+        parity = np.arange(n_frames, dtype=int) % 2
+        halves = [np.flatnonzero(parity == 1), np.flatnonzero(parity == 0)]
+        if min(len(h) for h in halves) < 2:
+            raise ValueError("split_half xhat_source needs at least 2 frames per parity half")
+        # Frame with parity p is scored against the SAA built from the OTHER
+        # parity, so no frame contributes to the x̂ it is compared with.
+        xhat_images = [
+            reconstruct_saa(
+                inputs.frames_highpass[half],
+                inputs.shifts[half],
+                scale=scale,
+                workers=workers,
+                fill_missing=True,
+            ).astype(np.float32, copy=False)
+            for half in halves
+        ]
+        frame_xhat_idx = parity
+        xhat_meta = {
+            "method": "split-half SAA cross-scoring (even/odd frame parity, frame scored against opposite half)",
+            "source": "split_half",
+            "n_frames_per_xhat": [int(len(h)) for h in halves],
+        }
+    xhat = xhat_images[0]
     candidates = build_psf_candidates(sigmas=sigmas, anisotropy_ratios=anisotropy_ratios, angles=angles)
     baseline = _baseline_candidate()
     if not any(
@@ -685,7 +765,9 @@ def run_stage0a_mvp(
     baseline_summary, baseline_frames = score_candidate(
         baseline,
         refine_mode="none",
-        hr_image=xhat,
+        hr_images=xhat_images,
+        frame_xhat_idx=frame_xhat_idx,
+        block_convention=forward_convention,
         frames_raw=inputs.frames_raw,
         metadata=inputs.metadata,
         shifts=inputs.shifts,
@@ -703,7 +785,9 @@ def run_stage0a_mvp(
         summary_part, frame_part = score_candidate(
             candidate,
             refine_mode="bounded",
-            hr_image=xhat,
+            hr_images=xhat_images,
+            frame_xhat_idx=frame_xhat_idx,
+            block_convention=forward_convention,
             frames_raw=inputs.frames_raw,
             metadata=inputs.metadata,
             shifts=inputs.shifts,
@@ -757,12 +841,17 @@ def run_stage0a_mvp(
         "current_spatial_resolution_um": float(inputs.spatial_resolution_um),
         "pitch_contract": "20um_per_detector_pixel; previous 10um scale is not used",
         "xhat": {
-            "method": "SAA over loaded clean highpass frames",
+            **xhat_meta,
             "highpass_sigma_lr_px": float(highpass_sigma),
             "scale": int(scale),
             "shape": list(map(int, xhat.shape)),
         },
         "scoring": {
+            "forward_convention": str(forward_convention),
+            "forward_convention_note": (
+                "centered aligns the block-average center with the SAA scatter grid; "
+                "legacy_corner reproduces the pre-ACL-046 +0.5 HR px mismatch"
+            ),
             "band_sigma_lr_px": float(band_sigma_lr_px),
             "crop_margin_lr_px": int(crop_margin),
             "huber_delta": float(huber_delta),
@@ -801,8 +890,14 @@ def run_stage0a_mvp(
     frame_scores.to_csv(out_dir / "stage0a_frame_scores.csv", index=False)
     best_refinements.to_csv(out_dir / "stage0a_best_shift_refinements.csv", index=False)
     if save_xhat:
-        np.save(out_dir / "stage0a_saa_xhat_highpass.npy", xhat.astype(np.float32, copy=False))
-        summary["outputs"]["xhat_npy"] = relative(out_dir / "stage0a_saa_xhat_highpass.npy")
+        if len(xhat_images) == 1:
+            np.save(out_dir / "stage0a_saa_xhat_highpass.npy", xhat.astype(np.float32, copy=False))
+            summary["outputs"]["xhat_npy"] = relative(out_dir / "stage0a_saa_xhat_highpass.npy")
+        else:
+            for pos, image in enumerate(xhat_images):
+                path = out_dir / f"stage0a_saa_xhat_highpass_half{pos}.npy"
+                np.save(path, image.astype(np.float32, copy=False))
+                summary["outputs"][f"xhat_half{pos}_npy"] = relative(path)
     write_json(out_dir / "stage0a_summary.json", summary)
     return Stage0aResult(
         sweep=sweep,

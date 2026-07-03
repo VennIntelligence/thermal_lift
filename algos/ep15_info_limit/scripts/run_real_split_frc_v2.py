@@ -704,6 +704,130 @@ def evaluate_artifact_pairs(args: argparse.Namespace, stage: dict[str, Any]) -> 
     return rows, curves
 
 
+def parse_cross_pair(spec: str) -> tuple[str, list[Path], int, str]:
+    parts = str(spec).split(":")
+    if len(parts) not in (5, 6, 7):
+        raise ValueError(
+            "--cross-pair must be name:x_a:x_b:y_a:y_b[:scale[:source_note]]; "
+            f"got {spec!r}"
+        )
+    name = parts[0]
+    paths = [Path(p) for p in parts[1:5]]
+    scale = int(parts[5]) if len(parts) >= 6 and parts[5] else DEFAULT_SCALE
+    note = parts[6] if len(parts) == 7 else "cross_method_split_pair"
+    return name, paths, scale, note
+
+
+def evaluate_cross_pairs(args: argparse.Namespace, stage: dict[str, Any]) -> tuple[list[dict[str, Any]], list[pd.DataFrame]]:
+    """Symmetrized cross-method split FRC: FRC(X_a, Y_b) and FRC(X_b, Y_a).
+
+    A deterministic reconstructor that reprints the same learned prior in both
+    halves inflates its own split-half FRC, but that shared-prior content does
+    not correlate with an independent method's opposite half.  The cross FRC
+    therefore only credits frequency content both methods genuinely recover
+    from disjoint frames.  It is still a RELATIVE ranking tool (both methods
+    share the burst alignment), not an absolute resolution claim.
+    """
+
+    rows: list[dict[str, Any]] = []
+    curves: list[pd.DataFrame] = []
+    for raw_spec in args.cross_pair:
+        name, paths, scale, note = parse_cross_pair(raw_spec)
+        paths = [p if p.is_absolute() else PROJECT_ROOT / p for p in paths]
+        row_prefix: dict[str, Any] = {
+            "method": name,
+            "split_mode": "cross_method_pair",
+            "seed": -1,
+            "scale": int(scale),
+            "pixel_size_um": float(stage["pixel_size_um"]),
+            "hr_pitch_um": float(stage["pixel_size_um"]) / float(scale),
+            "current_spatial_resolution_um": float(stage["current_spatial_resolution_um"]),
+            "source": note,
+            "cross_x_a": rel(paths[0]),
+            "cross_x_b": rel(paths[1]),
+            "cross_y_a": rel(paths[2]),
+            "cross_y_b": rel(paths[3]),
+        }
+        try:
+            images = [np.load(p).astype(np.float32, copy=False) for p in paths]
+            shapes = {img.shape for img in images}
+            if len(shapes) != 1:
+                raise ValueError(f"cross-pair arrays have mixed shapes: {sorted(shapes)}")
+            x_a, x_b, y_a, y_b = images
+
+            def _curve(image_1: np.ndarray, image_2: np.ndarray) -> pd.DataFrame:
+                return frc_curve_v2(
+                    image_1,
+                    image_2,
+                    scale=scale,
+                    pixel_size_um=float(stage["pixel_size_um"]),
+                    crop_lr_px=int(args.crop_lr_px),
+                    tukey_alpha=float(args.tukey_alpha),
+                )
+
+            curve_ab = _curve(x_a, y_b)
+            curve_ba = _curve(x_b, y_a)
+            if len(curve_ab) != len(curve_ba):
+                raise ValueError("cross-pair FRC curves have different ring counts")
+            mean_curve = curve_ab.copy()
+            mean_curve["frc"] = 0.5 * (
+                curve_ab["frc"].to_numpy(dtype=float) + curve_ba["frc"].to_numpy(dtype=float)
+            )
+            curve_dir = args.output_dir / "frc_curves"
+            curve_dir.mkdir(parents=True, exist_ok=True)
+            for tag, curve in (("xa_yb", curve_ab), ("xb_ya", curve_ba), ("mean", mean_curve)):
+                labeled = curve.copy()
+                labeled.insert(0, "seed", -1)
+                labeled.insert(0, "split_mode", "cross_method_pair")
+                labeled.insert(0, "method", name if tag == "mean" else f"{name}__{tag}")
+                labeled.to_csv(curve_dir / f"{name}_cross_{tag}_frc_curve.csv", index=False)
+                curves.append(labeled)
+
+            scored = mean_curve.copy()
+            cutoff_1_7 = find_cutoff(scored, "threshold_1_7")
+            cutoff_half = find_cutoff(scored, "threshold_half_bit")
+            row: dict[str, Any] = {
+                **row_prefix,
+                "status": "success",
+                "n_a": 0,
+                "n_b": 0,
+                "frc_curve_csv": rel(curve_dir / f"{name}_cross_mean_frc_curve.csv"),
+                "split_half_nrmse": float(np.mean([nrmse_pair(x_a, y_b), nrmse_pair(x_b, y_a)])),
+                "split_half_corr": float(np.mean([pearson_finite(x_a, y_b), pearson_finite(x_b, y_a)])),
+                "zero_coverage_pct_a": float(np.mean(~np.isfinite(x_a)) * 100.0),
+                "zero_coverage_pct_b": float(np.mean(~np.isfinite(y_b)) * 100.0),
+                "phase_balance_max_abs_diff": 0,
+                "frc_cutoff_frequency_um_inv_1_7": float(cutoff_1_7.frequency_um_inv),
+                "frc_cutoff_period_um_1_7": float(cutoff_1_7.period_um),
+                "frc_cutoff_crossed_1_7": bool(cutoff_1_7.crossed),
+                "frc_cutoff_frequency_um_inv_half_bit": float(cutoff_half.frequency_um_inv),
+                "frc_cutoff_period_um_half_bit": float(cutoff_half.period_um),
+                "frc_cutoff_crossed_half_bit": bool(cutoff_half.crossed),
+                "cutoff_1_7_role": period_role(
+                    float(cutoff_1_7.period_um), float(stage["current_spatial_resolution_um"])
+                )
+                if np.isfinite(cutoff_1_7.period_um)
+                else "no_finite_cutoff",
+                "period_um_conversion_audit": (
+                    "period_um = 1 / frequency_um_inv with d = pixel_size_um / scale; pixel_size_um fixed at 20."
+                ),
+                "cross_frc_interpretation": (
+                    "symmetrized cross-method FRC (mean of X_a-vs-Y_b and X_b-vs-Y_a); shared-prior "
+                    "hallucination does not survive; relative ranking only, alignment still shared"
+                ),
+            }
+            for period in args.periods_um:
+                key = f"frc_at_{float(period):g}um".replace(".", "p")
+                row[key] = interpolate_frc(mean_curve, float(period))
+                row[f"{key}_role"] = period_role(float(period), float(stage["current_spatial_resolution_um"]))
+                row[f"{key}_xa_yb"] = interpolate_frc(curve_ab, float(period))
+                row[f"{key}_xb_ya"] = interpolate_frc(curve_ba, float(period))
+            rows.append(row)
+        except Exception as exc:  # noqa: BLE001 - keep audit row materialized.
+            rows.append({**row_prefix, "status": "failed", "error": repr(exc)})
+    return rows, curves
+
+
 def save_reconstruction_if_requested(
     args: argparse.Namespace,
     image: np.ndarray,
@@ -856,6 +980,7 @@ def write_outputs(
         },
         "methods_requested": list(args.methods),
         "artifact_pairs_requested": list(args.artifact_pair),
+        "cross_pairs_requested": list(args.cross_pair),
         "periods_um": [
             {
                 "period_um": float(period),
@@ -883,7 +1008,14 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--alignment-method", default="contour_refined")
     parser.add_argument("--stage-config", type=Path, default=PROJECT_ROOT / "configs" / "stage_calibration.json")
     parser.add_argument("--output-dir", type=Path, default=PROJECT_ROOT / "output" / "stage0c_real_split_frc_v2")
-    parser.add_argument("--methods", nargs="+", default=["aligned_mean", "drizzle"], choices=["aligned_mean", "drizzle"])
+    parser.add_argument(
+        "--methods",
+        nargs="+",
+        default=["aligned_mean", "drizzle"],
+        choices=["aligned_mean", "drizzle", "none"],
+        help="Native split reconstructions to run; 'none' skips loading the real burst "
+        "entirely (artifact/cross pairs only).",
+    )
     parser.add_argument("--split-mode", choices=["phase_stratified", "odd_even", "both"], default="phase_stratified")
     parser.add_argument("--seeds", type=int, nargs="+", default=list(DEFAULT_SEEDS))
     parser.add_argument("--scale", type=int, default=DEFAULT_SCALE)
@@ -905,6 +1037,14 @@ def parse_args() -> argparse.Namespace:
         default=[],
         help="Optional external split pair: name:path_a.npy:path_b.npy[:scale[:source_note]].",
     )
+    parser.add_argument(
+        "--cross-pair",
+        action="append",
+        default=[],
+        help="Optional symmetrized cross-method pair: name:x_a.npy:x_b.npy:y_a.npy:y_b.npy"
+        "[:scale[:source_note]]. Scores FRC(x_a,y_b) and FRC(x_b,y_a) and their mean; "
+        "kills shared-prior self-correlation that inflates same-method split FRC.",
+    )
     parser.add_argument("--allow-non20", action="store_true", help="Only for explicit legacy scale audits.")
     return parser.parse_args()
 
@@ -923,12 +1063,33 @@ def main() -> int:
         f"frame_domain={args.frame_domain}, scale={args.scale}"
     )
 
-    inputs = prepare_inputs(args)
-    splits = build_splits(args, inputs)
-    native_rows, native_curves, balances = run_native_methods(args, inputs, splits)
+    skip_native = list(args.methods) == ["none"]
+    if skip_native:
+        stage = load_stage_config(args.stage_config, allow_non20=bool(args.allow_non20))
+        inputs = Inputs(
+            frames=np.zeros((0,) + LR_SHAPE, dtype=np.float32),
+            metadata=pd.DataFrame(),
+            shifts=np.zeros((0, 2), dtype=np.float32),
+            phase_bins=np.zeros((0,), dtype=np.int16),
+            stage=stage,
+            frame_domain=str(args.frame_domain),
+            cache_hit=False,
+            cache_dir=args.output_dir / "cache",
+        )
+        splits = []
+        native_rows: list[dict[str, Any]] = []
+        native_curves: list[pd.DataFrame] = []
+        balances: list[pd.DataFrame] = []
+    else:
+        if "none" in args.methods:
+            raise ValueError("--methods none cannot be combined with native methods")
+        inputs = prepare_inputs(args)
+        splits = build_splits(args, inputs)
+        native_rows, native_curves, balances = run_native_methods(args, inputs, splits)
     artifact_rows, artifact_curves = evaluate_artifact_pairs(args, inputs.stage)
-    rows = native_rows + artifact_rows
-    curves = native_curves + artifact_curves
+    cross_rows, cross_curves = evaluate_cross_pairs(args, inputs.stage)
+    rows = native_rows + artifact_rows + cross_rows
+    curves = native_curves + artifact_curves + cross_curves
     manifest = write_outputs(
         args,
         rows=rows,

@@ -8,6 +8,34 @@
 
 ## 变更记录
 
+### [ACL-046] 2026-07-03 — Stage 1a 判定=仪表失效（inconclusive）；0a 半像素约定 bug 实锤；新增 Stage 0f 仪表修复（0a centered forward + split-source x̂、cross-method FRC、0d 分布对比工具）
+
+**问题诊断**（对 20260703 remote run 的本地复核，产物见 `remote_inbox/20260703_stage1a/`）:
+1. **0a 的"真实算子误差 ≥0.4px"结论撤回——大头是 0a 打分器自己的半像素约定 bug**。Task A（radius 0.8）248 帧精修分布：mean Δ=(dx −0.237, dy −0.242) px、每轴 sd≈0.22、0 帧碰 0.8 边界。−0.24≈−0.25 LR px=0.5 HR px：`stage0a_mvp.forward_block_average_shifted` 采样 `scale*(i+shift)+{0..scale-1}`（block 中心 +0.5 HR px），而打分对象 x̂ 来自 `saa.reconstruct_saa`，其 scatter 在 `scale*(i+shift)`（无 +0.5）。两套独立实现差恰好半个 HR 像素，精修一直在补这个常数。此前所有"饱和"现象（MVP p95=0.05√2、full-grid p95=0.4√2 顶角）全部由此解释。**ep07 solver 本身不受影响**（forward_roundtrip_selfcheck 认证过其 adjoint 内部一致）。
+2. **20.07% [18.16, 22.06] 的改善被该 bug 污染**：sweep 分解显示 σ=0.5 只做 shift 精修已得 +14.0%，换 σ=0.1 只再加 ~6%（且 σ 部分本就受 x̂ 同源退化偏低影响）。"模型误差天花板可修"的真实幅度待修约定后重测；剩余每轴 0.22px 散布还双峰聚在 0/−0.5 格点，疑似插值 landscape 伪影，真实逐帧对齐误差可能显著小于 0.2px。
+3. **0d 回归套件无判别力**（Task B）：好例 V11 与 PromptA 在 flat-ROI/seam/beading 与已知坏例几乎同分布（seam autocorr 0.86 vs 0.87），仅 extent 探针双双 pass。判据 #2 当前不可用。
+4. **split-half FRC 对神经方法结构性失效**（Task E）：经典方法物理表现正常（TGV cutoff 20.0µm、MAP-TV 21.2µm、drizzle 29.67µm、FRC@20µm 全为负），V11/C/D 却 FRC@20µm=0.93–0.9998 永不截止——确定性网络把同一先验高频复现进两个独立半幅，**FRC 奖励可复现的幻觉**；且 D(0.9975)>C(0.9310) 更可能表示 DR 臂更先验主导，方向可能反向。判据 #1 对神经候选失效。
+5. **C vs D 复判**：synth −0.033dB、real 基本平——在 0.1px 档 DR 无害无益；但由于 1、4 两条，正确结论是 **inconclusive（没有可用仪表判定），不是"DR 无效"**。DR 的正确量级也依赖修好 0a 后的真实误差测量。
+
+**修改内容**（全部本地已测，Stage 0f 仪表修复）:
+1. **0a centered forward**：`forward_block_average_shifted` 新增 `block_convention`，默认 `centered`（block 采样点 −(scale−1)/2，使 LR 像素中心落在 `scale*(i+shift)`，与 SAA scatter 网格一致）；`legacy_corner` 保留旧行为仅供对照。贯穿 `_score_shift/_score_one_frame/score_candidate/run_stage0a_mvp`，CLI `--forward-convention`，summary 记录 `scoring.forward_convention`。
+2. **0a split-source x̂**：`run_stage0a_mvp(xhat_source="split_half")` / CLI `--xhat-source split_half`：偶/奇 parity 各建一张 SAA，每帧只对**对侧**半幅的 x̂ 打分，消除"帧参与自身 x̂"的同源退化（σ̂ 偏低的主因之一）。`score_candidate` 改为 `hr_images + frame_xhat_idx` 路由。
+3. **cross-method FRC**：`run_real_split_frc_v2.py` 新增 `--cross-pair name:x_a:x_b:y_a:y_b[:scale[:note]]`，对称化计算 FRC(X_a,Y_b) 与 FRC(X_b,Y_a) 及均值曲线/cutoff（cryo-EM map-vs-model 思路：共享先验幻觉在跨方法半幅间不相关，只有真实带内信息相关；仍属相对排名，两方法共享对齐）。另加 `--methods none`（跳过加载真数据，纯 artifact/cross 评估）。合成烟测：自带幻觉的"神经"self-FRC@20µm=0.999 不截止，cross-FRC 立即塌回真实信号带（@20µm≈−0.10，cutoff 与诚实方法一致）——机制符合设计。
+4. **0d 分布对比工具**：新增 `algos/ep07_unet_sr/scripts/compare_regression_distributions.py`，从多个 suite JSON 抽 7 个探针标量，输出好/坏分布、当前阈值命中、可分性与建议阈值（geomean）。**只报数据，阈值仍由 owner 决定**。
+5. 测试：ep09 新增 3 条——ramp 上 centered 与 SAA 网格严格一致且 legacy 恰差 +0.5 HR px；SAA 回环回归（centered 最优精修≈0，legacy 出 −0.25 对角偏置，直接编码本 bug）；split-source 路由正确性（对侧路由 band_mse≈0、错配路由显著非 0）。ep09 10 passed。
+
+**预期效果 / 下一步（Stage 0f 远端任务，见 `handoff/stage0f_remote_tasks.md`）**:
+- 0a 用 centered + full 与 centered + split_half 重跑：读修正后的真实改善幅度、per-frame 散布（决定 DR 正确量级与 test-time shift refinement 优先级）、split-source 下 σ 是否离开网格下边缘。
+- cross-FRC 排行榜：V11/C/D 各自对 drizzle 半幅交叉，得到神经候选第一个可信的真实域相对排名；C vs D 复判凭它。
+- 0d：远端补 V8/K4 坏例 JSON 后跑 compare 工具，分布表交 owner 定阈值。
+- dc_resid 继续冻结；在 0f 仪表可用前不再增开训练臂。
+
+**训练结果**: 待 Stage 0f 远端结果回填。
+
+**涉及文件**: `algos/ep09_psf_calibration/{src/psf_calibration/stage0a_mvp.py,scripts/run_stage0a_mvp.py,tests/test_psf_calibration.py}`、`algos/ep15_info_limit/scripts/run_real_split_frc_v2.py`、`algos/ep07_unet_sr/scripts/compare_regression_distributions.py`、`handoff/stage0f_remote_tasks.md`
+
+---
+
 ### [ACL-045] 2026-07-02 — Stage 1a operator DR 实现 + 0a bootstrap CI + TCForge 默认 pitch 修正
 
 **问题诊断**:

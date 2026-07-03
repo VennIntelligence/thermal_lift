@@ -69,6 +69,20 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scale", type=int, default=2)
     parser.add_argument("--huber-delta", type=float, default=0.0)
     parser.add_argument("--save-xhat", action="store_true")
+    parser.add_argument(
+        "--forward-convention",
+        choices=("centered", "legacy_corner"),
+        default="centered",
+        help="centered aligns the forward block center with the SAA grid (ACL-046 fix); "
+        "legacy_corner reproduces the old +0.5 HR px mismatch for comparison runs only.",
+    )
+    parser.add_argument(
+        "--xhat-source",
+        choices=("full", "split_half"),
+        default="full",
+        help="full = one SAA from all frames (same-source); split_half = even/odd parity "
+        "SAA pair, each frame scored against the opposite half's estimate.",
+    )
     args = parser.parse_args()
     if args.use_all_score:
         args.max_train_score = None
@@ -83,6 +97,10 @@ def main() -> None:
     probe = result.summary["dc_resid_floor_probe"]
     print(f"Loaded frames: {result.summary['n_loaded_frames']}")
     print(f"Shift source: {result.summary['shift_source']}")
+    print(
+        f"Forward convention: {result.summary['scoring']['forward_convention']}, "
+        f"xhat source: {result.summary['xhat']['source']}"
+    )
     print(
         "Val band RMS floor probe: "
         f"{probe['baseline_val_band_rms_from_mean_mse']:.6g} -> "
