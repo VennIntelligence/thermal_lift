@@ -30,6 +30,9 @@ algos/*/outputs/
 # Root-level reports are legacy/generated scratch. Formal reports live in paper/reports/.
 reports/
 
+# Remote agent handoff inbox is local-only; promote durable findings into tracked logs/reports.
+remote_inbox/
+
 # ===== 临时工作区 / 草稿（不入 Git） =====
 tmp/
 todos/
