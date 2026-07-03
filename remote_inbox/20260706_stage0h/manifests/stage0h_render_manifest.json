@@ -1,0 +1,159 @@
+{
+  "command_methods": [
+    "v11",
+    "C_nodr",
+    "D_dr01",
+    "tgv",
+    "maptv"
+  ],
+  "elapsed_sec": 1433.3645045569865,
+  "inputs": {
+    "alignment_csv": "configs/alignment/stage0f_refined_alignment.csv",
+    "n_a": 124,
+    "n_b": 124,
+    "n_frames": 248,
+    "shift_dx_mean": -0.33751794695854187,
+    "shift_dy_mean": -0.4699020981788635,
+    "shift_norm_mean": 1.435233473777771,
+    "split_seed": 42
+  },
+  "methods": {
+    "C_nodr": {
+      "checkpoint": "algos/ep07_unet_sr/outputs/solver_v13_v6_nodr_ctrl/solver_final.pt",
+      "config_subset": {
+        "phase_bin_channels": 4,
+        "scale": 2,
+        "solver_dc_shift_jitter_std_px": 0.0,
+        "solver_m_frames": 16,
+        "solver_no_drizzle": true,
+        "solver_prox_highpass_residual": false,
+        "solver_warmstart": "phasebin"
+      },
+      "device": "cuda",
+      "halo_hr": 96,
+      "kind": "neural",
+      "outputs": [
+        {
+          "elapsed_sec": 5.034329132002313,
+          "path": "output/stage0h_frc_recons/C_nodr_a.npy",
+          "split": "a"
+        },
+        {
+          "elapsed_sec": 5.165430685010506,
+          "path": "output/stage0h_frc_recons/C_nodr_b.npy",
+          "split": "b"
+        }
+      ]
+    },
+    "D_dr01": {
+      "checkpoint": "algos/ep07_unet_sr/outputs/solver_v13_v6_dr01/solver_final.pt",
+      "config_subset": {
+        "phase_bin_channels": 4,
+        "scale": 2,
+        "solver_dc_shift_jitter_std_px": 0.1,
+        "solver_m_frames": 16,
+        "solver_no_drizzle": true,
+        "solver_prox_highpass_residual": false,
+        "solver_warmstart": "phasebin"
+      },
+      "device": "cuda",
+      "halo_hr": 96,
+      "kind": "neural",
+      "outputs": [
+        {
+          "elapsed_sec": 5.1709380940010305,
+          "path": "output/stage0h_frc_recons/D_dr01_a.npy",
+          "split": "a"
+        },
+        {
+          "elapsed_sec": 5.371816108003259,
+          "path": "output/stage0h_frc_recons/D_dr01_b.npy",
+          "split": "b"
+        }
+      ]
+    },
+    "maptv": {
+      "kind": "classic",
+      "outputs": [
+        {
+          "convergence_csv": "output/stage0h_frc_recons/maptv_a_convergence.csv",
+          "elapsed_sec": 163.59460493698134,
+          "path": "output/stage0h_frc_recons/maptv_a.npy",
+          "split": "a"
+        },
+        {
+          "convergence_csv": "output/stage0h_frc_recons/maptv_b_convergence.csv",
+          "elapsed_sec": 170.35894490400096,
+          "path": "output/stage0h_frc_recons/maptv_b.npy",
+          "split": "b"
+        }
+      ],
+      "params": {
+        "lambda_tv": 0.001,
+        "max_iter": 150,
+        "psf_sigma": 0.2,
+        "step_size": 0.1,
+        "use_fista": true,
+        "workers": 16
+      }
+    },
+    "tgv": {
+      "kind": "classic",
+      "outputs": [
+        {
+          "convergence_csv": "output/stage0h_frc_recons/tgv_a_convergence.csv",
+          "elapsed_sec": 534.1249473329808,
+          "path": "output/stage0h_frc_recons/tgv_a.npy",
+          "split": "a"
+        },
+        {
+          "convergence_csv": "output/stage0h_frc_recons/tgv_b_convergence.csv",
+          "elapsed_sec": 544.1979511450045,
+          "path": "output/stage0h_frc_recons/tgv_b.npy",
+          "split": "b"
+        }
+      ],
+      "params": {
+        "alpha_ratio": 2.0,
+        "aniso_ratio_y": 1.5,
+        "coverage_weighted": true,
+        "lambda_tv": 0.003,
+        "max_iter": 100,
+        "psf_sigma": 0.5,
+        "step_size": 1.0,
+        "tgv_device": "cpu",
+        "tgv_inner_iter": 80,
+        "use_fista": true,
+        "workers": 16
+      }
+    },
+    "v11": {
+      "checkpoint": "algos/ep07_unet_sr/outputs/solver_v11_k2_p384_nogn_halo96_50k/solver_step_040000.pt",
+      "config_subset": {
+        "phase_bin_channels": 4,
+        "scale": 2,
+        "solver_dc_shift_jitter_std_px": null,
+        "solver_m_frames": 12,
+        "solver_no_drizzle": true,
+        "solver_prox_highpass_residual": false,
+        "solver_warmstart": "phasebin"
+      },
+      "device": "cuda",
+      "halo_hr": 96,
+      "kind": "neural",
+      "outputs": [
+        {
+          "elapsed_sec": 6.558653885003878,
+          "path": "output/stage0h_frc_recons/v11_a.npy",
+          "split": "a"
+        },
+        {
+          "elapsed_sec": 5.451332698983606,
+          "path": "output/stage0h_frc_recons/v11_b.npy",
+          "split": "b"
+        }
+      ]
+    }
+  },
+  "task": "stage0h refined-alignment split-half renderer"
+}

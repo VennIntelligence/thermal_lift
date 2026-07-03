@@ -1,0 +1,135 @@
+{
+  "alignment_method": "contour_refined",
+  "baseline_sigma_0p5_iso_no_refine": {
+    "train": {
+      "angle_deg": 0.0,
+      "anisotropy_ratio": 1.0,
+      "band_mse_mean": 0.010384626251504311,
+      "band_rms_from_mean_mse": 0.10190498639175764,
+      "band_rms_mean": 0.1017921186084209,
+      "band_rms_median": 0.10003844715342686,
+      "candidate_label": "sx0.500_sy0.500_a0.0",
+      "full_rms_from_mean_mse": 23.309302521276035,
+      "n_frames": 198,
+      "refine_mode": "none",
+      "shift_delta_norm_mean_px": 0.0,
+      "shift_delta_norm_p95_px": 0.0,
+      "sigma_x_lr_px": 0.5,
+      "sigma_y_lr_px": 0.5,
+      "split": "train"
+    },
+    "val": {
+      "angle_deg": 0.0,
+      "anisotropy_ratio": 1.0,
+      "band_mse_mean": 0.010395640110867665,
+      "band_rms_from_mean_mse": 0.10195901191590503,
+      "band_rms_mean": 0.10185202680139968,
+      "band_rms_median": 0.10012308982253032,
+      "candidate_label": "sx0.500_sy0.500_a0.0",
+      "full_rms_from_mean_mse": 23.314868013085427,
+      "n_frames": 50,
+      "refine_mode": "none",
+      "shift_delta_norm_mean_px": 0.0,
+      "shift_delta_norm_p95_px": 0.0,
+      "sigma_x_lr_px": 0.5,
+      "sigma_y_lr_px": 0.5,
+      "split": "val"
+    }
+  },
+  "best_train_selected": {
+    "candidate": {
+      "angle_deg": 0.0,
+      "sigma_x_lr_px": 0.05,
+      "sigma_y_lr_px": 0.05
+    },
+    "train": {
+      "angle_deg": 0.0,
+      "anisotropy_ratio": 1.0,
+      "band_mse_mean": 0.00966932841167331,
+      "band_rms_from_mean_mse": 0.09833274333442198,
+      "band_rms_mean": 0.09823843443254614,
+      "band_rms_median": 0.09701528740447304,
+      "candidate_label": "sx0.050_sy0.050_a0.0",
+      "full_rms_from_mean_mse": 23.30928237119705,
+      "n_frames": 198,
+      "refine_mode": "bounded",
+      "shift_delta_norm_mean_px": 0.012346821203621369,
+      "shift_delta_norm_p95_px": 0.07071069813846227,
+      "sigma_x_lr_px": 0.05,
+      "sigma_y_lr_px": 0.05,
+      "split": "train"
+    },
+    "val": {
+      "angle_deg": 0.0,
+      "anisotropy_ratio": 1.0,
+      "band_mse_mean": 0.009678632610132226,
+      "band_rms_from_mean_mse": 0.09838004172662372,
+      "band_rms_mean": 0.09829002634829323,
+      "band_rms_median": 0.09747722053225681,
+      "candidate_label": "sx0.050_sy0.050_a0.0",
+      "full_rms_from_mean_mse": 23.314847713710577,
+      "n_frames": 50,
+      "refine_mode": "bounded",
+      "shift_delta_norm_mean_px": 0.009236197075438726,
+      "shift_delta_norm_p95_px": 0.050000137090790896,
+      "sigma_x_lr_px": 0.05,
+      "sigma_y_lr_px": 0.05,
+      "split": "val"
+    }
+  },
+  "current_spatial_resolution_um": 20.0,
+  "dc_resid_floor_probe": {
+    "baseline_val_band_rms_from_mean_mse": 0.10195901191590503,
+    "best_val_band_rms_from_mean_mse": 0.09838004172662372,
+    "interpretation": "diagnostic floor movement only; not a resolution or temperature-metrology claim",
+    "val_band_mse_improvement_bootstrap": {
+      "ci95_high_pct": 7.1787849095779475,
+      "ci95_low_pct": 6.589687113227887,
+      "improvement_significant_at_95": true,
+      "n_boot": 2000,
+      "n_val_frames": 50,
+      "point_pct": 6.897194334246677
+    },
+    "val_band_mse_improvement_pct": 6.897194334246677
+  },
+  "detector_pitch_um": 20.0,
+  "elapsed_sec": 2641.3763417080045,
+  "n_loaded_frames": 248,
+  "n_train_score_frames": 198,
+  "n_val_score_frames": 50,
+  "outputs": {
+    "frame_scores_csv": "output/ep09_psf_calibration/stage0g_iter2/stage0a_frame_scores.csv",
+    "shift_refinements_csv": "output/ep09_psf_calibration/stage0g_iter2/stage0a_best_shift_refinements.csv",
+    "summary_json": "output/ep09_psf_calibration/stage0g_iter2/stage0a_summary.json",
+    "sweep_csv": "output/ep09_psf_calibration/stage0g_iter2/stage0a_model_sweep.csv"
+  },
+  "pitch_contract": "20um_per_detector_pixel; previous 10um scale is not used",
+  "purpose": "bounded real 248-frame operator calibration scaffold; not full joint high-dimensional optimization",
+  "scoring": {
+    "band_sigma_lr_px": 5.0,
+    "crop_margin_lr_px": 8,
+    "forward_convention": "centered",
+    "forward_convention_note": "centered aligns the block-average center with the SAA scatter grid; legacy_corner reproduces the pre-ACL-046 +0.5 HR px mismatch",
+    "full_residual_note": "full residual is reported for debugging only because xhat is highpass by default",
+    "huber_delta": 0.0,
+    "n_shift_offsets": 289,
+    "selection_metric": "train band_mse_mean",
+    "shift_refine_radius_lr_px": 0.4,
+    "shift_refine_step_lr_px": 0.05
+  },
+  "shift_source": "alignment:contour_refined",
+  "stage": "solver_v2_stage0a_mvp",
+  "xhat": {
+    "highpass_sigma_lr_px": 5.0,
+    "method": "SAA over loaded clean highpass frames",
+    "n_frames_per_xhat": [
+      248
+    ],
+    "scale": 2,
+    "shape": [
+      960,
+      1280
+    ],
+    "source": "full"
+  }
+}

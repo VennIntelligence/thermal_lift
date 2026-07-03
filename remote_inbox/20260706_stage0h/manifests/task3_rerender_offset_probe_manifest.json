@@ -1,0 +1,15 @@
+{
+  "elapsed_sec": 2.1277752940077335,
+  "failed": [],
+  "interpretation": "offset is b relative to a in HR grid px; 'after' rows are FRC with b shifted back by the estimated offset. Recovery + oscillation collapse => registration artifact; low monotone after-curve => genuine content divergence.",
+  "pairs": [
+    "v11_new_vs_drz:output/stage0g_frc_refined/recons/drizzle_phase_stratified_seed42_a.npy:output/stage0h_frc_recons/v11_a.npy:2",
+    "c_nodr_new_vs_drz:output/stage0g_frc_refined/recons/drizzle_phase_stratified_seed42_a.npy:output/stage0h_frc_recons/C_nodr_a.npy:2",
+    "d_dr01_new_vs_drz:output/stage0g_frc_refined/recons/drizzle_phase_stratified_seed42_a.npy:output/stage0h_frc_recons/D_dr01_a.npy:2",
+    "tgv_new_vs_drz:output/stage0g_frc_refined/recons/drizzle_phase_stratified_seed42_a.npy:output/stage0h_frc_recons/tgv_a.npy:2",
+    "maptv_new_vs_drz:output/stage0g_frc_refined/recons/drizzle_phase_stratified_seed42_a.npy:output/stage0h_frc_recons/maptv_a.npy:2",
+    "v11_new_vs_tgv:output/stage0h_frc_recons/tgv_a.npy:output/stage0h_frc_recons/v11_a.npy:2"
+  ],
+  "pixel_size_um": 20.0,
+  "task": "stage0h pair grid-offset probe"
+}

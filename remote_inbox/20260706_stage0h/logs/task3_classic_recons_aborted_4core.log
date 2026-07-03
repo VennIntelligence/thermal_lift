@@ -1,0 +1,4 @@
+[stage0h] pid=256974 output_dir=/home/ujs/thermal_lift/output/stage0h_frc_recons
+[stage0h] workers: io=8 classic=4; device_request=cuda; torch_threads=4; thread_env={'OMP_NUM_THREADS': '4', 'OPENBLAS_NUM_THREADS': '4', 'MKL_NUM_THREADS': '4', 'NUMEXPR_NUM_THREADS': '4'}
+[stage0h] default alignment CSV: /home/ujs/thermal_lift/configs/alignment/stage0f_refined_alignment.csv
+[stage0h] rendering tgv_a: n=124 kwargs={'lambda_tv': 0.003, 'alpha_ratio': 2.0, 'psf_sigma': 0.5, 'max_iter': 100, 'step_size': 1.0, 'use_fista': True, 'workers': 4, 'tgv_inner_iter': 80, 'tgv_device': 'cpu', 'aniso_ratio_y': 1.5, 'coverage_weighted': True}

@@ -1,0 +1,12 @@
+[stage0h] pid=257484 output_dir=/home/ujs/thermal_lift/output/stage0h_frc_recons
+[stage0h] workers: io=8 classic=16; device_request=cuda; torch_threads=16; thread_env={'OMP_NUM_THREADS': '16', 'OPENBLAS_NUM_THREADS': '16', 'MKL_NUM_THREADS': '16', 'NUMEXPR_NUM_THREADS': '16'}
+[stage0h] default alignment CSV: /home/ujs/thermal_lift/configs/alignment/stage0f_refined_alignment.csv
+[stage0h] rendering tgv_a: n=124 kwargs={'lambda_tv': 0.003, 'alpha_ratio': 2.0, 'psf_sigma': 0.5, 'max_iter': 100, 'step_size': 1.0, 'use_fista': True, 'workers': 16, 'tgv_inner_iter': 80, 'tgv_device': 'cpu', 'aniso_ratio_y': 1.5, 'coverage_weighted': True}
+[stage0h] saved /home/ujs/thermal_lift/output/stage0h_frc_recons/tgv_a.npy shape=(960, 1280) elapsed_sec=534.12
+[stage0h] rendering tgv_b: n=124 kwargs={'lambda_tv': 0.003, 'alpha_ratio': 2.0, 'psf_sigma': 0.5, 'max_iter': 100, 'step_size': 1.0, 'use_fista': True, 'workers': 16, 'tgv_inner_iter': 80, 'tgv_device': 'cpu', 'aniso_ratio_y': 1.5, 'coverage_weighted': True}
+[stage0h] saved /home/ujs/thermal_lift/output/stage0h_frc_recons/tgv_b.npy shape=(960, 1280) elapsed_sec=544.20
+[stage0h] rendering maptv_a: n=124 kwargs={'lambda_tv': 0.001, 'psf_sigma': 0.2, 'max_iter': 150, 'step_size': 0.1, 'use_fista': True, 'workers': 16}
+[stage0h] saved /home/ujs/thermal_lift/output/stage0h_frc_recons/maptv_a.npy shape=(960, 1280) elapsed_sec=163.59
+[stage0h] rendering maptv_b: n=124 kwargs={'lambda_tv': 0.001, 'psf_sigma': 0.2, 'max_iter': 150, 'step_size': 0.1, 'use_fista': True, 'workers': 16}
+[stage0h] saved /home/ujs/thermal_lift/output/stage0h_frc_recons/maptv_b.npy shape=(960, 1280) elapsed_sec=170.36
+[stage0h] done elapsed_sec=1433.36
