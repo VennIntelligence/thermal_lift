@@ -6,7 +6,45 @@
 
 ---
 
+## ✅ 当前有效结论速览（2026-07-06 快照 — 读旧条目前先读这里）
+
+旧条目是历史记录，其中的判断随后可能被推翻；与本块冲突时**以本块与其引用的 ACL 为准**：
+
+1. **神经臂与经典同档，"神经带内破坏"已被推翻**（ACL-049 v4）：solver 输出网格带 +0.5 HR px 角点约定（`forward_torch.py`，设计而非 bug），此前所有神经×经典对比被配准伪影压低 ~0.44-0.49 FRC 点。校正后 V11 cutoff 与 TGV 打平（23.03µm），@30µm 落后 0.05-0.06。ACL-046/047/048 中对神经臂 cross-FRC 的定罪段落均已过时。
+2. **对齐**：精修对齐是 repo 默认资产（`configs/alignment/stage0f_refined_alignment.csv`，ACL-048）；旧 contour_refined 有 ~0.29px 逐帧误差，勿再用其得出的绝对结论。
+3. **权威可恢复频带 = 25.45µm ±0.73**（精修对齐下 EP15 M2，ACL-048）；旧值 34µm（坏对齐）与更早 EP15 数字作废。真实增益带 ~25-40µm 周期；**20µm 是探测器孔径零点，任何 20µm 处的 FRC 值不采信**。
+4. **判据管线**：神经×经典比较必须先做逐半偏移校正（`probe_pair_offset.py --save-corrected-dir` 或 `real_eval.to_center_grid`）再算 cross-FRC；self split-half FRC 对神经方法无效（奖励可复现幻觉，ACL-047）；synth PSNR 只是 sanity 下限（ACL-032）。
+5. **DR@0.1px 关案**（ACL-049）：C vs D 三重仪器零差。如再讨论 DR，量级为实测残余 ~0.05px。
+6. **0d 回归套件**：仅 extent 探针有好/坏判别力（ACL-047），阈值重定权在 owner，尚未落定。
+7. **经典基线（要打败的对象）**：TGV×drz cutoff 23.03µm / FRC@30µm 0.702；MAP-TV×drz 24.62µm / 0.690（精修对齐+校正口径，ACL-049）。
+8. **基础设施**：`remote_inbox/` 只走 rsync/scp 增量，严禁 git（AGENTS.md 硬规则）。
+
+---
+
 ## 变更记录
+
+### [ACL-050] 2026-07-06 — 对比层永久修正（real_eval 中心网格选项）+ 文档纠偏（速览块/旧结论软化）+ inbox 传输硬规则 + Stage 0j：v6+E3 主线 50k 成熟度臂
+
+**问题诊断**:
+1. v4 裁决后（ACL-049）有三笔欠账：偏移校正只存在于事后探针，渲染源头没有中心网格出口；repo 文档里大量已推翻的结论（神经破坏带内信息、34µm 频带、split-half FRC 主判据）会误导未来的智能体；远端把 84 个 inbox 产物 commit 进了 git（8e4467c，违反 e532574 惯例）。
+2. v4 暴露的最便宜杠杆：V11（50k, v5 池）cutoff 23.03µm 优于 C（20k, v6 池）的 25.45µm——**v6+E3 主线臂没训到成熟度**，在判架构/容量之前必须先补齐这 30k 步。owner 确认：v6 池 + E3 主线（operator DR 全默认关）就是当前最新的数据集与架构；V11 只作历史基准，不重训。
+3. DR 关案后 Stage 1a 的"D 臂"分支正式废弃；本轮起训练臂命名 v14。
+
+**修改内容**:
+1. **real_eval 中心网格**：新增 `to_center_grid(image, scale)`（Fourier 平移 −(scale−1)/2 px/轴）与 `infer_solver_from_burst_full_halo(..., output_grid="native"|"centered")`。默认 `native` 保历史 in-training eval_real 可比性；**一切与经典方法的对比一律用 `centered`**（残余 ~0.05px 内容相关偏移需精确时仍用 probe 逐半校正）。测试 `test_center_grid.py` 2 条，ep07 19 passed。
+2. **文档纠偏**：changelog 顶部新增"✅ 当前有效结论速览"块（8 条当前真值，旧条目冲突以速览为准）；ACL-046/047/048 头部加 ⚠️ 已推翻标注；proposal/roadmap 状态块补充 v4 翻案与偏移校正要求。目的：未来智能体第一眼看到正确结论。
+3. **inbox 硬规则**：`git rm -r --cached remote_inbox/`（84 文件，ce29f74，磁盘保留）；AGENTS.md 新增"remote_inbox 传输规则"硬规则段（只走 rsync/scp/SSH 管道增量，严禁 git，违反即回滚）。
+4. **Stage 0j 任务包** `handoff/stage0j_remote_tasks.md`：Task 1=v6+E3 主线 50k 训练（`solver_v14_v6_nodr_50k`，与 C 完全同参仅步数 20k→50k、同 seed——前 20k 顺带复现 C 作 sanity）；Task 2=step 20k/50k 两个 checkpoint 用 `output_grid=centered` 渲染分半 → 残余偏移探针 → 排行榜 v5 对 TGV/MAP-TV/drizzle。
+
+**预期效果**:
+- v5 排行榜回答："成熟度补齐后 v6+E3 距 TGV（0.702@30µm / 23.03µm）还差多少"。追平/超过 → 路径明确（更长训练/loss band 微调）；仍差且 50k 曲线已平 → 容量/先验问题坐实，才立项 Stage 2 架构（逐帧融合）。
+- 20k checkpoint 的 eval_synth 应≈C 的 31.26 PSNR（同 seed 同参），偏差大=复现性问题优先排查。
+
+**训练结果**: 待 Stage 0j 回填。
+
+**涉及文件**: `algos/ep07_unet_sr/{src/unet_sr/real_eval.py,tests/test_center_grid.py}`、`AGENTS.md`、`research_log/{algorithm_changelog,solver_v2_redesign_proposal,network_upgrade_roadmap}.md`、`handoff/stage0j_remote_tasks.md`
+
+---
 
 ### [ACL-049] 2026-07-05 — Stage 0h 根因裁决：神经输出网格 +0.5 HR px 角点约定（有文档记载）导致所有神经×经典对比系统性低估；"神经臂带内净破坏"基本翻案；决策=对比层配准修正，不改训练约定
 
@@ -36,6 +74,8 @@
 
 ### [ACL-048] 2026-07-05 — Stage 0g 判定：精修 shift = 真信息增益，权威频带 34.07→25.45µm；精修对齐升级为 repo 默认资产；V11 网格偏移嫌疑（C/D 不适用）；新增偏移探针 + 文档纠偏 + Stage 0h
 
+> ⚠️ 本条对 C/D 的"带内内容被先验替换定罪成立"已被 ACL-049 推翻：C/D 同样带 ~0.65px 配准偏移，校正后神经与经典同档。以顶部速览块为准。
+
 **问题诊断 / 0g 已核验结果**（产物 `remote_inbox/20260705_stage0g/`，数字均已对 CSV/JSON 复核）:
 1. **Task 1 shift 反馈回路三信号全正**：(a) iter2 收敛——残余 delta 0.012/0.071px（iter1 0.288/0.447），每轴均值≈0，improvement 缩至 6.9%（剩余为 σ/形状项）；(b) drizzle 分半 cutoff：phase_stratified 29.67→26.28µm、odd_even 26.9→20.6µm；(c) **EP15 M2 权威频带 34.07→25.45µm（±0.73，3 seeds）**，带内负对照压死（24µm：main 0.197 vs shuffle 0.020 vs bicubic 0.002），且 **aperture dip 首次 visible（margin 0.205）**——FRC 现在能看到 20µm 探测器孔径零点的物理特征，独立佐证对齐质量。**判定：精修 shift 为真信息增益；真实可恢复带 ~25.5–40µm 周期。** 0e 的 34µm 作废（那是"坏对齐下的频带"）。
 2. **Task 2 同半幅对照——判决拆开**（本地对曲线做了 45–21µm 符号翻转计数，远端 REPORT 只给了"定罪缓议"的整体结论）：tgv×drz 0 次翻转（锚，@30µm 0.590）；**c_nodr×drz 仅 2 次、平滑衰减但低（@30µm 0.185 < drizzle 跨半自洽 0.377）→ 对 C/D 的"带内内容被先验替换"定罪成立**；v11×drz 14 次、v11×tgv 41 次高幅振荡（0.53→0.22→0.43）→ **V11 输出网格有刚性亚像素偏移嫌疑，对 V11 定罪缓议**。
@@ -60,6 +100,8 @@
 ---
 
 ### [ACL-047] 2026-07-04 — Stage 0f 结果核验：逐帧 shift 误差 ~0.29px 实锤为头号瓶颈；神经臂带内净破坏（cross-FRC）；权威频带 ≈34µm；新增 shift 反馈工具 + Stage 0g 任务
+
+> ⚠️ 本条两个结论已被后续推翻："神经臂带内净破坏"系 +0.5 HR px 配准伪影（ACL-049 v4 翻案）；"权威频带 34µm"是坏对齐下的测量（ACL-048 修正为 25.45µm）。shift 误差 ~0.29px 的诊断仍然成立。以顶部速览块为准。
 
 **问题诊断 / 0f 已核验结果**（产物 `remote_inbox/20260704_stage0f/`，远端 REPORT 有两处错误见文末勘误）:
 1. **Task 1（0a centered 重跑 ×2）**：约定修复在真实数据生效——系统偏置从 −0.24px 归零（axis means +0.010/+0.007）。诚实改善 12.62% CI[11.77,13.49]（full）/ 12.44% CI[11.61,13.31]（split_half），比带 bug 的 20.07% 挤掉约 7.5 个点。**关键分布事实**（本地复核 t1a/t1b CSV）：精修量是均值为零、模长集中 0.25–0.40px 的环状分布（248 帧仅 17 帧 <0.05px；mean |Δ|=0.288，p95=0.447，max=0.566）；仅 42/248 落在 0.25 格点（非插值伪影）；full 与 split_half 两个独立 x̂ 逐帧几乎一致 → **真实逐帧 shift 误差 ~0.29px（约 0.2px/轴）**。对照 0b（0.2px→−3.5dB），不修 shift 则 2× 去混叠预算基本不存在——**shift 校正取代 DR 成为头号杠杆**。σ̂ 两个变体都卡 0.05 下边缘：SAA x̂ 自带模糊，本仪器测不了 σ（预期内）。
@@ -89,6 +131,8 @@
 ---
 
 ### [ACL-046] 2026-07-03 — Stage 1a 判定=仪表失效（inconclusive）；0a 半像素约定 bug 实锤；新增 Stage 0f 仪表修复（0a centered forward + split-source x̂、cross-method FRC、0d 分布对比工具）
+
+> ⚠️ 本条 §4 对神经方法 split-half FRC 的解读方向正确（self-FRC 无效），但由此展开的"神经臂破坏带内信息"叙事已被 ACL-049 推翻（配准伪影）。以顶部速览块为准。
 
 **问题诊断**（对 20260703 remote run 的本地复核，产物见 `remote_inbox/20260703_stage1a/`）:
 1. **0a 的"真实算子误差 ≥0.4px"结论撤回——大头是 0a 打分器自己的半像素约定 bug**。Task A（radius 0.8）248 帧精修分布：mean Δ=(dx −0.237, dy −0.242) px、每轴 sd≈0.22、0 帧碰 0.8 边界。−0.24≈−0.25 LR px=0.5 HR px：`stage0a_mvp.forward_block_average_shifted` 采样 `scale*(i+shift)+{0..scale-1}`（block 中心 +0.5 HR px），而打分对象 x̂ 来自 `saa.reconstruct_saa`，其 scatter 在 `scale*(i+shift)`（无 +0.5）。两套独立实现差恰好半个 HR 像素，精修一直在补这个常数。此前所有"饱和"现象（MVP p95=0.05√2、full-grid p95=0.4√2 顶角）全部由此解释。**ep07 solver 本身不受影响**（forward_roundtrip_selfcheck 认证过其 adjoint 内部一致）。

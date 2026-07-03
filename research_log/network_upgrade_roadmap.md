@@ -4,7 +4,8 @@
 > - **Step 5 已完成且数字更新两次**：EP15 M2 在 20µm 契约下的权威频带，旧对齐下为 34.07µm；换用精修对齐（现 repo 默认 `configs/alignment/stage0f_refined_alignment.csv`）后为 **25.45µm ±0.73**（负对照保持、aperture dip 可见）。band gate 应引用 25.45µm。
 > - **风险 #1（shift 精度）已实测并大部分解决**：真实逐帧误差 ~0.29px（"p95≈0.79px"为旧对齐旧口径），0a 精修一轮收敛，残余 0.012/0.071px。其"缓解=训练时 shift-jitter DR"已被实测判 null（DR@0.1px 两臂无差异）；**主线改为精修对齐直接喂 DC + 测试时联合精化**。
 > - **§4 的"PSF σ=0.2257 标定值"不可信**：EP09 三路发散未解决，0a 类仪器测不了 σ。σ 仍是开放校准项，loss/DC 中勿当"钉死值"引用。
-> - **Step 4 的"synthetic split-half FRC 快 sanity"照旧，但真实域主 gate 改为 cross-method FRC**（self split-half FRC 对神经方法结构性失效，奖励可复现幻觉）。
+> - **Step 4 的"synthetic split-half FRC 快 sanity"照旧，但真实域主 gate 改为 cross-method FRC**（self split-half FRC 对神经方法结构性失效，奖励可复现幻觉），且神经×经典比较**必须先做偏移校正**——solver 输出网格带 +0.5 HR px 角点约定（ACL-049，`forward_torch.py` 设计使然，不改训练约定、修在对比层：`probe_pair_offset.py` / `real_eval.to_center_grid`）。
+> - **神经臂现状（ACL-049 v4）**：校正后神经与经典同档（V11 cutoff 平 TGV 23.03µm，@30µm 差 0.05-0.06）；"神经破坏带内信息"的历史结论全部作废。当前基线=TGV×drz 0.702@30µm / 23.03µm，Step 4 及格线据此执行。
 >
 > 写于 2026-06-25。目的:把"数据生成完后该不该把 U-Net 换成 diffusion / flow matching、要不要拿现成超分底子微调"这个决策**落盘**,并给出 cold-reopen 也能直接续上的实现次序。
 > 配套:决策记录见 `research_log/algorithm_changelog.md` ACL-024;跨会话记忆见 memory `thermal-lift-redesign-direction`。

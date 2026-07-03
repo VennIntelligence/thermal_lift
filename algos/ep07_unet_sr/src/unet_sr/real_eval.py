@@ -434,6 +434,35 @@ def infer_solver_from_burst(
 
 
 @torch.no_grad()
+def to_center_grid(image: np.ndarray, *, scale: int = 2) -> np.ndarray:
+    """Resample a solver output from its native corner-convention grid onto the
+    classical center-convention grid used by drizzle/SAA/TGV/MAP-TV.
+
+    The solver DC anchors x on the block-corner grid (forward samples HR at
+    ``scale*(i+d)+{0..scale-1}``, i.e. a constant ``+(scale-1)/2`` HR-px
+    block-center offset — see forward_torch.py and ACL-049), so raw outputs sit
+    that far off classical reconstructions in both axes and any cross-method
+    comparison is registration-attenuated.  This Fourier shift removes the
+    constant for COMPARISON purposes only; training and DC must keep the
+    native grid.  A small content-dependent residual (~0.05 px, ACL-049) can
+    remain — use probe_pair_offset.py when the comparison needs to be exact.
+    """
+
+    offset = (int(scale) - 1) / 2.0
+    arr = np.asarray(image, dtype=np.float64)
+    if arr.ndim != 2:
+        raise ValueError(f"image must be 2D, got shape {arr.shape}")
+    if offset == 0.0:
+        return arr.astype(np.float32, copy=False)
+    fy = np.fft.fftfreq(arr.shape[0])[:, None]
+    fx = np.fft.fftfreq(arr.shape[1])[None, :]
+    # Content must move by -offset in both axes (fourier ramp exp(-2i*pi*f*d)
+    # translates content by +d, so d = -offset).
+    ramp = np.exp(-2j * np.pi * (fy + fx) * (-offset))
+    shifted = np.fft.ifft2(np.fft.fft2(arr) * ramp)
+    return np.real(shifted).astype(np.float32, copy=False)
+
+
 def infer_solver_from_burst_full_halo(
     solver: torch.nn.Module,
     lr_burst: np.ndarray,
@@ -442,12 +471,20 @@ def infer_solver_from_burst_full_halo(
     training_config: Any,
     halo_hr: int,
     device: torch.device | str,
+    output_grid: str = "native",
 ) -> np.ndarray:
     """Run full-frame solver inference with an outer reflect halo, then crop to the original FOV.
 
     This eval path avoids patch-local prox boundaries inside the visible image.  The halo is applied
     on the LR burst before feature fusion; after solving on the enlarged field, the HR output is
     cropped back to the original detector FOV.
+
+    ``output_grid='native'`` returns the solver's own corner-convention grid
+    (comparable with historical in-training eval_real numbers).  Use
+    ``'centered'`` whenever the output will be compared against classical
+    reconstructions (drizzle/SAA/TGV/MAP-TV) — it applies
+    :func:`to_center_grid` so the +0.5 HR-px convention offset (ACL-049) does
+    not attenuate the comparison.
     """
 
     scale = int(training_config.scale)
@@ -455,6 +492,8 @@ def infer_solver_from_burst_full_halo(
         raise ValueError("scale must be positive")
     if int(halo_hr) < 0 or int(halo_hr) % scale != 0:
         raise ValueError("halo_hr must be non-negative and divisible by scale")
+    if output_grid not in ("native", "centered"):
+        raise ValueError(f"output_grid must be 'native' or 'centered', got {output_grid!r}")
 
     requested_device = torch.device(device)
     if requested_device.type == "cuda" and not torch.cuda.is_available():
@@ -512,6 +551,8 @@ def infer_solver_from_burst_full_halo(
         h_hr = int(burst.shape[-2]) * scale
         w_hr = int(burst.shape[-1]) * scale
         pred = pred[int(halo_hr) : int(halo_hr) + h_hr, int(halo_hr) : int(halo_hr) + w_hr]
+    if output_grid == "centered":
+        return to_center_grid(pred, scale=scale)
     return pred.astype(np.float32, copy=False)
 
 

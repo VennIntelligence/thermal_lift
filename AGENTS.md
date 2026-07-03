@@ -38,6 +38,8 @@ exec bash -l
 
 这样任务运行时可直接 attach 到窗口看进度，任务结束后 pane 不会消失；实验员确认输出后可手动 `exit` 或 `tmux kill-window -t 0:task_name` 关闭窗口。智能体报告中必须保留 stdout log 路径和实际 exit code。
 
+**🔴 remote_inbox 传输规则（硬规则，2026-07-06 起违反即回滚）**：`remote_inbox/` 是机器间的**产物投递目录**，只允许通过 `rsync` / `scp` / SSH 管道做**增量文件同步**，**严禁**进入 git（不 `git add`、不 commit、不 push）。`.gitignore` 已包含 `remote_inbox/`；ignore 对已 track 文件无效，所以一旦发现被 track，立即 `git rm -r --cached remote_inbox/` 并单独提交回滚（先例：e532574、ce29f74 两次回滚，禁止出现第三次）。原因：inbox 是大体积、可再生的运行产物，进 git 会永久膨胀仓库历史并把"数据搬运"伪装成"代码变更"。执行 Agent 的任务包汇报中若涉及归档，只写 inbox 路径，由 owner/同步脚本负责搬运。
+
 ---
 
 ## 📁 项目概述
