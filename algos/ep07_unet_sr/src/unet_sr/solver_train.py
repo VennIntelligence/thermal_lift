@@ -168,6 +168,13 @@ def build_criterion(config: TrainingConfig) -> ContourSRLoss:
         flatness_tau=config.flatness_tau,
         laplacian_weight=config.laplacian_weight,
         forward_model_weight=0.0,  # hard DC replaces the (falsified) soft forward-model loss
+        # Stage 2a E3: band-gated supervision on the measured recoverable band
+        # (25-40 um periods = 2.5-4.0 HR px at scale 2). Weight 0 = legacy loss.
+        band_loss_weight=(
+            config.solver_band_loss_weight if config.solver_band_loss == "gate25_40" else 0.0
+        ),
+        band_period_lo_px=2.5,
+        band_period_hi_px=4.0,
     )
 
 
@@ -286,10 +293,12 @@ def train(config: TrainingConfig) -> Path:
     fusion_label = "off" if config.solver_fusion == "none" else (
         f"{config.solver_fusion}(E={config.solver_fusion_channels}, "
         f"+{3 * config.solver_fusion_channels}ch, chunk={config.solver_fusion_frame_chunk})")
+    band_loss_label = "off" if config.solver_band_loss == "none" else (
+        f"{config.solver_band_loss}(w={config.solver_band_loss_weight:g}, 2.5-4.0 HR px)")
     print(f"UnrolledSolver: K={config.unroll_steps} steps, M={config.solver_m_frames} frames, "
           f"{n_params:,} params, cond={cond_channels}ch, no_drizzle={config.solver_no_drizzle}, "
           f"warmstart x0={warmstart_label}, band_sigma={config.solver_band_sigma}, "
-          f"operator_DR={dr_label}, fusion={fusion_label}, device={device}")
+          f"operator_DR={dr_label}, fusion={fusion_label}, band_loss={band_loss_label}, device={device}")
 
     optimizer = torch.optim.AdamW(solver.parameters(), lr=config.lr, weight_decay=config.weight_decay)
     cosine = torch.optim.lr_scheduler.CosineAnnealingLR(optimizer, T_max=max(1, config.total_steps))

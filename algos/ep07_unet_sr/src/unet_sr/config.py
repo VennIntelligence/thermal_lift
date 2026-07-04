@@ -128,6 +128,13 @@ class TrainingConfig:
     solver_fusion: str = "none"
     solver_fusion_channels: int = 16
     solver_fusion_frame_chunk: int = 8
+    # Stage 2a E3 (roadmap Step 3): band-gated supervision — an ADDITIVE L1 term on the
+    # pred-target residual restricted to the measured recoverable band (25-40 um periods
+    # = 2.5-4.0 HR px on the 10 um/sample grid; EP15 M2 authoritative cutoff 25.45 um,
+    # ACL-048). "none" (default) keeps the loss byte-identical to the legacy stack; the
+    # terminal hard DC term is untouched either way.
+    solver_band_loss: str = "none"
+    solver_band_loss_weight: float = 0.5
 
     def validate(self) -> None:
         if self.device == "cpu" and self.amp:
@@ -253,6 +260,12 @@ class TrainingConfig:
                 raise ValueError("solver_fusion_channels must be >= 1")
             if self.solver_fusion_frame_chunk < 1:
                 raise ValueError("solver_fusion_frame_chunk must be >= 1")
+            if self.solver_band_loss not in ("none", "gate25_40"):
+                raise ValueError("solver_band_loss must be 'none' or 'gate25_40'")
+            if self.solver_band_loss_weight < 0:
+                raise ValueError("solver_band_loss_weight must be >= 0")
+            if self.solver_band_loss != "none" and self.solver_band_loss_weight == 0:
+                raise ValueError("solver_band_loss enabled but solver_band_loss_weight is 0 — set a weight or use 'none'")
         if self.input_mode == "hybrid_drizzle2x" and self.forward_model_weight > 0 and self.scale != 2:
             raise ValueError(
                 "input_mode='hybrid_drizzle2x' with forward_model_weight > 0 requires --scale 2 "
@@ -672,6 +685,16 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--solver-fusion-frame-chunk", type=int,
                         default=TrainingConfig.solver_fusion_frame_chunk,
                         help="Frames per streaming chunk in the fusion pooling (VRAM knob; default 8).")
+    parser.add_argument("--solver-band-loss", choices=("none", "gate25_40"),
+                        default=TrainingConfig.solver_band_loss,
+                        help="Stage 2a E3 band-gated supervision: 'gate25_40' adds an L1 term on the "
+                             "pred-target residual band-passed to 25-40 um periods (2.5-4.0 HR px at "
+                             "scale 2 — the measured recoverable band, ACL-048). 'none' (default) = "
+                             "legacy loss, byte-identical. Terminal DC term is unaffected.")
+    parser.add_argument("--solver-band-loss-weight", type=float,
+                        default=TrainingConfig.solver_band_loss_weight,
+                        help="Weight of the band-gated L1 term (default 0.5; only used when "
+                             "--solver-band-loss is not 'none').")
     return parser
 
 
@@ -765,6 +788,8 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         solver_fusion=args.solver_fusion,
         solver_fusion_channels=args.solver_fusion_channels,
         solver_fusion_frame_chunk=args.solver_fusion_frame_chunk,
+        solver_band_loss=args.solver_band_loss,
+        solver_band_loss_weight=args.solver_band_loss_weight,
         solver_dc_shift_jitter_std_px=args.solver_dc_shift_jitter_std_px,
         solver_dc_psf_sigma_jitter_frac=args.solver_dc_psf_sigma_jitter_frac,
         solver_dc_psf_angle_jitter_deg=args.solver_dc_psf_angle_jitter_deg,

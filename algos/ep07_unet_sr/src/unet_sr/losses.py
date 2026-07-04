@@ -336,6 +336,54 @@ def forward_model_loss(
 
 
 # ---------------------------------------------------------------------------
+# Fourier band filter for band-gated supervision (Stage 2a E3 / roadmap Step 3)
+# ---------------------------------------------------------------------------
+
+def fourier_band_filter(
+    x: torch.Tensor,
+    *,
+    period_lo_px: float,
+    period_hi_px: float,
+    edge_softness_cyc: float = 0.05,
+) -> torch.Tensor:
+    """Radial band-pass a BCHW tensor, keeping spatial periods in [lo, hi] px.
+
+    Implemented as an exact Fourier radial mask with raised-cosine edges
+    (width *edge_softness_cyc* cycles/px) rather than a DoG: the target band
+    (25-40 um on the 10 um/sample HR grid = 2.5-4.0 px periods) sits close to
+    Nyquist (2 px), where DoG sigmas become sub-pixel and the response is hard
+    to control; the FFT mask is exact, differentiable, and cheap at patch size.
+    The mask depends only on shape/device/dtype, so it is rebuilt per call from
+    cached fftfreq grids — negligible next to the model's conv stack.
+    """
+
+    if x.ndim != 4:
+        raise ValueError("x must have shape (B, C, H, W)")
+    lo = float(period_lo_px)
+    hi = float(period_hi_px)
+    if not (0 < lo < hi):
+        raise ValueError(f"need 0 < period_lo_px < period_hi_px, got {lo}, {hi}")
+    f_hi = 1.0 / lo  # upper frequency edge (short-period side)
+    f_lo = 1.0 / hi  # lower frequency edge (long-period side)
+    soft = float(edge_softness_cyc)
+
+    h, w = x.shape[-2], x.shape[-1]
+    fy = torch.fft.fftfreq(h, d=1.0, device=x.device, dtype=torch.float32)
+    fx = torch.fft.rfftfreq(w, d=1.0, device=x.device, dtype=torch.float32)
+    radius = torch.sqrt(fy[:, None] ** 2 + fx[None, :] ** 2)
+
+    def _rise(f: torch.Tensor, edge: float) -> torch.Tensor:
+        # 0 below edge-soft, 1 above edge, raised-cosine in between.
+        t = ((f - (edge - soft)) / max(soft, 1e-9)).clamp(0.0, 1.0)
+        return 0.5 - 0.5 * torch.cos(torch.pi * t)
+
+    weight = _rise(radius, f_lo) * (1.0 - _rise(radius, f_hi + soft))
+    spec = torch.fft.rfft2(x.float())
+    out = torch.fft.irfft2(spec * weight, s=(h, w))
+    return out.to(dtype=x.dtype)
+
+
+# ---------------------------------------------------------------------------
 # Contour-focused loss for structure/edge reconstruction
 # ---------------------------------------------------------------------------
 
@@ -388,6 +436,9 @@ class ContourSRLoss(nn.Module):
         forward_model_scale: int = 2,
         forward_model_band: str = "full",
         forward_model_band_sigma: float = 5.0,
+        band_loss_weight: float = 0.0,
+        band_period_lo_px: float = 2.5,
+        band_period_hi_px: float = 4.0,
     ) -> None:
         super().__init__()
         for name, val in [
@@ -404,9 +455,14 @@ class ContourSRLoss(nn.Module):
             ("forward_model_weight", forward_model_weight),
             ("forward_model_psf_sigma", forward_model_psf_sigma),
             ("forward_model_band_sigma", forward_model_band_sigma),
+            ("band_loss_weight", band_loss_weight),
         ]:
             if val < 0:
                 raise ValueError(f"{name} must be >= 0")
+        if not (0 < float(band_period_lo_px) < float(band_period_hi_px)):
+            raise ValueError(
+                f"need 0 < band_period_lo_px < band_period_hi_px, got {band_period_lo_px}, {band_period_hi_px}"
+            )
         if float(flatness_tau) <= 0:
             raise ValueError("flatness_tau must be > 0")
         if int(forward_model_scale) <= 0:
@@ -429,6 +485,9 @@ class ContourSRLoss(nn.Module):
         self.forward_model_scale = int(forward_model_scale)
         self.forward_model_band = str(forward_model_band)
         self.forward_model_band_sigma = float(forward_model_band_sigma)
+        self.band_loss_weight = float(band_loss_weight)
+        self.band_period_lo_px = float(band_period_lo_px)
+        self.band_period_hi_px = float(band_period_hi_px)
 
     def forward(
         self,
@@ -511,6 +570,20 @@ class ContourSRLoss(nn.Module):
                 band_sigma_lr_px=self.forward_model_band_sigma,
             )
 
+        # ---- Band-gated supervision (Stage 2a E3): L1 on the residual restricted
+        # to the measured recoverable band (25-40 um periods = 2.5-4.0 HR px at
+        # scale 2, EP15 M2 authoritative cutoff 25.45 um, ACL-048). Additive on
+        # top of the existing terms — spends extra gradient budget exactly where
+        # real information exists, without touching the full-band anchors.
+        band_loss = pred.new_tensor(0.0)
+        if self.band_loss_weight > 0:
+            band_residual = fourier_band_filter(
+                pred - target,
+                period_lo_px=self.band_period_lo_px,
+                period_hi_px=self.band_period_hi_px,
+            )
+            band_loss = torch.abs(band_residual).mean()
+
         total = (
             self.mse_weight * mse_loss
             + self.highpass_weight * hp_loss
@@ -520,6 +593,7 @@ class ContourSRLoss(nn.Module):
             + self.flatness_weight * flat_loss
             + self.laplacian_weight * lap_loss
             + self.forward_model_weight * fm_loss
+            + self.band_loss_weight * band_loss
         )
         out = {
             "total": total,
@@ -535,4 +609,6 @@ class ContourSRLoss(nn.Module):
             out["laplacian"] = lap_loss
         if self.forward_model_weight > 0:
             out["forward_model"] = fm_loss
+        if self.band_loss_weight > 0:
+            out["band"] = band_loss
         return out
