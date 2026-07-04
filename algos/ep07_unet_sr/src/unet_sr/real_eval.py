@@ -472,8 +472,13 @@ def infer_solver_from_burst_full_halo(
     halo_hr: int,
     device: torch.device | str,
     output_grid: str = "native",
+    psf_override: Any | None = None,
 ) -> np.ndarray:
     """Run full-frame solver inference with an outer reflect halo, then crop to the original FOV.
+
+    ``psf_override`` (a ``forward_torch.ScenePSF``, batch size 1, tensors on ``device``) replaces the
+    real-eval placeholder PSF for DC — required on synthetic scenes where the true per-scene PSF is
+    known (Stage 2b benchmark). ``None`` keeps the historical real-eval path byte-identical.
 
     This eval path avoids patch-local prox boundaries inside the visible image.  The halo is applied
     on the LR burst before feature fusion; after solving on the enlarged field, the HR output is
@@ -535,7 +540,7 @@ def infer_solver_from_burst_full_halo(
     obs_t = torch.from_numpy(np.ascontiguousarray(cond[None])).to(requested_device)
     burst_t = torch.from_numpy(np.ascontiguousarray(burst_sub[None])).to(requested_device)
     shifts_t = torch.from_numpy(np.ascontiguousarray(shifts_sub[None])).to(requested_device)
-    psf = _solver_real_psf(training_config, 1, requested_device)
+    psf = psf_override if psf_override is not None else _solver_real_psf(training_config, 1, requested_device)
     frame_mask = _lr_edge_mask(
         burst_solve.shape[-2],
         burst_solve.shape[-1],

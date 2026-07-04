@@ -24,6 +24,28 @@
 
 ## 变更记录
 
+### [ACL-054] 2026-07-08（凌晨）— Stage 2b 合成基准 harness 交付（H1 域差 vs H2 架构 判决实验；代码+测试，结果待回填）
+
+**问题诊断**: ACL-053 冠军臂负结果第三次呈现 synth↑/real↓ 反相关；owner 裁决单数据集调参终止。差距根因二选一：H1（合成-真实域差，先验兑现不了）vs H2（架构把信息留在桌上）。判决所需的关键对照——**TGV/MAP-TV 在我们自己合成集上的表现——此前从未测过**。设计稿：`research_log/stage2b_synth_benchmark_design.md`。
+
+**修改内容**:
+1. **`configs/synthetic/pool_2x_v6_bench48.json`**（新）：v6 训练池配置逐字拷贝，仅改 6 键（num_scenes=48、seed=20260708 与训练池种子不相交、n_frames_per_scene=96 固定以支持成对 N 阶梯、output_dir、dataset 名、注释）。有测试强制该"仅 6 键差异"不变量。
+2. **`algos/ep07_unet_sr/scripts/run_stage2b_synth_benchmark.py`**（新）：四阶段 harness——
+   - `recon-classical`：TGV/MAP-TV ×（portable=真实数据同款 σ 占位 / oracle=每景真 σ）× N∈{24,48,96} 前缀阶梯；**景级 spawn 进程池**（owner 需求：`--workers` 默认 55，BLAS 四件套线程环境在父进程 spawn 前权威设置=1，子进程 fresh import 生效；`--workers>1` 时强制方法内部 workers=1 防过订阅）；单任务 >300s 打 SLOW_TASKS 标记供 owner 裁剪。TGV/MAP-TV 超参与 stage0h 真实基线逐字一致。
+   - `recon-neural`：checkpoint 参数化多臂（TrainingConfig 按 dataclass 字段过滤重建 + build_solver 复用，兼容 fusion 臂），DC 用**每景真 PSF**（见 3），`output_grid=native`（GT 与训练同网格）。
+   - `gate`：ACL-049 教训制度化——各臂 vs GT 迭代式相位相关偏移测量（单发抛物线峰值对亚像素分数系统低估、但为收缩映射，迭代 4 轮收敛至 <0.025 px，已验证），常数校正后残余中位 ≤0.15 px 才放行，>1.5 px 或校正失败 → exit 2 拒产表。
+   - `metrics`：与现役排行榜同一套 `frc_curve_v2` 口径 → 带限 FRC-vs-GT（记 24/30µm 点值、25-40µm 带均值、1/7 与 half-bit cutoff）+ band RMSE（加窗 FFT 带通差值 RMS）+ PSNR；长表 + 按 N/噪声三分位/ΔT 三分位分层汇总 CSV；缺失重建显式 log（no silent skip）。
+3. **`real_eval.infer_solver_from_burst_full_halo` 增加 `psf_override` 参数**（默认 None=历史真实评测路径字节不变，有测试钉住默认值）：合成域算子已知，DC 不该吃 σ=0.5 占位。
+4. **测试** `tests/test_stage2b_benchmark.py`：7 项（配置不变量、前缀阶梯、gate 判决表、迭代偏移往返、带指标 sanity、三分位分箱、psf_override 默认关）。ep07 全套 **97 passed + 3 skipped**。
+
+**预期效果**: 判决读法——神经（域内、oracle 条件）明显>TGV → H1，修数据（v7 池）；打平/落后 → H2，修网络（prox 架构轮在本基准台迭代，真实 248 帧只当期末考）。附带产出：v20-vs-v19 域内差 = 迁移损耗直接量化；η 跨域稳健性表（v17 全家 final 尚存）。
+
+**训练结果**: 待回填（基准无训练；远端跑完 recon→gate→metrics 后回填分层表与判决）。
+
+**涉及文件**: `configs/synthetic/pool_2x_v6_bench48.json`、`algos/ep07_unet_sr/scripts/run_stage2b_synth_benchmark.py`、`algos/ep07_unet_sr/tests/test_stage2b_benchmark.py`、`algos/ep07_unet_sr/src/unet_sr/real_eval.py`、`research_log/stage2b_synth_benchmark_design.md`。
+
+---
+
 ### [ACL-053] 2026-07-07（晚，无人值守）— 组合臂 η0.09×band=0.6705@30µm（B 增量为正）；冠军流程启动：batch 8 重锚 + 成对 50k 过夜对决 TGV
 
 **实验记录**:
