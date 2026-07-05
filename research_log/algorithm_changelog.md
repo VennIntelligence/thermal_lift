@@ -49,9 +49,26 @@
 3. **depb9v6_bin4 = 双轴 champion 候选**: 真实 0.668=神经新高,**平 v19 纪录 0.6705(差 0.002 噪声内)**,低频干净(4.35)、DE-prox 家族、输入通道更少。在 ACL-063 双轴标准(真实 FRC + 点保留门)下**支配 v19**(同 FRC、远好的点保真——v19 抹 68.6% 孤立点;bin4 点保留待补测)。仍低于 TGV 0.702。
 4. TGV×drz 复现 0.7017/0.3558/23.03,offset 探针六半幅全 success,结果可信。
 
-**下一步**: (a) **v22 三臂点保真探针**(recons 已在 remote `output/stageDE_v22_corrected/`,复用 probe_dot_retention.py,补齐 bin4/eta8/eta4 retention→完成 champion 双轴画像;派 Sonnet 拉数据+跑,进行中);(b) champion 提案 depb9v6_bin4 为主候选,待点保真确认;(c) A3 phase-D 经典跑完回填 ACL-060;(d) champion 若定 bin4,可再探 2/3-bin 下探极限 + v7 长训。
+**点保真回填(v22 三臂,复用 ACL-063 检出的 3562 点+isolation 标签,同预处理;`output/dot_probe/summary_v22_arms.csv`)**:
 
-**涉及文件**: 无代码变更(实验记录;三臂用现有 harness)。
+| 臂 | ALL retention | isolated erased% | vs_drizzle |
+|---|---|---|---|
+| depb9v6_bin4 | 0.477 | 9.6% | 0.569 |
+| meandc_eta8 | 0.455 | 12.7% | 0.543 |
+| meandc_eta4 | 0.197 | **83.5%** | 0.242 |
+| (参照)depb9v6 9bin | 0.60 | 4.7% | 0.71 |
+| (参照)de_pb9(v5) | 0.68 | 2.5% | 0.85 |
+| (参照)v19 | 0.27 | 68.6% | 0.29 |
+| (参照)v14 | 0.50 | 6.8% | 0.59 |
+
+**修正判读(加入第三轴=点保真)**:
+1. **"4 bin 双域 ≥ 9 bin"不成立于第三轴 → ACL-064 判读 #2/#3 修正**: 点保真上 bin4(0.477,孤立抹除 9.6%)**劣于** 9-bin depb9v6(0.60,4.7%)。9→4 bin **不是免费午餐**:用 −0.12 点保留 + 2× 孤立抹除换 +0.007 真实 FRC。**双轴纪律价值实证**——只看 FRC,bin4 像白捡的赢(FRC↑通道↓);点探针揭出隐藏代价。bin4 不支配 9-bin,两者是 FRC↔点保真真权衡。
+2. **champion = 三轴权衡,非橡皮图章**: depb9v6 9-bin(0.661/低频2.70/点0.60·4.7%)=最均衡可复现臂;bin4(0.668/4.35/0.477·9.6%)=FRC 稍高点稍差通道省;v19(0.6705/1.33/0.27·68.6%)=FRC 王点崩;de_pb9(v5 池不可复现,0.667/2.73/0.68·2.5%)=三轴全优但池已删。**owner 护缺陷优先 → 倾向 9-bin depb9v6;FRC 至上 → bin4。属 owner 加权决策。**
+3. **meandc_eta4 点保真灾难(83.5% 孤立抹除,劣于 v19)与其后段低频漂移同源**:不稳定同时表现为低频漂移+点摧毁;eta8(稳定)=v14 档(12.7%)。**再证低频稳定性与点保真强相关**(DC 锚强且稳→点活),与 ACL-060 η 反转、ACL-063 弱 DC 抹点三线同指一因。
+
+**下一步(更新)**: (a) champion 建议 **depb9v6 9-bin 为主候选**(护缺陷优先·三轴最均衡可复现),bin4 作 FRC 上限对照;de_pb9 证"三轴全优可存在"(v5),提示 **v7 应能复现其点保真**;(b) champion 长训前在 v7 上复评 9-bin vs bin4 三轴;(c) A3 phase-D 经典跑完回填 ACL-060。
+
+**涉及文件**: `algos/ep07_unet_sr/scripts/probe_dot_retention.py`(Sonnet 加 `--extra-arms/--per-dot-csv` 追加臂能力,默认流程不变);其余无代码变更(实验记录;三臂用现有 harness)。
 
 ---
 

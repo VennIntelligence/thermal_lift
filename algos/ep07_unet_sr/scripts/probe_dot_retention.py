@@ -113,10 +113,22 @@ ARM_FILES = {
     "de_pb9": ("de_pb9_a_corrected.npy", "de_pb9_b_corrected.npy"),
     "depb9v6": ("depb9v6_a_corrected.npy", "depb9v6_b_corrected.npy"),
     "meanDC": ("meanDC_a_corrected.npy", "meanDC_b_corrected.npy"),
+    # v22 supplemental arms (2026-07-06 addendum): NOT added to MEASURE_ARMS /
+    # NEURAL_ARMS / BOARD_COLS, so the default full pipeline (detection +
+    # boards + tile NCC) is byte-for-byte unchanged.  They are only consumed
+    # by --extra-arms mode (append_extra_arms), which reuses the existing
+    # per_dot.csv detections + isolation labels instead of re-detecting.
+    "depb9v6_bin4": ("depb9v6_bin4_a_corrected.npy",
+                     "depb9v6_bin4_b_corrected.npy"),
+    "meandc_eta8": ("meandc_eta8_a_corrected.npy",
+                    "meandc_eta8_b_corrected.npy"),
+    "meandc_eta4": ("meandc_eta4_a_corrected.npy",
+                    "meandc_eta4_b_corrected.npy"),
 }
 MEASURE_ARMS = ["drizzle", "tgv", "v14", "v19", "de_pb9", "depb9v6", "meanDC"]
 NEURAL_ARMS = ["v14", "v19", "de_pb9", "depb9v6", "meanDC"]
 BOARD_COLS = ["drizzle", "tgv", "v14", "v19", "de_pb9", "depb9v6", "meanDC"]
+EXTRA_ARMS = ["depb9v6_bin4", "meandc_eta8", "meandc_eta4"]  # v22 addendum
 
 
 # --------------------------------------------------------------------------
@@ -461,10 +473,13 @@ def classify_isolation(dots: pd.DataFrame, tgv_work: np.ndarray):
     return n_nb, side, cls
 
 
-def summarize_isolation(dots: pd.DataFrame) -> pd.DataFrame:
+def summarize_isolation(dots: pd.DataFrame, arm_list: list[str] | None = None
+                        ) -> pd.DataFrame:
     rows = []
     size_order = list(dots["size_bin"].cat.categories) + ["ALL"]
-    for name in [a for a in MEASURE_ARMS if a != "tgv"]:
+    if arm_list is None:
+        arm_list = [a for a in MEASURE_ARMS if a != "tgv"]
+    for name in arm_list:
         for iso in ["isolated", "structured"]:
             pop = dots[dots["isolation"] == iso]
             for sb in size_order:
@@ -493,10 +508,13 @@ def summarize_isolation(dots: pd.DataFrame) -> pd.DataFrame:
 # --------------------------------------------------------------------------
 # Step 3: stratified summary
 # --------------------------------------------------------------------------
-def summarize(dots: pd.DataFrame) -> pd.DataFrame:
+def summarize(dots: pd.DataFrame, arm_list: list[str] | None = None
+             ) -> pd.DataFrame:
     rows = []
     size_order = list(dots["size_bin"].cat.categories) + ["ALL"]
-    for name in [a for a in MEASURE_ARMS if a != "tgv"]:
+    if arm_list is None:
+        arm_list = [a for a in MEASURE_ARMS if a != "tgv"]
+    for name in arm_list:
         for sb in size_order:
             sub = dots if sb == "ALL" else dots[dots["size_bin"] == sb]
             if len(sub) == 0:
@@ -504,6 +522,9 @@ def summarize(dots: pd.DataFrame) -> pd.DataFrame:
                 continue
             ret = sub[f"retention_{name}"]
             cls = sub[f"class_{name}"]
+            vdrz_col = f"retention_vs_drz_{name}"
+            vdrz = (float(sub[vdrz_col].median())
+                    if vdrz_col in sub.columns else np.nan)
             rows.append({
                 "arm": name,
                 "size_bin": sb,
@@ -513,6 +534,7 @@ def summarize(dots: pd.DataFrame) -> pd.DataFrame:
                 "blurred_pct": float((cls == "blurred").mean() * 100),
                 "preserved_pct": float((cls == "preserved").mean() * 100),
                 "median_fwhm_ratio": float(sub[f"fwhm_ratio_{name}"].median()),
+                "median_retention_vs_drz": vdrz,
             })
     return pd.DataFrame(rows)
 
@@ -965,11 +987,122 @@ def write_summary(outdir, pre, funnel, summary, summary_depth, summary_iso,
 
 
 # --------------------------------------------------------------------------
+# v22 addendum (2026-07-06): append EXTRA_ARMS retention to an existing
+# per_dot.csv without re-running detection.  Reuses the already-detected
+# dots (y, x, sigma), their TGV/drizzle depths and isolation labels exactly
+# as produced by the main pipeline; only preprocessing (alignment + gain)
+# and per-dot measurement are re-done, for the 3 new arms only, against the
+# same TGV reference and the same CONFIG thresholds.
+# --------------------------------------------------------------------------
+def append_extra_arms(inbox: str, per_dot_csv: str, outdir: str,
+                      arm_list: list[str] = EXTRA_ARMS) -> None:
+    rng = np.random.default_rng(CONFIG["seed"])
+    print(f"[extra-arms] loading existing detections from {per_dot_csv} ...")
+    dots = pd.read_csv(per_dot_csv)
+    # restore the canonical size_bin category order (matches CONFIG edges);
+    # pd.read_csv loses the Categorical dtype, so summarize()'s
+    # "+ ['ALL']" size-bin ordering must be rebuilt explicitly.
+    edges = CONFIG["size_bins_px"]
+    labels = [f"<={edges[0]:g}px", f"{edges[0]:g}-{edges[1]:g}px",
+              f"{edges[1]:g}-{edges[2]:g}px", f">{edges[2]:g}px"]
+    dots["size_bin"] = pd.Categorical(dots["size_bin"], categories=labels,
+                                      ordered=True)
+    print(f"  {len(dots)} dots, isolation counts: "
+          f"{dots['isolation'].value_counts().to_dict()}")
+
+    print("[extra-arms] loading TGV reference ...")
+    fa, fb = ARM_FILES["tgv"]
+    tgv_a = np.load(os.path.join(inbox, fa)).astype(np.float64)
+    tgv_b = np.load(os.path.join(inbox, fb)).astype(np.float64)
+    tgv_work = 0.5 * (tgv_a + tgv_b)
+
+    pre_rows = []
+    for name in arm_list:
+        fa, fb = ARM_FILES[name]
+        a = np.load(os.path.join(inbox, fa)).astype(np.float64)
+        b = np.load(os.path.join(inbox, fb)).astype(np.float64)
+        work = 0.5 * (a + b)
+        dy, dx = phase_corr_offset(tgv_work, work)
+        norm = float(np.hypot(dy, dx))
+        shifted = norm > CONFIG["align_apply_px"]
+        aligned = (ndimage.shift(work, (dy, dx), order=3, mode="nearest")
+                   if shifted else work)
+        gain = robust_gain(tgv_work, aligned, CONFIG["edge_margin_px"], rng)
+        slope_applied = (gain["slope"]
+                         if abs(gain["slope"] - 1.0) > CONFIG["gain_tol"]
+                         else 1.0)
+        pre_rows.append({
+            "arm": name, "offset_dy_px": dy, "offset_dx_px": dx,
+            "offset_norm_px": norm, "shift_applied": bool(shifted),
+            "gain_slope": gain["slope"], "gain_intercept": gain["intercept"],
+            "gain_n_px": gain["n_px"],
+            "slope_applied_to_depth": slope_applied,
+        })
+        print(f"  {name}: offset=({dy:+.4f},{dx:+.4f})px "
+              f"slope={gain['slope']:.4f} applied={slope_applied:.4f}")
+
+        depth_raw, depth, fwhm = [], [], []
+        for r in dots.itertuples():
+            mm = measure_dot(aligned, r.y, r.x, r.sigma)
+            depth_raw.append(mm["depth"])
+            depth.append(mm["depth"] / slope_applied)
+            fwhm.append(mm["fwhm_diam"])
+        dots[f"depth_raw_{name}"] = depth_raw
+        dots[f"depth_{name}"] = depth
+        dots[f"fwhm_diam_{name}_px"] = fwhm
+        dots[f"retention_{name}"] = dots[f"depth_{name}"] / dots["depth_tgv"]
+        dots[f"fwhm_ratio_{name}"] = (dots[f"fwhm_diam_{name}_px"]
+                                      / dots["fwhm_diam_tgv_px"])
+        dots[f"class_{name}"] = dots[f"retention_{name}"].map(classify)
+        dots[f"retention_vs_drz_{name}"] = (dots[f"depth_{name}"]
+                                            / dots["depth_drizzle"])
+    pre = pd.DataFrame(pre_rows)
+
+    os.makedirs(outdir, exist_ok=True)
+    inter = os.path.join(outdir, "intermediate")
+    os.makedirs(inter, exist_ok=True)
+    dots.to_csv(os.path.join(inter, "per_dot_v22_arms.csv"), index=False)
+    pre.to_csv(os.path.join(inter, "preprocessing_v22_arms.csv"), index=False)
+
+    print("[extra-arms] size-bin summary ...")
+    summary = summarize(dots, arm_list)
+    print(summary.to_string(index=False))
+    print("[extra-arms] isolation summary ...")
+    summary_iso = summarize_isolation(dots, arm_list)
+    print(summary_iso.to_string(index=False))
+
+    pre_out = pre.assign(table="preprocessing")
+    size_out = summary.assign(table="by_size", isolation="")
+    iso_out = summary_iso.assign(table="by_isolation")
+    cols = sorted(set(pre_out.columns) | set(size_out.columns)
+                  | set(iso_out.columns))
+    combined = pd.concat(
+        [pre_out.reindex(columns=cols), size_out.reindex(columns=cols),
+         iso_out.reindex(columns=cols)], ignore_index=True)
+    front = ["table", "arm", "isolation", "size_bin", "N"]
+    combined = combined[front + [c for c in combined.columns
+                                 if c not in front]]
+    out_csv = os.path.join(outdir, "summary_v22_arms.csv")
+    combined.to_csv(out_csv, index=False)
+    print(f"[extra-arms] done. {out_csv}")
+
+
+# --------------------------------------------------------------------------
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("--inbox", default="remote_inbox/20260713_dotprobe")
     ap.add_argument("--outdir", default="output/dot_probe")
+    ap.add_argument("--extra-arms", action="store_true",
+                    help="v22 addendum: append EXTRA_ARMS retention to an "
+                         "existing --per-dot-csv, reusing its detections + "
+                         "isolation labels instead of re-detecting; writes "
+                         "summary_v22_arms.csv and exits (does not touch "
+                         "the main pipeline outputs).")
+    ap.add_argument("--per-dot-csv", default="output/dot_probe/per_dot.csv")
     args = ap.parse_args()
+    if args.extra_arms:
+        append_extra_arms(args.inbox, args.per_dot_csv, args.outdir)
+        return
     os.makedirs(args.outdir, exist_ok=True)
     inter = os.path.join(args.outdir, "intermediate")
     os.makedirs(inter, exist_ok=True)
