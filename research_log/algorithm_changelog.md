@@ -48,6 +48,12 @@
 
 **下一步**: (a) mean-DC + eta 重标定跟进臂(eta_mean 4-8 或小扫,配 mean 归一化的原则化步长);(b) depb9v6 regime 内纯 9-vs-4 bin 隔离(现可做,phase_bin_channels 单变量);(c) 收敛曲线(阶段2,5k checkpoint)确认两臂 30k 收敛性、并诊断臂B 病态是训练发散还是结构性(band_FRC-vs-step 曲线)。champion 候选 = depb9v6 配方 + DC 修复(eta 标定后)+ 更长训练。
 
+**训练结果(回填,收敛曲线阶段2,5k checkpoint × 6,N=96,48/48 景全格,`output/v21_eval/v21_convergence_table.csv`)**:
+1. **depb9v6 = 已收敛(平台)**: band_FRC 0.680(5k)→0.784(10k)→0.814(15k)→0.817(20k)→0.829(25k)→0.830(30k),25k→30k 增量 +0.001;range_excursion 全程 2.0-2.7(低频稳定)。配方训练稳定,30k final 可作 champion 配方基线。
+2. **meanDC = step≥15k 训练期低频发散,非结构病/非加载配准问题**: band_FRC 峰值 0.754@10k 后崩塌(0.678@15k→0.218@25k→0.206@30k);range_excursion 1.29(5k)/1.36(10k)→**251(15k)→187(20k)→9703(25k)→10261(30k)**,mean_offset 同步跑飞(−0.06→−364)。10k 快照健康、网格门 ok → ACL-062 判读坐实:eta 错配(有效 DC 步 = sum 版 1/16)下低频无锚,训练动力学缓慢漂移至发散,发散起点 15k。**含义**: (a) eta 重标定跟进臂(eta_mean 4-8)必要性坐实,且新臂应监控 range_excursion-vs-step(发散在 band_FRC 之前先出现在 range_excursion,15k 处 band_FRC 仍 0.68 而 range 已 251——低频哨兵更灵敏);(b) 该臂 TB loss 高企是真发散,不是"没训完";跨臂聚合比较 raw loss 本就不可比(dc_weight/训练池/batch/输入通道逐臂不同,且 synth loss↔真实质量反相关有案,ACL-032/053)。
+3. TGV 管线自检逐位复现(tgv_x_drz 0.7017/0.3558/23.03µm)→ 仪器可信。
+4. 产物: 远端 `output/stage2b_bench/`(final+10 checkpoint 全表)、`output/v21_eval/`(曲线 png+csv,本地已同步)、`stageDE_v21_{leaderboard,recons,corrected,offset_probe}/`;TB run `algos/ep07_unet_sr/outputs/v21_convergence/`;辅助脚本留远端 `render_v21_{real_halves,convergence}.py`。
+
 **涉及文件**: 无代码变更(实验记录;两臂用现有 harness 训练+评测)。
 
 ---
