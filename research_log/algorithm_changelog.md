@@ -57,6 +57,11 @@
 
 **下一步**: (a) isolated/structured 分层回填(在跑);(b) A1-dots 试点池(生成器审计判 config-only 可跑,`research_log/ood_generator_support_audit_draft.md`;对比度/软边缺口 30-40 行修复待 owner 拍板);(c) 点保真探针候选纳入 0d 常驻回归门;(d) v7 池吸收小暗点缺陷族(半径下探 1-3px、密度上调、若批准加 hole_depth_range);(e) champion 配方权衡新增一轴:v19 的 cross-FRC 纪录建立在最重的点抹除上,DE-prox 系配方在"不删真实缺陷"上占优。
 
+**回填(isolated/structured 分层)**: 分类器 = 邻域检出数(r14px)+带通自相关旁瓣比,光学子集校准命中 100%(42/42,一次预注册内调整:加"≥4 邻居即 structured"分支,isolated 定义未动);计数 structured 2446 / ambiguous 794 / **isolated 322**(集中 3-8px;≤3px 档 N=1——最小点几乎全活在密集纹理区)。产物 `summary_by_arm_isolation.csv`、`board_crops_isolated.png`(目检:isolated 点在 drizzle/TGV 清晰、v14 减半、v19/meanDC 近乎平掉、DE-prox 臂保留)。
+1. **isolated 组 = 纯先验抹除的干净证据**: drizzle erased **0%**、中位 0.83、preserved 92.5%——孤立点在证据里全活,无任何证据受限借口。神经臂:v19 erased **68.6%**(比其 structured 组 54.9% 更狠)、meanDC 78.6%;v14 0.48/6.8%(很少全抹但一律减半);**de_pb9 0.73/2.5%/vdrz 0.85 最佳**,depb9v6 0.62/4.7%。
+2. **修正判读3**: 各臂中位 retention 在 isolated vs structured 间差 ≤0.05——"神经在结构极小上普遍更好"**不成立**;光学足迹的反转排序是那块强周期高对比区的局部现象,不能推广到全部 structured 点。真正的组间差是 **erased% 两极化**:弱η臂在孤立点上更易"全抹"(v19 68.6 vs 54.9),DC 锚强/DE-prox 臂在孤立点上几乎不全抹(2.5-6.8%)但仍减深。修正后的机理句:点的存亡 = 先验是否支持该内容 × DC/DE 路径能否把证据顶回来;弱 DC 下孤立点没有任何保护。
+3. v7 含义更新:dots 池应同时含**孤立点**与**嵌入密集结构的小点**(≤3px 真实点几乎都嵌在纹理里,那一档 drizzle 也只 0.53——评测时两类分开计分)。
+
 **涉及文件**: `algos/ep07_unet_sr/scripts/probe_dot_retention.py`(新);产物 `output/dot_probe/`;数据快照 `remote_inbox/20260713_dotprobe/`(不入 git)。
 
 ---
