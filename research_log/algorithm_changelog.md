@@ -24,6 +24,29 @@
 
 ## 变更记录
 
+### [ACL-061] 2026-07-08（夜）— de_pb9 复活评测：owner 目视选中的臂过可信仪器 = "最均衡臂"（v14 的带内细节 + v19 的干净低频），DE 高通 prox 被证实为解耦机制；真实域打平纪录未破；细线为轻度过锐化而非幻觉
+
+**问题诊断**: owner 目视 `solver_v14_de_pb9`（ACL-042/043 当年判"负"）细线最细、分离最好。核查（探查代理）发现:该臂**从未跑过偏移校正 cross-FRC**，死因仅是旧 synth PSNR 32.47（而 synth PSNR 与真实质量反相关，ACL-032）——被指向反方向的仪器杀掉。它与标准 v14 差 8 个轴(DE 高通 prox σ4、9 phase bins/in_ch14、warmstart=aligned_mean、dc_weight0、m12、no_drizzle=False、batch12、**训练池 v5 而非 v6**、40k)。DE prox 机制(`unroll.py:180`):prox 网络的 delta 加回前先减自身高斯模糊 → 只能注入高频、锁死低频。
+
+**实验记录**(可信仪器复评,产物 `output/{depb9_eval,stageDE_*}` + TB `board/real_with_optical_depb9`;smoke 过=9-phase-bin/14通道路径渲染正常):
+- **合成基准(48 景 N=96,带限 FRC-vs-GT,de_pb9 对 bench48 完全 held-out——它训练在 v5)**:
+
+  | 臂 | band_FRC(25-40) | band_rmse | range_excursion | 真实 cross-FRC@30 |
+  |---|---|---|---|---|
+  | v14 | 0.8698 | 0.0149 | 33.58 | 0.649 |
+  | **de_pb9** | **0.8133** | 0.0203 | **2.73** | **0.667** |
+  | v19_etaB | 0.7792 | 0.0246 | 1.33 | 0.6705 |
+  | tgv_oracle | 0.7650 | 0.0274 | 2.39 | — |
+
+- **判读**:(1) de_pb9 带内 FRC 居 v14 与 v19 之间(0.813),band_rmse 略高于 v14 → 相对 v14 是"带内 FRC↓+band_rmse↑"= **轻度过锐化**,但绝对量小、远优于 v19/tgv,非幻觉(带内 FRC 高=与 GT 真结构强相关)。(2) **决定性优点:低频漂移被 DE prox 治好**——range_excursion 2.73 vs v14 的 33.58(12×)、fullband_rmse 0.21 vs 5.43(26×),接近 v19 水平。(3) de_pb9 = "v14 的带内细节(大部分)+ v19 的干净低频",**首个两者兼得的臂**——正是 owner 目视选中的性质。(4) 真实域 cross-FRC 0.667 **打平 v19 纪录(0.6705)但未破**;经典 TGV 0.702 仍领先。(5) OOD 信号:de_pb9 训练在 v5、评在 v6,却带内 FRC 超过域内 v19——跨分布泛化更强,呼应 OOD 主题。
+- **光学第六列**:board/real_with_optical_depb9(optical|drizzle|TGV|v19|v14|de_pb9),de_pb9 偏移校正残余 0.100 HR px(与 v14/v19 同级),渲染相干、锐度与 v14/v19 相当。
+
+**裁决 / 下一步**: de_pb9 证实 **DE 高通 prox 是"带内细节与低频漂移解耦"的可用机制**(与 mean-DC 归一化是殊途同归的两条路)。但它八轴齐变,赢因未拆:带内细节来自 9-phase-bin(Stage 2a 输入相位假设)? DE prox? 还是 v5 sharp 池?下一步 = v6 池单变量拆解臂(9-phase-bin 单独 / mean-DC+η / DE-prox 单独),成对锚定 v14,20k,可信仪器评测。owner 目视判断再次跑赢反相关旧指标——记忆 [[record-process-artifacts]] 的价值实证。v5 池已删,纯池归因留空(如需重生成再议)。
+
+**涉及文件**: 无代码变更(实验记录条目;评测复用现有 harness)。
+
+---
+
 ### [ACL-060] 2026-07-08（夜）— OOD 套件 A3 轴（算子误差）旋钮交付：stage2b harness 新增 DC σ 覆盖与 DC shift 抖动（默认关＝字节级旧行为）；A3 扫描档位预注册
 
 **问题诊断**: OOD 泛化套件设计稿（`research_log/ood_generalization_suite_design.md`）A3 轴 = 算子误差鲁棒性——σ 不可自标定（ACL-059）后，σ 处理转为"鲁棒带"；η 跨域反转（ACL-054）的机理验证也需要"对算子撒谎"的对照实验。A3 零生成成本（复用 bench48 现有 GT/burst，只扰动喂给重建器的算子参数），排 OOD 五轴之首。
