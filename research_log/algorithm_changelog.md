@@ -24,6 +24,34 @@
 
 ## 变更记录
 
+### [ACL-062] 2026-07-08（深夜）— v6 单变量拆解：臂A'(de_pb9→v6)证实优势来自配方非v5池、9-phase-bin 实锤；臂B(mean-DC@eta0.5)合成病态=DC被稀释16×,归一化需配 eta 重标定
+
+**问题诊断**: de_pb9 八轴齐变(ACL-061),赢因待拆。开两个 30k/save5k 单变量臂(v6 池,可信仪器,锚 v14_50k/v19/de_pb9;TGV×drz 对照复现 0.7017/0.3558/23.03,管线可信):
+- 臂B `solver_v21_meanDC_30k` = v14 + 仅 `--solver-dc-normalize mean`(单变量,smoke config-diff 证实);
+- 臂A' `solver_v21_depb9v6_30k` = de_pb9 配方(9-bin ontf/DE-prox σ4/aligned_mean/m12/dc_weight0/no_drizzle False)搬到 v6 池(纯"v14+9bin"因 phasebin_ontf 与 no_drizzle 代码互斥做不出,`config.py:243`;A' 隔离 v5 池混淆并使 de_pb9 与 v14/v19 同池可比)。
+
+**实验记录**(final,band=25-40µm FRC-vs-GT):
+
+| 臂 | band_FRC | band_rmse | range_excursion | synth frc@30 | 真实 cross-FRC@30 |
+|---|---|---|---|---|---|
+| **depb9v6(A')** | **0.830** | 0.0182 | **2.70** | 0.819 | 0.6611 |
+| meanDC(B) | 0.206(病态) | 0.239 | 10261(爆) | 0.274 | 0.6567 |
+| v14 | 0.870 | 0.0149 | 33.58 | 0.855 | 0.649 |
+| v19_etaB | 0.779 | 0.0246 | 1.33 | 0.763 | 0.6705 |
+| de_pb9 | 0.813 | 0.0203 | 2.73 | 0.798 | 0.667 |
+| tgv_oracle | 0.765 | 0.0274 | 2.39 | 0.758 | (TGV 0.702) |
+
+**判读**:
+1. **臂A' = 干净成功,de_pb9 优势来自配方而非 v5 池**:band_FRC 0.830 ≥ de_pb9 的 0.813(v5),range_excursion 2.70 ≈ de_pb9 2.73(低频干净),换 v6 完整保住甚至微升。**9-phase-bin(+DE-prox)输入端配方是带内细节+干净低频的真来源**,Stage 2a"输入聚合抹平相位"假设获正面支持。真实 cross-FRC 0.661 与 de_pb9/v19 同档(~0.66),未破 v19 纪录 0.6705,亦低于 TGV 0.702。
+2. **臂B = 失败但有信息**:mean 归一化把 DC 梯度除以 M,eta 仍 0.5(为单变量未改)→ 有效 DC 步 = sum 版的 **1/16**,DC 太弱→低频完全不受锚→合成 range_excursion 爆到 10261、band_FRC 坍到 0.206(与 v20 坏快照同型,48/48 景一致)。真实 cross-FRC 0.6567 却"正常"——因 cross-FRC 带限+去均值,**对低频垃圾免疫**,看不见该臂的病(合成↔真实指标对该臂强烈矛盾正是此故;真实指标单独看会被骗)。**结论:mean 归一化非坏主意,但必须配 eta 重标定(eta_mean ≈ 16×eta_sum)**;臂B 证明"改归一化不改 eta"是错配。DE-prox(臂A'/de_pb9)才是当前可用的低频修复;mean-DC 需 eta 跟进臂再判。
+3. **所有神经臂真实 cross-FRC 仍聚 ~0.66,未破 v19 0.6705 / TGV 0.702**:配方改善(合成 band 0.83)未转化为真实域增益——真实域天花板由配方之外的因素(算子误差/域差)设,呼应 η 跨域反转与 A3 算子误差轴。
+
+**下一步**: (a) mean-DC + eta 重标定跟进臂(eta_mean 4-8 或小扫,配 mean 归一化的原则化步长);(b) depb9v6 regime 内纯 9-vs-4 bin 隔离(现可做,phase_bin_channels 单变量);(c) 收敛曲线(阶段2,5k checkpoint)确认两臂 30k 收敛性、并诊断臂B 病态是训练发散还是结构性(band_FRC-vs-step 曲线)。champion 候选 = depb9v6 配方 + DC 修复(eta 标定后)+ 更长训练。
+
+**涉及文件**: 无代码变更(实验记录;两臂用现有 harness 训练+评测)。
+
+---
+
 ### [ACL-061] 2026-07-08（夜）— de_pb9 复活评测：owner 目视选中的臂过可信仪器 = "最均衡臂"（v14 的带内细节 + v19 的干净低频），DE 高通 prox 被证实为解耦机制；真实域打平纪录未破；细线为轻度过锐化而非幻觉
 
 **问题诊断**: owner 目视 `solver_v14_de_pb9`（ACL-042/043 当年判"负"）细线最细、分离最好。核查（探查代理）发现:该臂**从未跑过偏移校正 cross-FRC**，死因仅是旧 synth PSNR 32.47（而 synth PSNR 与真实质量反相关，ACL-032）——被指向反方向的仪器杀掉。它与标准 v14 差 8 个轴(DE 高通 prox σ4、9 phase bins/in_ch14、warmstart=aligned_mean、dc_weight0、m12、no_drizzle=False、batch12、**训练池 v5 而非 v6**、40k)。DE prox 机制(`unroll.py:180`):prox 网络的 delta 加回前先减自身高斯模糊 → 只能注入高频、锁死低频。
