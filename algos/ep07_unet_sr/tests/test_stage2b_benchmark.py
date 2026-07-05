@@ -110,3 +110,30 @@ def test_infer_full_halo_has_default_off_psf_override():
     param = sig.parameters.get("psf_override")
     assert param is not None, "psf_override parameter missing from infer_solver_from_burst_full_halo"
     assert param.default is None, "psf_override must default to None (byte-identical real-eval path)"
+
+
+def test_lowfreq_stability_columns(bench):
+    # ACL-055 (verification-B lesson): catch v14-style low-frequency amplitude drift that
+    # band-limited metrics are blind to. All three columns are relative to the scene's own GT.
+    rng = np.random.default_rng(7)
+    gt = rng.uniform(19.0, 23.0, size=(160, 160)).astype(np.float32)
+
+    ident = bench.lowfreq_stability(gt, gt, scale=2, crop_lr_px=16)
+    assert ident["fullband_rmse"] == pytest.approx(0.0, abs=1e-7)
+    assert ident["mean_offset"] == pytest.approx(0.0, abs=1e-7)
+    assert ident["range_excursion"] == pytest.approx(1.0, abs=1e-6)
+
+    shifted = bench.lowfreq_stability(gt + 0.5, gt, scale=2, crop_lr_px=16)
+    assert shifted["fullband_rmse"] == pytest.approx(0.5, abs=1e-5)
+    assert shifted["mean_offset"] == pytest.approx(0.5, abs=1e-5)
+    assert shifted["range_excursion"] == pytest.approx(1.0, abs=1e-6)
+
+    # v14 signature: amplified dynamic range around the same mean → range_excursion ≈ gain,
+    # mean_offset ≈ 0, fullband_rmse > 0 (band_rmse alone would under-report this).
+    crop = bench._ep15_scripts()[0].crop_for_frc(gt, scale=2, crop_lr_px=16)
+    mu = float(crop.mean())
+    blown = (gt - mu) * 7.0 + mu
+    drift = bench.lowfreq_stability(blown, gt, scale=2, crop_lr_px=16)
+    assert drift["range_excursion"] == pytest.approx(7.0, rel=1e-3)
+    assert abs(drift["mean_offset"]) < 0.05
+    assert drift["fullband_rmse"] > 1.0

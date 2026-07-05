@@ -89,6 +89,9 @@ class TrainingConfig:
     solver_share_weights: bool = True
     solver_eta_init: float = 0.5
     solver_learn_eta: bool = False  # False freezes eta (a learnable eta let the optimizer bypass the DC step, ACL-026)
+    # ACL-055: "sum" (legacy) = DC gradient is the M-frame SUM (effective step couples to M — m32
+    # collapse ACL-051, low-freq instability ACL-054); "mean" divides by M (eta_mean = M * eta_sum).
+    solver_dc_normalize: str = "sum"
     solver_dc_rim_lr_px: int = 8
     solver_dc_weight: float = 0.1
     solver_prior_anneal_steps: int = 0
@@ -234,6 +237,8 @@ class TrainingConfig:
                 raise ValueError("solver_warmstart must be 'phasebin' or 'aligned_mean'")
             if self.solver_prox_norm not in ("group", "none"):
                 raise ValueError("solver_prox_norm must be 'group' or 'none'")
+            if self.solver_dc_normalize not in ("sum", "mean"):
+                raise ValueError("solver_dc_normalize must be 'sum' or 'mean'")
             if self.solver_phasebin_ontf and self.solver_no_drizzle:
                 raise ValueError(
                     "--solver-phasebin-ontf requires hybrid input; do not combine with --solver-no-drizzle")
@@ -617,6 +622,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         default=TrainingConfig.solver_learn_eta,
                         help="Learn the per-step DC step size eta. Default OFF (frozen): a learnable eta "
                              "let the optimizer drive the DC step toward 0 and bypass the constraint (ACL-026).")
+    parser.add_argument("--solver-dc-normalize", choices=("sum", "mean"),
+                        default=TrainingConfig.solver_dc_normalize,
+                        help="DC gradient aggregation over the M burst frames. 'sum' (legacy default) "
+                             "couples the effective step to M (eta*M*gain); 'mean' divides by M so eta is "
+                             "M-independent. Equivalence at fixed M: eta_mean = M*eta_sum (M=16: old 0.09 "
+                             "≈ new 1.44, old 0.5 ≈ new 8.0). ACL-055.")
     parser.add_argument("--solver-dc-rim-lr-px", type=int, default=TrainingConfig.solver_dc_rim_lr_px,
                         help="LR-px rim masked out of the DC term (patch-edge zero-padding artifact; default 8).")
     parser.add_argument("--solver-dc-weight", type=float, default=TrainingConfig.solver_dc_weight,
@@ -775,6 +786,7 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         solver_share_weights=args.solver_share_weights,
         solver_eta_init=args.solver_eta_init,
         solver_learn_eta=args.solver_learn_eta,
+        solver_dc_normalize=args.solver_dc_normalize,
         solver_dc_rim_lr_px=args.solver_dc_rim_lr_px,
         solver_dc_weight=args.solver_dc_weight,
         solver_prior_anneal_steps=args.solver_prior_anneal_steps,

@@ -184,6 +184,25 @@ def psnr(image: np.ndarray, reference: np.ndarray, *, scale: int, crop_lr_px: in
     return float(20.0 * np.log10(peak) - 10.0 * np.log10(mse))
 
 
+def lowfreq_stability(image: np.ndarray, reference: np.ndarray, *, scale: int, crop_lr_px: int) -> dict[str, float]:
+    """Low-frequency amplitude-drift columns (ACL-054 verification B: band metrics are blind to it).
+
+    All three are relative to the scene's own GT — distribution-agnostic by construction:
+      fullband_rmse   RMS(recon - GT), no bandpass (catches DC/low-freq drift band_rmse ignores).
+      mean_offset     mean(recon - GT) — signed large-scale bias (v14 showed +1.1 C).
+      range_excursion (recon range)/(GT range) — v14 showed 7-10x blowup; healthy arms ~1.
+    """
+    v2, _, _ = _ep15_scripts()
+    a = v2.crop_for_frc(np.asarray(image, dtype=np.float32), scale=scale, crop_lr_px=crop_lr_px)
+    b = v2.crop_for_frc(np.asarray(reference, dtype=np.float32), scale=scale, crop_lr_px=crop_lr_px)
+    gt_range = float(b.max() - b.min())
+    return {
+        "fullband_rmse": float(np.sqrt(np.mean((a - b) ** 2))),
+        "mean_offset": float(np.mean(a - b)),
+        "range_excursion": float((a.max() - a.min()) / gt_range) if gt_range > 0 else float("inf"),
+    }
+
+
 # ---------------------------------------------------------------------------
 # Scene access
 # ---------------------------------------------------------------------------
@@ -525,6 +544,7 @@ def phase_metrics(args: argparse.Namespace) -> None:
                     "cutoff_half_bit_crossed": bool(cuthb.crossed),
                     "band_rmse": band_rmse(recon, gt, scale=2, crop_lr_px=args.crop_lr_px),
                     "psnr": psnr(recon, gt, scale=2, crop_lr_px=args.crop_lr_px),
+                    **lowfreq_stability(recon, gt, scale=2, crop_lr_px=args.crop_lr_px),
                     "gate_verdict": g["verdict"],
                     "gate_dx_px": g["dx_px"],
                     "gate_dy_px": g["dy_px"],
@@ -540,7 +560,10 @@ def phase_metrics(args: argparse.Namespace) -> None:
     args.output_dir.mkdir(parents=True, exist_ok=True)
     long_path = args.output_dir / "stage2b_long.csv"
     long_df.to_csv(long_path, index=False)
-    metric_cols = ["frc_at_30um", "frc_at_24um", "frc_band_mean_25_40", "band_rmse", "psnr", "cutoff_half_bit_um"]
+    metric_cols = [
+        "frc_at_30um", "frc_at_24um", "frc_band_mean_25_40", "band_rmse", "psnr",
+        "fullband_rmse", "mean_offset", "range_excursion", "cutoff_half_bit_um",
+    ]
     summary = (
         long_df.groupby(["arm", "n_frames_used"])[metric_cols].agg(["mean", "std", "count"]).round(5)
     )

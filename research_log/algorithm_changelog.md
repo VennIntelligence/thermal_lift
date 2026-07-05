@@ -24,6 +24,25 @@
 
 ## 变更记录
 
+### [ACL-055] 2026-07-08（上午）— DC sum→mean 归一化选项 + 基准低频稳定性三指标（算子/DC 主攻线的代码部分；结果待回填）
+
+**问题诊断**: ACL-054 统一假设——DC 梯度是 M 帧**未归一化求和**（`forward_torch.py` 的 DC 目标对 N 维求和），有效步长 = η×M×算子增益：(1) 步长与证据预算 M 耦合（m32 崩溃，ACL-051）；(2) 低频算子增益最大 → η=0.5 时低频越过迭代稳定界（v14 域内低频幅值漂移：range 膨胀 7-10×、mean offset +1.1°C，ACL-054 核实 B），而带限指标对此失明。
+
+**修改内容**:
+1. **`unroll.py`**：`UnrolledSolver` 新参 `dc_normalize`（"sum"=旧行为逐字节不变（默认，测试钉住）；"mean"=DC 梯度除以 `y_burst.shape[1]`，步长与 M 解耦）。等效换算：固定 M 下 η_mean = M×η_sum（M=16：旧 0.09 ≈ 新 1.44，旧 0.5 ≈ 新 8.0）——归一化后 η 重扫的起点。注：frame_mask 存在时分母仍取 M（常数尺度、分布无关；补齐重复帧语义与 ACL-051 一致）。
+2. **`config.py`**：字段 `solver_dc_normalize: str = "sum"` + `validate()` 校验 + CLI `--solver-dc-normalize {sum,mean}`。
+3. **`solver_train.py::build_solver`**：`getattr(config, "solver_dc_normalize", "sum")`——旧 checkpoint 的 config dict/对象缺该字段时必回落 sum（推理兼容,有测试）。
+4. **`run_stage2b_synth_benchmark.py`**：metrics 阶段新增三列 `fullband_rmse` / `mean_offset` / `range_excursion`（相对每景自身 GT，分布无关），进 summary 聚合——v14 式低频漂移从此在体检表直接可见；已有 recons 重跑 metrics 即可补列（metrics 纯读 recons/）。
+5. **测试** `tests/test_dc_normalize.py` 8 项（默认 sum 字节级等价、复制帧下 mean≡单帧 sum、mean 的 M 不变性、坏值拒绝、CLI 解析、validate 校验、旧 config dict 重建回落 sum、缺属性对象 build_solver 回落 sum）+ `test_stage2b_benchmark.py` 新增 lowfreq_stability 手工小例。**ep07 全套 106 passed + 3 skipped**。
+
+**预期效果**: 为归一化后的 η 重扫提供工具（起点 η_mean ∈ {1.44, 8.0} 附近）；基准台可直接观测"重 DC 是否还有低频失稳"。是否用 mean 模式重训对照臂＝下一步实验决策（owner/主循环），本条目只交付机制。**owner 规则遵守**：无任何数据集特异性常数；默认行为逐字节不变。
+
+**训练结果**: 待回填（无训练；归一化 η 重扫臂由后续条目记录）。
+
+**涉及文件**: `algos/ep07_unet_sr/src/unet_sr/unroll.py`、`src/unet_sr/config.py`、`src/unet_sr/solver_train.py`、`scripts/run_stage2b_synth_benchmark.py`、`tests/test_dc_normalize.py`、`tests/test_stage2b_benchmark.py`。
+
+---
+
 ### [ACL-054] 2026-07-08（凌晨）— Stage 2b 合成基准 harness 交付（H1 域差 vs H2 架构 判决实验；代码+测试，结果待回填）
 
 **问题诊断**: ACL-053 冠军臂负结果第三次呈现 synth↑/real↓ 反相关；owner 裁决单数据集调参终止。差距根因二选一：H1（合成-真实域差，先验兑现不了）vs H2（架构把信息留在桌上）。判决所需的关键对照——**TGV/MAP-TV 在我们自己合成集上的表现——此前从未测过**。设计稿：`research_log/stage2b_synth_benchmark_design.md`。

@@ -66,6 +66,11 @@ class UnrolledSolver(nn.Module):
         eta_init:      DC step size (softplus-parameterized, per step).
         learn_eta:     if True, eta is a learnable Parameter; default False freezes it (a learnable
                        eta let the optimizer bypass the DC step — ACL-026).
+        dc_normalize:  "sum" (legacy, default) leaves the DC gradient as the M-frame SUM, so the
+                       effective step is eta*M*operator-gain and couples to the evidence budget
+                       (m32 collapse ACL-051; low-frequency step instability ACL-054). "mean"
+                       divides the DC gradient by M, decoupling the step from M. Equivalence at
+                       fixed M: eta_mean = M * eta_sum (M=16: old 0.09 ≈ new 1.44, old 0.5 ≈ new 8.0).
         prox_use_se:   keep SE channel attention inside the prox UNet. Disable for E3 extent-
                        invariance tests where global average pooling is a suspected coupling path.
         prox_norm:     normalization inside the prox UNet ("group" or "none"). "none" removes
@@ -84,6 +89,7 @@ class UnrolledSolver(nn.Module):
         huber_delta: float = 0.0,
         eta_init: float = 0.5,
         learn_eta: bool = False,
+        dc_normalize: str = "sum",
         prox_use_se: bool = True,
         prox_norm: str = "group",
         prox_highpass_residual: bool = False,
@@ -97,6 +103,9 @@ class UnrolledSolver(nn.Module):
             raise ValueError("n_steps must be >= 1")
         if fusion not in ("none", "perframe"):
             raise ValueError(f"fusion must be 'none' or 'perframe', got {fusion!r}")
+        if dc_normalize not in ("sum", "mean"):
+            raise ValueError(f"dc_normalize must be 'sum' or 'mean', got {dc_normalize!r}")
+        self.dc_normalize = str(dc_normalize)
         self.n_steps = int(n_steps)
         self.scale = int(scale)
         self.share_weights = bool(share_weights)
@@ -227,6 +236,8 @@ class UnrolledSolver(nn.Module):
                 create_graph=create_graph,
                 plan=forward_plan,
             )
+            if self.dc_normalize == "mean":
+                g = g / y_burst.shape[1]  # decouple the DC step from the evidence budget M
             x = x - eta * g              # DC gradient step (range constraint) — LAST: x_K ends on DC
             if return_iters:
                 iters.append(x)

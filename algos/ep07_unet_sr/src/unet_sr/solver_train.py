@@ -144,6 +144,9 @@ def build_solver(config: TrainingConfig, device: torch.device, cond_channels: in
         huber_delta=config.solver_huber_delta,
         eta_init=config.solver_eta_init,
         learn_eta=config.solver_learn_eta,
+        # getattr: configs rebuilt from pre-ACL-055 checkpoints (or unpickled old objects) lack the
+        # field — they trained with the legacy M-frame SUM and must keep it.
+        dc_normalize=getattr(config, "solver_dc_normalize", "sum"),
         prox_use_se=config.solver_prox_use_se,
         prox_norm=config.solver_prox_norm,
         prox_highpass_residual=config.solver_prox_highpass_residual,
