@@ -24,6 +24,26 @@
 
 ## 变更记录
 
+### [ACL-056] 2026-07-08（日间）— σ 自校准估计器交付，但**核心负发现：设计稿的 E1/E2 自监督估计器对 σ 近乎简并**——一并解释 EP09 三路发散与 0a"测不了 σ"的旧账；48 景校准战役取消，预注册 Step 2/3 暂停待估计器换代
+
+**问题诊断 / 实验记录**:
+1. 按 `research_log/sigma_selfcal_prereg_design.md` 实现了 E1（留帧前向预测,bootstrap CI）+ E2（残差谱平坦度/自相关衰减）双估计器与 bench 验证驱动（预注册判定逻辑代码化:median |rel err|≤15% 且噪声三分位无系统偏置）。
+2. **简并性发现（本条目主结果）**:该算子族中高斯 blur 与亚像素 shift、块降采样（有效地）交换——对任意假设 σ′,补偿重建 x̂=B_σ′⁻¹B_σx 可**精确**复现全部帧（连续极限严格,离散网格上高斯无零点、逐频可逆）→ 留帧预测与残差白化度**原理上无法辨识 σ**,仅边界效应（mode=constant)与噪声放大留下微弱信号。
+3. **实测证据（160px 裁窗、48 帧、真 σ=0.4）**:CG 40 步时 σ̂=0.60（CI 窄=系统偏差）;CG 150-300 步、λ 减小后 E(σ) 曲线整体趋平且单调偏向大 σ（欠收敛伪信号消失后无判别力）;非负底板 PGD 变体在硬边缘结构场景上也只有噪声级区分。tiny 图单测能"找回"σ 纯系边界效应（测试注释已写明,保留作管线守护）。
+4. **旧账贯通**:该简并性从机理上解释了 EP09 三路标定发散（0.119/0.2257/1.129——不同路线=不同隐式先验,各自打破简并的方式不同）与 0a"σ̂ 卡网格边缘、仪器测不了 σ"（ACL-044/046)。σ 不是"没测准",是**这一类自监督程序原理上测不了**。
+
+**修改内容**（代码全部交付,测试 16/16 绿——11 旧 + 5 新）:
+- `algos/ep09_psf_calibration/src/psf_calibration/sigma_selfcal.py`（新）:E1/E2 估计器、CG 均值法方程重建器（λ 为经验对角尺度的相对值,全 σ 网格恒定）、`crop_lr` 中心裁窗计算旋钮、bench 验证驱动 + `evaluate_prereg` 判定、曲线/汇总 csv+json+png 落盘;模块 docstring 顶部**显著标注简并性限制**。
+- `algos/ep09_psf_calibration/scripts/sigma_selfcal.py`（新 CLI）:通用 burst 模式（burst npy + dx_px/dy_px CSV,分布无关）与 bench 模式;help 中警告"预期 Step 1 FAIL,仅作证伪检查（--scene-limit 3),勿跑 48 景校准战役"。
+- `algos/ep09_psf_calibration/tests/test_sigma_selfcal.py`（新,5 项):找回(tiny,守管线)、白化度可分性、预注册判定三分支、bench 模式产物、CLI smoke。
+- 设计稿 `sigma_selfcal_prereg_design.md` 加顶部状态块:E1/E2 被本条目证伪,Step 2/3 暂停。
+
+**预期效果 / 下一步（主循环裁决）**: 可辨识的 σ 估计需要"补偿器无法满足的约束"。推荐换代方向:**多帧投影 ESF**——用精修 shifts（残余 0.01-0.07px,ACL-048）把全部帧的边缘剖面投影到公共超分辨 1D 轴,拟合 erf⊗box 参数模型（参数化边缘先验即打破简并的约束;`psf_calibration/esf_fitting.py` 的 erf_model/fit_esf_profile 可复用;bench 与真实芯片场景都富含直边,"无可用边缘"时程序显式报告而非硬给数）。预注册验收框架（bench 先行、median≤15%、三分位无偏置）**原样保留**,只换估计器内核。
+
+**涉及文件**: `algos/ep09_psf_calibration/src/psf_calibration/sigma_selfcal.py`、`algos/ep09_psf_calibration/scripts/sigma_selfcal.py`、`algos/ep09_psf_calibration/tests/test_sigma_selfcal.py`、`research_log/sigma_selfcal_prereg_design.md`。
+
+---
+
 ### [ACL-055] 2026-07-08（上午）— DC sum→mean 归一化选项 + 基准低频稳定性三指标（算子/DC 主攻线的代码部分；结果待回填）
 
 **问题诊断**: ACL-054 统一假设——DC 梯度是 M 帧**未归一化求和**（`forward_torch.py` 的 DC 目标对 N 维求和），有效步长 = η×M×算子增益：(1) 步长与证据预算 M 耦合（m32 崩溃，ACL-051）；(2) 低频算子增益最大 → η=0.5 时低频越过迭代稳定界（v14 域内低频幅值漂移：range 膨胀 7-10×、mean offset +1.1°C，ACL-054 核实 B），而带限指标对此失明。
