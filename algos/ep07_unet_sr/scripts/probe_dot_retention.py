@@ -84,7 +84,24 @@ CONFIG = {
     "control_sigma": 2.0,
     "control_min_dist_px": 24.0,    # controls keep away from detected dots
     "board_n_dots": 24,
+    "board_n_dots_isolated": 16,
     "seed": 20260713,
+    # step 2b: isolation classifier (isolated / structured / ambiguous);
+    # both signals computed on the TGV work image
+    "iso_neighbor_radius_px": 14.0,   # neighbour = other detection within r
+    "iso_neighbor_structured_min": 2,  # >=2 neighbours -> structured signal
+    "iso_acorr_win_half": 16,          # 32 px autocorrelation window
+    "iso_acorr_exclude_r": 5.0,        # exclude central-lobe lags < 5 px
+    "iso_acorr_max_lag": 14.0,         # sidelobe search radius
+    "iso_acorr_thr_hi": 0.50,          # sidelobe/center >= hi -> structured
+    "iso_acorr_thr_lo": 0.35,          # both-signals-agree band
+    # single calibration adjustment after the optical validity check (see
+    # summary Deviations 8): initial rule scored 83.3% on the 42
+    # ground-truth structured optical dots (7 chevron dots had weak 32 px
+    # periodicity, sidelobe 0.18-0.29, but 5-12 neighbours); density alone
+    # is decisive when strong.  Leaves 'isolated' (needs <=1 neighbour)
+    # untouched.
+    "iso_neighbor_dense_min": 4,       # >= 4 neighbours -> structured
 }
 
 # arm name -> (file_a, file_b);  tgv is the reference, drizzle the anchor
@@ -395,6 +412,85 @@ def measure_all_arms(dots: pd.DataFrame, arms: dict,
 
 
 # --------------------------------------------------------------------------
+# Step 2b: isolation classification (isolated / structured / ambiguous)
+# --------------------------------------------------------------------------
+def classify_isolation(dots: pd.DataFrame, tgv_work: np.ndarray):
+    """Two signals, both on the TGV work image:
+    (A) neighbour density: number of OTHER final detections within
+        iso_neighbor_radius_px; >= iso_neighbor_structured_min leans
+        structured.
+    (B) local periodicity: 32 px window around the dot on the band-passed
+        (DoG 2.5/4.0) TGV image, Hann-tapered FFT autocorrelation;
+        sidelobe ratio = max acorr over lags 5..14 px / zero-lag.
+    Rule: structured  if B >= thr_hi, or (A and B >= thr_lo),
+                      or n_nb >= iso_neighbor_dense_min (density alone,
+                      added as the single post-validation calibration
+                      adjustment -- see CONFIG comment / Deviations 8);
+          isolated    if not A and B <  thr_lo;
+          ambiguous   otherwise (the two signals disagree)."""
+    from scipy.spatial import cKDTree
+
+    pts = dots[["y", "x"]].to_numpy(float)
+    tree = cKDTree(pts)
+    n_nb = (tree.query_ball_point(
+        pts, r=CONFIG["iso_neighbor_radius_px"], return_length=True) - 1)
+
+    bp = bandpass(tgv_work)
+    hw = CONFIG["iso_acorr_win_half"]
+    win = np.outer(np.hanning(2 * hw + 1), np.hanning(2 * hw + 1))
+    yy, xx = np.mgrid[-hw:hw + 1, -hw:hw + 1]
+    lag_r = np.hypot(yy, xx)
+    ring = ((lag_r >= CONFIG["iso_acorr_exclude_r"])
+            & (lag_r <= CONFIG["iso_acorr_max_lag"]))
+    side = np.empty(len(dots))
+    for i, r in enumerate(dots.itertuples()):
+        patch = bp[r.y - hw:r.y + hw + 1, r.x - hw:r.x + hw + 1]
+        p = (patch - patch.mean()) * win
+        ac = np.fft.fftshift(np.real(np.fft.ifft2(
+            np.abs(np.fft.fft2(p)) ** 2)))
+        c0 = ac[hw, hw]
+        side[i] = ac[ring].max() / c0 if c0 > 0 else np.nan
+
+    dense = n_nb >= CONFIG["iso_neighbor_structured_min"]
+    structured = ((side >= CONFIG["iso_acorr_thr_hi"])
+                  | (dense & (side >= CONFIG["iso_acorr_thr_lo"]))
+                  | (n_nb >= CONFIG["iso_neighbor_dense_min"]))
+    isolated = (~dense) & (side < CONFIG["iso_acorr_thr_lo"])
+    cls = np.where(structured, "structured",
+                   np.where(isolated, "isolated", "ambiguous"))
+    return n_nb, side, cls
+
+
+def summarize_isolation(dots: pd.DataFrame) -> pd.DataFrame:
+    rows = []
+    size_order = list(dots["size_bin"].cat.categories) + ["ALL"]
+    for name in [a for a in MEASURE_ARMS if a != "tgv"]:
+        for iso in ["isolated", "structured"]:
+            pop = dots[dots["isolation"] == iso]
+            for sb in size_order:
+                sub = pop if sb == "ALL" else pop[pop["size_bin"] == sb]
+                if len(sub) == 0:
+                    rows.append({"arm": name, "isolation": iso,
+                                 "size_bin": sb, "N": 0})
+                    continue
+                ret = sub[f"retention_{name}"]
+                cls = sub[f"class_{name}"]
+                vdrz = (np.nan if name == "drizzle"
+                        else float(sub[f"retention_vs_drz_{name}"].median()))
+                rows.append({
+                    "arm": name,
+                    "isolation": iso,
+                    "size_bin": sb,
+                    "N": int(len(sub)),
+                    "median_retention": float(ret.median()),
+                    "erased_pct": float((cls == "erased").mean() * 100),
+                    "preserved_pct": float((cls == "preserved").mean() * 100),
+                    "median_retention_vs_drz": vdrz,
+                })
+    return pd.DataFrame(rows)
+
+
+# --------------------------------------------------------------------------
 # Step 3: stratified summary
 # --------------------------------------------------------------------------
 def summarize(dots: pd.DataFrame) -> pd.DataFrame:
@@ -551,12 +647,14 @@ def control_measurements(dots: pd.DataFrame, arms: dict,
 # --------------------------------------------------------------------------
 # Step 6: visual products
 # --------------------------------------------------------------------------
-def pick_board_dots(dots: pd.DataFrame,
-                    rng: np.random.Generator) -> pd.DataFrame:
+def pick_board_dots(dots: pd.DataFrame, rng: np.random.Generator,
+                    n_dots: int | None = None) -> pd.DataFrame:
     """Stratified sample: 2 seeded-random dots per (size_bin x depth_bin)
     cell (typical dots, not outliers), then back-fill so that every class
     (erased/blurred/preserved, judged on the median neural retention) that
     exists in the population is represented at least twice."""
+    if n_dots is None:
+        n_dots = CONFIG["board_n_dots"]
     med_ret = dots[[f"retention_{n}" for n in NEURAL_ARMS]].median(axis=1)
     dots = dots.assign(_mret=med_ret, _mcls=med_ret.map(classify))
     chosen = []
@@ -583,13 +681,14 @@ def pick_board_dots(dots: pd.DataFrame,
                 drop = rng.choice(board[board["_mcls"] == big].index.to_numpy())
                 board = board.drop(index=drop)
                 board = pd.concat([board, dots.loc[[i]]])
-    if len(board) > CONFIG["board_n_dots"]:
+    if len(board) > n_dots:
         board = board.sort_values("_mret").iloc[
-            np.linspace(0, len(board) - 1, CONFIG["board_n_dots"]).astype(int)]
+            np.linspace(0, len(board) - 1, n_dots).astype(int)]
     return board.sort_values(["size_bin", "depth_bin"])
 
 
-def render_board(board: pd.DataFrame, arms: dict, path: str) -> None:
+def render_board(board: pd.DataFrame, arms: dict, path: str,
+                 title_extra: str = "") -> None:
     n = len(board)
     ncol = len(BOARD_COLS)
     fig, axes = plt.subplots(n, ncol, figsize=(1.75 * ncol, 1.75 * n))
@@ -624,7 +723,8 @@ def render_board(board: pd.DataFrame, arms: dict, path: str) -> None:
             ax.set_xticks([])
             ax.set_yticks([])
     fig.suptitle("dot crops (a+b)/2, local bg removed, window = "
-                 "[-1.5, +0.75] x depth_tgv; label = retention", fontsize=9)
+                 "[-1.5, +0.75] x depth_tgv; label = retention"
+                 + title_extra, fontsize=9)
     fig.tight_layout(rect=(0, 0, 1, 0.995))
     fig.savefig(path, dpi=150)
     plt.close(fig)
@@ -721,7 +821,8 @@ def df_to_md(df: pd.DataFrame, floatfmt: str = "%.3f") -> str:
     return "\n".join([header, sep, body])
 
 
-def write_summary(outdir, pre, funnel, summary, summary_depth, dots,
+def write_summary(outdir, pre, funnel, summary, summary_depth, summary_iso,
+                  iso_counts, opt_hit, dots,
                   optical_subset, ncc_means, controls, sanity_tgv_ok):
     lines = ["# Dot retention probe (P0) -- measurement summary", ""]
     lines += ["## 0. Preprocessing: alignment to TGV + gain", "",
@@ -736,10 +837,43 @@ def write_summary(outdir, pre, funnel, summary, summary_depth, dots,
     lines += ["## 1. Detection funnel (TGV work image only)", ""]
     for k, v in funnel.items():
         lines.append(f"- {k}: {v}")
-    lines += ["", "## 3. Arm x size-bin summary (size = TGV FWHM diam; "
+    lines += ["", "## 2b. Isolation classification "
+              "(isolated / structured / ambiguous)", "",
+              "Classifier (pre-registered, both signals on the TGV work "
+              "image):",
+              f"- (A) neighbour density: >= "
+              f"{CONFIG['iso_neighbor_structured_min']} other detections "
+              f"within {CONFIG['iso_neighbor_radius_px']:g} px leans "
+              "structured;",
+              "- (B) local periodicity: 32 px Hann-tapered autocorrelation "
+              "of the DoG(2.5/4.0)-band-passed TGV around the dot; sidelobe "
+              "ratio = max acorr over lags "
+              f"{CONFIG['iso_acorr_exclude_r']:g}-"
+              f"{CONFIG['iso_acorr_max_lag']:g} px / zero-lag.",
+              f"- structured if B >= {CONFIG['iso_acorr_thr_hi']}, or "
+              f"(A and B >= {CONFIG['iso_acorr_thr_lo']}), or "
+              f">= {CONFIG['iso_neighbor_dense_min']} neighbours (density "
+              "alone when strong); isolated if "
+              f"(not A) and B < {CONFIG['iso_acorr_thr_lo']}; ambiguous "
+              "otherwise (signals disagree).", "",
+              f"- class counts: {iso_counts}",
+              f"- validity check: optical-footprint detections (chevron "
+              f"pattern minima, ground truth structured) classified "
+              f"structured: {opt_hit:.1%}",
+              "- calibration record (single allowed adjustment): the "
+              "initial rule (without the density-alone branch) scored "
+              "83.3% (35/42); the 7 misses were chevron dots with weak "
+              "32 px periodicity (sidelobe 0.18-0.29) but 5-12 neighbours. "
+              "Lowering the sidelobe threshold instead would have shrunk "
+              "the isolated class from 322 to 33 for only 95% hit, so the "
+              "density-alone branch (>= 4 neighbours -> structured, "
+              "isolated class untouched) was adopted; re-scored 100%.", ""]
+    lines += ["## 3. Arm x size-bin summary (size = TGV FWHM diam; "
               "1 px = 10 um)", "", df_to_md(summary), ""]
     lines += ["## 3b. Arm x depth-tertile summary", "",
               df_to_md(summary_depth), ""]
+    lines += ["## 3c. Arm x isolation x size-bin summary", "",
+              df_to_md(summary_iso), ""]
     lines += ["## 4. Optical-footprint subset", ""]
     if len(optical_subset) == 0:
         lines.append("No detected dot falls inside the optical footprint "
@@ -816,7 +950,13 @@ def write_summary(outdir, pre, funnel, summary, summary_depth, dots,
         "retention picks, so crops show typical dots.",
         "7. Detection is pattern-agnostic (pre-registered): LoG dark maxima "
         "include dark minima of periodic line structure, not only isolated "
-        "dots. See the optical-subset note above.",
+        "dots. See the optical-subset note above; section 2b adds the "
+        "isolation split requested after acceptance review.",
+        "8. Isolation classifier thresholds (neighbour radius 14 px / >=2, "
+        "sidelobe 0.35/0.50, exclusion 5 px, search <=14 px) were fixed "
+        "before evaluating the optical-footprint validity check; the "
+        "outcome of that check and any single calibration adjustment is "
+        "reported in section 2b.",
         "",
         "## Config (pre-registered)", "", "```json",
         json.dumps(CONFIG, indent=2), "```", ""]
@@ -861,6 +1001,23 @@ def main():
     print(f"[2] per-dot per-arm measurement on {len(dots)} dots ...")
     dots = measure_all_arms(dots, arms, optical)
     sanity_tgv_ok = bool(np.allclose(dots["retention_tgv_self"], 1.0))
+
+    print("[2b] isolation classification ...")
+    n_nb, side, iso_cls = classify_isolation(dots, arms["tgv"]["work"])
+    rad = CONFIG["iso_neighbor_radius_px"]
+    dots[f"n_neighbors_r{rad:g}px"] = n_nb
+    dots["acorr_sidelobe"] = side
+    dots["isolation"] = iso_cls
+    iso_counts = dots["isolation"].value_counts().to_dict()
+    opt = dots[dots["in_optical"]]
+    opt_hit = (float((opt["isolation"] == "structured").mean())
+               if len(opt) else np.nan)
+    print(f"  counts: {iso_counts}")
+    print(f"  optical-footprint structured hit-rate: {opt_hit:.3f} "
+          f"(n={len(opt)}; expected ~structured, chevron pattern)")
+    print("  optical sidelobe percentiles:",
+          np.round(np.percentile(opt['acorr_sidelobe'], [10, 50, 90]), 3)
+          if len(opt) else "n/a")
     dots.to_csv(os.path.join(args.outdir, "per_dot.csv"), index=False)
 
     print("[3] stratified summaries ...")
@@ -871,6 +1028,11 @@ def main():
     summary_depth.to_csv(os.path.join(args.outdir, "summary_by_arm_depth.csv"),
                          index=False)
     print(summary.to_string(index=False))
+    summary_iso = summarize_isolation(dots)
+    summary_iso.to_csv(os.path.join(args.outdir,
+                                    "summary_by_arm_isolation.csv"),
+                       index=False)
+    print(summary_iso.to_string(index=False))
 
     print("[4] optical subset ...")
     optical_subset = dots[dots["in_optical"]].copy()
@@ -895,9 +1057,19 @@ def main():
     board = pick_board_dots(dots, rng)
     board.to_csv(os.path.join(inter, "board_selection.csv"), index=False)
     render_board(board, arms, os.path.join(args.outdir, "board_crops.png"))
+    iso_dots = dots[dots["isolation"] == "isolated"]
+    if len(iso_dots):
+        board_iso = pick_board_dots(iso_dots, rng,
+                                    CONFIG["board_n_dots_isolated"])
+        board_iso.to_csv(os.path.join(inter, "board_selection_isolated.csv"),
+                         index=False)
+        render_board(board_iso, arms,
+                     os.path.join(args.outdir, "board_crops_isolated.png"),
+                     title_extra=" | isolated-only")
     render_scatter(dots, os.path.join(args.outdir, "retention_vs_size.png"))
 
-    write_summary(args.outdir, pre, funnel, summary, summary_depth, dots,
+    write_summary(args.outdir, pre, funnel, summary, summary_depth,
+                  summary_iso, iso_counts, opt_hit, dots,
                   optical_subset, ncc_means, controls, sanity_tgv_ok)
     print(f"done. products in {args.outdir}")
 

@@ -24,9 +24,16 @@ def _disk(rad: float) -> np.ndarray:
     return (yy * yy + xx * xx) <= r * r
 
 
-def irregular_blob(shape, cy, cx, radius_px, rng, irregularity=0.45, n_harm=5) -> np.ndarray:
-    """Boolean mask of a smooth irregular closed shape (radial-harmonic boundary).
-    Used for drilled holes, broken corners and edge fragments (subtractive)."""
+def irregular_blob(shape, cy, cx, radius_px, rng, irregularity=0.45, n_harm=5,
+                   edge_softness_px=0.0) -> np.ndarray:
+    """Mask of a smooth irregular closed shape (radial-harmonic boundary).
+    Used for drilled holes, broken corners and edge fragments (subtractive).
+
+    Default (`edge_softness_px=0`): hard boolean mask `rr <= boundary` (legacy, bit-exact).
+    `edge_softness_px > 0`: float32 mask with a linear radial transition of total width
+    `edge_softness_px` centred on the nominal boundary (value 1 inside, 0.5 ON the
+    boundary, 0 outside) — the 0.5-level set stays at the hard-edge boundary, so
+    softness does not shrink the blob. RNG draws are identical in both modes."""
     rows, cols = shape
     ks = rng.integers(2, 7, size=n_harm).astype(np.float64)
     amps = rng.uniform(0.0, irregularity, size=n_harm) / ks
@@ -40,6 +47,9 @@ def irregular_blob(shape, cy, cx, radius_px, rng, irregularity=0.45, n_harm=5) -
     for a, k, p in zip(amps, ks, phs):
         boundary = boundary + radius_px * a * np.sin(k * theta + p)
     np.clip(boundary, 0.3 * radius_px, None, out=boundary)
+    if edge_softness_px and float(edge_softness_px) > 0.0:
+        soft = (boundary - rr) / float(edge_softness_px) + 0.5
+        return np.clip(soft, 0.0, 1.0).astype(np.float32)
     return rr <= boundary
 
 
@@ -68,10 +78,23 @@ def jagged_crack(shape, start, length_px, width_px, rng, jaggedness=0.45, branch
 def apply_defects(coverage, rng, *, severity_range=(0.3, 1.0),
                   hole_radius_px=(4, 13), notch_radius_px=(3, 10),
                   crack_len_px=(60, 260), crack_width_px=(2, 4),
-                  max_holes=6, max_notches=6, max_cracks=4):
+                  max_holes=6, max_notches=6, max_cracks=4,
+                  hole_depth_range=(1.0, 1.0), hole_edge_softness_px=0.0,
+                  min_holes=0):
     """Subtract irregular holes (interior), broken edges (boundary) and jagged cracks from a
     coverage mask. All defects are > pitch (recoverable). Per-scene `severity` randomizes counts.
-    Returns (defected_coverage, meta)."""
+    Returns (defected_coverage, meta).
+
+    Hole-only knobs (ACL-063, A1-dots; notches/cracks untouched):
+      - hole_depth_range: per-hole depth d ~ U(range); coverage drops by d*mask instead of the
+        legacy full-depth zeroing. Default (1.0, 1.0) => no depth draw, legacy behaviour.
+      - hole_edge_softness_px: > 0 => soft (float) hole edges, linear transition of this total
+        width centred on the blob boundary (see irregular_blob). Default 0.0 => hard boolean.
+      - min_holes: lower bound on the hole count draw, rng.integers(min_holes, ceil+1);
+        clamped to ceil (= round(max_holes*severity)) when larger, clamp recorded in meta.
+    All three are orthogonal to `severity` (which only scales count ceilings). With all three
+    at defaults the output AND the RNG stream are bit-identical to the legacy implementation
+    (no extra rng draws on the default path) — pinned by the golden-sample test."""
     cov = np.asarray(coverage, dtype=np.float32)
     struct = cov > 0.5
     interior = ndimage.binary_erosion(struct, _disk(8))
@@ -79,16 +102,33 @@ def apply_defects(coverage, rng, *, severity_range=(0.3, 1.0),
     iy, ix = np.where(interior)
     by, bx = np.where(boundary)
     sy, sx = np.where(struct)
-    defect = np.zeros(cov.shape, dtype=bool)
+    defect = np.zeros(cov.shape, dtype=bool)                 # notches + cracks (hard, legacy)
+    hole_removal = np.zeros(cov.shape, dtype=np.float32)     # holes: depth-weighted, maybe soft
     counts = {"holes": 0, "notches": 0, "cracks": 0}
     sev = float(rng.uniform(*severity_range))
 
-    for _ in range(int(rng.integers(0, round(max_holes * sev) + 1))):
+    depth_lo, depth_hi = float(hole_depth_range[0]), float(hole_depth_range[1])
+    depth_active = not (depth_lo == 1.0 and depth_hi == 1.0)
+    softness = float(hole_edge_softness_px)
+    holes_custom = depth_active or softness > 0.0 or int(min_holes) != 0
+    hole_ceil = int(round(max_holes * sev))
+    hole_floor = max(0, min(int(min_holes), hole_ceil))
+    hole_depths: list[float] = []
+    hole_radii: list[float] = []
+    for _ in range(int(rng.integers(hole_floor, hole_ceil + 1))):
         if len(iy) == 0:
             break
         j = rng.integers(len(iy))
-        defect |= irregular_blob(cov.shape, iy[j], ix[j], rng.uniform(*hole_radius_px), rng)
+        radius = float(rng.uniform(*hole_radius_px))
+        # Depth draw ONLY when non-default, so the default RNG stream is unchanged.
+        depth = float(rng.uniform(depth_lo, depth_hi)) if depth_active else 1.0
+        blob = irregular_blob(cov.shape, iy[j], ix[j], radius, rng,
+                              edge_softness_px=softness)
+        np.maximum(hole_removal, depth * blob.astype(np.float32), out=hole_removal)
         counts["holes"] += 1
+        hole_radii.append(round(radius, 4))
+        if depth_active:
+            hole_depths.append(round(depth, 4))
     for _ in range(int(rng.integers(0, round(max_notches * sev) + 1))):
         if len(by) == 0:
             break
@@ -103,8 +143,18 @@ def apply_defects(coverage, rng, *, severity_range=(0.3, 1.0),
                                rng.uniform(*crack_width_px), rng)
         counts["cracks"] += 1
 
-    defected = (cov * (1.0 - defect.astype(np.float32))).astype(np.float32)
+    removal = np.maximum(hole_removal, defect.astype(np.float32))
+    defected = (cov * (1.0 - removal)).astype(np.float32)
     counts["severity"] = round(sev, 4)
+    # New meta keys only when a non-default hole knob is active: keeps the default-path
+    # meta dict (and hence the golden sample) exactly identical to the legacy one.
+    if holes_custom:
+        counts["hole_radii"] = hole_radii
+        counts["hole_edge_softness_px"] = softness
+        counts["min_holes"] = int(min_holes)
+        counts["min_holes_effective"] = hole_floor
+        if depth_active:
+            counts["hole_depths"] = hole_depths
     return defected, counts
 
 
