@@ -16,10 +16,14 @@ Two modes:
      emits the preregistered verdict (median |rel err| <= tol, no systematic
      noise-tertile bias).
 
-WARNING (ACL-056): E1/E2 were found near-degenerate in sigma at realistic image
-sizes (see module docstring). Expect Step 1 to FAIL its prereg acceptance; run
-it only as a cheap falsification check (--scene-limit 3), not as a 48-scene
-calibration campaign.
+WARNING (ACL-056): the default e1e2 kernel was found near-degenerate in sigma
+at realistic image sizes (see module docstring). Expect its Step 1 to FAIL the
+prereg acceptance; run it only as a cheap falsification check (--scene-limit 3).
+
+RECOMMENDED (ACL-057): --kernel esf — multi-frame projected ESF. Identifiable
+via a parametric straight-edge scene prior; models the render/detector aperture
+explicitly (--aperture, default auto). Refuses to output sigma when no usable
+straight edge exists (exit 4 in generic mode).
 """
 
 from __future__ import annotations
@@ -49,6 +53,13 @@ def bootstrap() -> Path:
 
 PROJECT_ROOT = bootstrap()
 
+from psf_calibration.esf_selfcal import (  # noqa: E402
+    APERTURES,
+    EsfSelfCalConfig,
+    resolve_aperture,
+    run_esf_bench_validation,
+    run_esf_selfcal,
+)
 from psf_calibration.sigma_selfcal import (  # noqa: E402
     DEFAULT_SIGMA_GRID,
     PREREG_MEDIAN_REL_ERR_TOL,
@@ -106,11 +117,83 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument("--scene-limit", type=int, default=None, help="bench mode: only first K scenes (smoke)")
     parser.add_argument("--no-scene-plots", action="store_true")
     parser.add_argument("--median-tol", type=float, default=PREREG_MEDIAN_REL_ERR_TOL)
+    parser.add_argument(
+        "--kernel",
+        choices=["e1e2", "esf"],
+        default="e1e2",
+        help="estimator kernel. e1e2 = ACL-056 self-supervised pair (KNOWN near-degenerate in sigma; "
+        "falsification instrument only). esf = ACL-057 multi-frame projected ESF (identifiable via the "
+        "straight-edge scene prior; RECOMMENDED)",
+    )
+    parser.add_argument(
+        "--aperture",
+        choices=["auto", *APERTURES],
+        default="auto",
+        help="esf kernel: aperture model. auto = pool scenes use their recorded forward_mode preset; "
+        "generic bursts use detector_box (real detector). pool_block_average adds the known render-chain "
+        "extra blur (raster box + bilinear tent, sigma_extra=0.25 LR px at scale=2)",
+    )
+    parser.add_argument("--esf-half-width", type=float, default=5.0, help="esf: profile half-width around the edge (LR px)")
+    parser.add_argument("--esf-max-edges", type=int, default=8)
+    parser.add_argument("--esf-min-r2", type=float, default=0.90)
+    parser.add_argument("--esf-grad-quantile", type=float, default=0.985)
+    parser.add_argument("--esf-bootstrap", type=int, default=500)
     return parser.parse_args()
+
+
+def _main_esf(args: argparse.Namespace) -> int:
+    cfg = EsfSelfCalConfig(
+        scale=args.scale,
+        aperture="auto",  # resolved per scene (bench) or below (generic)
+        half_width_lr=args.esf_half_width,
+        max_edges=args.esf_max_edges,
+        min_r2=args.esf_min_r2,
+        grad_quantile=args.esf_grad_quantile,
+        bootstrap_rounds=args.esf_bootstrap,
+        seed=args.seed,
+    )
+    if args.bench_pool_dir is not None:
+        result = run_esf_bench_validation(
+            args.bench_pool_dir,
+            cfg,
+            args.output_dir,
+            aperture=args.aperture,
+            workers=args.workers,
+            scene_limit=args.scene_limit,
+            scene_plots=not args.no_scene_plots,
+            median_tol=args.median_tol,
+        )
+        verdict = result["verdict"]
+        print(json.dumps(verdict, indent=2))
+        print(
+            f"[sigma_selfcal/esf] bench verdict: {'PASS' if verdict['prereg_pass'] else 'FAIL'} "
+            f"(median |rel err| = {verdict['median_abs_rel_err']:.4f}, tol {verdict['median_tol']}, "
+            f"no-edge scenes {verdict['n_no_edge_scenes']}/{verdict['n_scenes_total']})"
+        )
+        return 0 if verdict["prereg_pass"] else 3
+    if args.burst_npy is None or args.shifts_csv is None:
+        raise SystemExit("either --bench-pool-dir or both --burst-npy and --shifts-csv are required")
+    import numpy as np  # noqa: PLC0415
+
+    cfg.aperture = resolve_aperture(args.aperture, None)  # generic burst: auto -> detector_box
+    burst = np.load(args.burst_npy)
+    shifts = _load_shifts(args.shifts_csv)
+    summary = run_esf_selfcal(burst, shifts, cfg, out_dir=args.output_dir, label=args.label)
+    printable = {
+        k: summary[k]
+        for k in ("label", "status", "sigma_hat", "ci_lo", "ci_hi", "n_edges_valid", "rel_spread", "warnings", "aperture")
+    }
+    print(json.dumps(printable, indent=2))
+    if summary["status"] == "no_usable_edges":
+        print("[sigma_selfcal/esf] REFUSED: no usable straight edges found — sigma_hat withheld (no silent fallback)")
+        return 4
+    return 0
 
 
 def main() -> int:
     args = parse_args()
+    if args.kernel == "esf":
+        return _main_esf(args)
     cfg = SelfCalConfig(
         sigma_grid=tuple(args.sigma_grid),
         rounds=args.rounds,
