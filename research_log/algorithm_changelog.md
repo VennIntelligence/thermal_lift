@@ -24,6 +24,37 @@
 
 ## 变更记录
 
+### [ACL-064] 2026-07-08（凌晨自治）— v22 三跟进臂裁决：eta 重标定证实治好 meanDC 灾难性发散(ACL-062 假设成立,range 10^4→~10)但仅平 v14；9-vs-4 bin 隔离**推翻 ACL-062"9-bin 实锤"**(4 bin 双域≥9 bin)；**depb9v6_bin4 = 神经真实域新高 0.668(平 v19 纪录)+低频干净+通道更省 → 双轴 champion 候选**
+
+**问题诊断**: 承 ACL-062 下一步 (a)(b)。三个 30k/save5k 单变量跟进臂(v6 池,可信仪器,TGV×drz 复现 0.7017/0.3558/23.03):
+- eta8 `solver_v22_meandc_eta8_30k` = v21_meanDC + `--solver-eta-init 8.0`(mean 归一化下 eta_mean=M×eta_sum,M16→8.0≈v14 的 eta_sum 0.5;confdiff 92 字段仅差 eta);
+- eta4 `..._eta4_30k` = 同上 eta 4.0(预注册区间下端);
+- bin4 `solver_v22_depb9v6_bin4_30k` = depb9v6 配方仅 9 phase bins→4(派生 in_ch 14→9,confdiff 91 字段仅差此轴)。
+
+**实验记录**(final;合成 N=96 48/48 全格;真实=偏移校正 cross-FRC,六半幅 offset 残余 0.057-0.095 HR px、sign-changes 0→0、网格门 ok):
+
+| 臂 | 合成 band_FRC | range_excursion(final) | 真实 cross-FRC@30 |
+|---|---|---|---|
+| **depb9v6_bin4** | 0.855 | 4.35(全程干净) | **0.668** |
+| meandc_eta8 | 0.858 | 10.1(稳定~10,mean_offset −0.31) | 0.644 |
+| meandc_eta4 | 0.871 | 21.3(15k 后漂移,25k 峰 31) | 0.647 |
+| depb9v6(9bin) | 0.830 | 2.70 | 0.661 |
+| v19_etaB | 0.779 | 1.33 | 0.6705 |
+| v14 | 0.870 | 33.6 | 0.649 |
+| v21_meanDC(发散) | 0.206 | 10261 | 0.657 |
+
+**判读**:
+1. **eta 重标定证实 ACL-062 假设**: mean 归一化 + eta 按 ~M 重标 **治好了 v21_meanDC 灾难性低频发散**(range 10261 → eta8 稳定 ~10、eta4 峰 31,均非 10^4 量级)。收敛轨迹:eta8 全程 range 10-16 平稳;eta4 前 15k 干净(<4)后段漂移(10.9→31→21,fullband_rmse/mean_offset 同步涨)——**eta 越大低频锚越强越稳**(eta8>eta4)。"改归一化必须配 eta 重标"闭环坐实,原则化 DC 可行。**但两臂真实 cross-FRC 仅 0.644/0.647 ≈ 平 v14(0.649),未入 ~0.66 DE-prox 簇;低频也远不及 DE-prox(range 2.7-4.4)**。结论:mean-DC+eta 是合法非病态路径,但**非制胜路径**;DE 高通 prox 仍是低频解耦更优机制。
+2. **9-vs-4 bin 隔离 → 推翻 ACL-062"9-phase-bin 实锤"**: 4 bin 合成 0.855>9 bin 的 0.830、真实 0.668>0.661、低频 4.35 仍干净——**4 bin 双域双双 ≥ 9 bin**。故 depb9v6 赢因**不是** 9 这个细粒度(9→4 无损微升),而是"相位分箱输入(粗粒度即可)+DE-prox"。Stage 2a"输入端别抹平子像素相位"方向仍成立,但箱数可降到 4(通道 14→9 更省);ACL-062 该处归因修正。
+3. **depb9v6_bin4 = 双轴 champion 候选**: 真实 0.668=神经新高,**平 v19 纪录 0.6705(差 0.002 噪声内)**,低频干净(4.35)、DE-prox 家族、输入通道更少。在 ACL-063 双轴标准(真实 FRC + 点保留门)下**支配 v19**(同 FRC、远好的点保真——v19 抹 68.6% 孤立点;bin4 点保留待补测)。仍低于 TGV 0.702。
+4. TGV×drz 复现 0.7017/0.3558/23.03,offset 探针六半幅全 success,结果可信。
+
+**下一步**: (a) **v22 三臂点保真探针**(recons 已在 remote `output/stageDE_v22_corrected/`,复用 probe_dot_retention.py,补齐 bin4/eta8/eta4 retention→完成 champion 双轴画像;派 Sonnet 拉数据+跑,进行中);(b) champion 提案 depb9v6_bin4 为主候选,待点保真确认;(c) A3 phase-D 经典跑完回填 ACL-060;(d) champion 若定 bin4,可再探 2/3-bin 下探极限 + v7 长训。
+
+**涉及文件**: 无代码变更(实验记录;三臂用现有 harness)。
+
+---
+
 ### [ACL-063] 2026-07-08（夜间自治）— 真实域小黑点保真探针（P0）：owner 目视坐实并量化——全部神经臂衰减小暗缺陷,v19(真实纪录臂)抹除 58% 检出点;DE-prox 臂保留最好;cross-FRC 对该失真近盲;神经臂全局增益一致 +15-18%
 
 **问题诊断**: owner 聚合 TB 后目视发现:真实芯片上 TGV 锐利还原的小黑点(局部低温缺陷),神经臂大量模糊甚至抹除。溯源训练分布:v6 池缺陷生成(`tcforge/src/tcforge/realism.py:68` `apply_defects`)最小 hole 半径 4 HR px(=40µm)、每景 ≤6 个、docstring 明写"All defects are > pitch (recoverable)"——**直径 2-4 px 的小暗点在训练分布里不存在,且该尺度的孤立暗斑只以噪声身份出现过**;学好的去噪先验对它们的"正确"动作就是抹除。本条把目视变成可复现测量(探针脚本),并为 A1 内容轴/v7 池提供真实域证据。
