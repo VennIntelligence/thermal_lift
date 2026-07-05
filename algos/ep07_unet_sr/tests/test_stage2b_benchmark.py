@@ -112,6 +112,71 @@ def test_infer_full_halo_has_default_off_psf_override():
     assert param.default is None, "psf_override must default to None (byte-identical real-eval path)"
 
 
+def test_perturbation_suffix(bench):
+    # ACL-060 (A3 operator-error axis): arm-name suffix encodes active DC perturbations;
+    # '' when both knobs are off (default byte-identical naming).
+    assert bench.perturbation_suffix(None, 0.0) == ""
+    assert bench.perturbation_suffix(0.25, 0.0) == "__dcsig0p25"
+    assert bench.perturbation_suffix(None, 0.1) == "__jit0p1"
+    assert bench.perturbation_suffix(0.4, 0.05) == "__dcsig0p4__jit0p05"
+
+
+def test_jitter_shifts_deterministic_and_prefix_paired(bench):
+    shifts = np.linspace(-0.4, 0.4, 96 * 2, dtype=np.float32).reshape(96, 2)
+    a = bench.jitter_shifts(shifts, 0.1, 20260708, "scene_0007")
+    b = bench.jitter_shifts(shifts, 0.1, 20260708, "scene_0007")
+    # same (seed, scene) -> identical perturbation; this is exactly how the neural and
+    # classical phases (separate processes) stay comparable
+    np.testing.assert_array_equal(a, b)
+    assert not np.array_equal(a, bench.jitter_shifts(shifts, 0.1, 20260708, "scene_0008"))
+    assert not np.array_equal(a, bench.jitter_shifts(shifts, 0.1, 1, "scene_0007"))
+    # jitter is zero-mean gaussian at the requested std
+    noise = a - shifts
+    assert abs(float(noise.std()) - 0.1) < 0.02
+    assert abs(float(noise.mean())) < 0.02
+    # frame i's jitter must not depend on the requested N: both phases jitter the FULL
+    # array before prefix selection, so the prefix property holds by construction
+    np.testing.assert_array_equal(a[:24], bench.jitter_shifts(shifts, 0.1, 20260708, "scene_0007")[:24])
+    # default-off contract: std<=0 is an untouched passthrough (byte-identical path)
+    assert bench.jitter_shifts(shifts, 0.0, 20260708, "scene_0007") is shifts
+
+
+def test_resolve_dc_sigma(bench):
+    assert bench.resolve_dc_sigma("tgv", "portable", 0.33, None) == 0.5
+    assert bench.resolve_dc_sigma("maptv", "portable", 0.33, None) == 0.2
+    assert bench.resolve_dc_sigma("tgv", "oracle", 0.33, None) == pytest.approx(0.33)
+    # override wins over both conditions and both methods
+    for method, cond in (("tgv", "portable"), ("tgv", "oracle"), ("maptv", "oracle")):
+        assert bench.resolve_dc_sigma(method, cond, 0.33, 0.25) == 0.25
+
+
+def test_resolve_neural_psf_params(bench):
+    md = {
+        "psf_sigma_lr_px": 0.31,
+        "psf_shape": "elliptical_gaussian",
+        "psf_sigma_y_lr_px": 0.5,
+        "psf_angle_deg": 12.0,
+    }
+    base = bench.resolve_neural_psf_params(md, None)
+    assert base["sigma_lr_px"] == pytest.approx(0.31)
+    assert base["shape"] == "elliptical_gaussian"
+    assert base["sigma_y_lr_px"] == pytest.approx(0.5)
+    assert base["angle_deg"] == pytest.approx(12.0)
+    # override -> fixed isotropic gaussian (the "wrong operator" semantics of A3)
+    over = bench.resolve_neural_psf_params(md, 0.4)
+    assert over == {"sigma_lr_px": 0.4, "shape": "gaussian", "sigma_y_lr_px": None, "angle_deg": 0.0}
+    # metadata defaults reproduce the pre-ACL-060 ScenePSF construction exactly
+    minimal = bench.resolve_neural_psf_params({"psf_sigma_lr_px": 0.2}, None)
+    assert minimal == {"sigma_lr_px": pytest.approx(0.2), "shape": "gaussian", "sigma_y_lr_px": None, "angle_deg": 0.0}
+
+
+def test_dc_knob_cli_defaults_off(bench):
+    args = bench.parse_args(["--phase", "metrics", "--pool-dir", "x", "--output-dir", "y"])
+    assert args.dc_sigma_override is None
+    assert args.dc_shift_jitter_std_px == 0.0
+    assert bench.perturbation_suffix(args.dc_sigma_override, args.dc_shift_jitter_std_px) == ""
+
+
 def test_lowfreq_stability_columns(bench):
     # ACL-055 (verification-B lesson): catch v14-style low-frequency amplitude drift that
     # band-limited metrics are blind to. All three columns are relative to the scene's own GT.

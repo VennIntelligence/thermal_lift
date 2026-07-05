@@ -23,6 +23,7 @@ import importlib
 import json
 import sys
 import time
+import zlib
 from pathlib import Path
 from typing import Any
 
@@ -77,6 +78,61 @@ TGV_KWARGS = dict(
 )
 MAPTV_KWARGS = dict(lambda_tv=0.001, max_iter=150, step_size=0.1, use_fista=True)
 PORTABLE_PSF = {"tgv": 0.5, "maptv": 0.2}
+
+
+def _fmt_float_token(v: float) -> str:
+    """0.25 -> '0p25', 0.05 -> '0p05' (arm-name-safe float token)."""
+    return format(float(v), "g").replace(".", "p").replace("-", "m")
+
+
+def perturbation_suffix(dc_sigma_override: float | None, dc_shift_jitter_std_px: float) -> str:
+    """Arm-name suffix encoding active DC perturbations (A3 operator-error axis, ACL-060).
+
+    '' when both knobs are off — perturbed reconstructions land in their own recons/<arm> dirs
+    and are grouped by metrics as independent arms, never mixed with unperturbed rows.
+    """
+    parts = []
+    if dc_sigma_override is not None:
+        parts.append(f"dcsig{_fmt_float_token(dc_sigma_override)}")
+    if dc_shift_jitter_std_px and dc_shift_jitter_std_px > 0:
+        parts.append(f"jit{_fmt_float_token(dc_shift_jitter_std_px)}")
+    return ("__" + "__".join(parts)) if parts else ""
+
+
+def jitter_shifts(shifts: np.ndarray, std_px: float, seed: int, scene_id: str) -> np.ndarray:
+    """Deterministic zero-mean Gaussian jitter on the shifts fed to the DC/reconstructor.
+
+    Render/GT stay untouched — this lies to the operator only. Seeded by
+    (seed, crc32(scene_id)) so the neural and classical phases — run in different processes —
+    apply the IDENTICAL perturbation to the same scene/frame (fair cross-arm comparison), and
+    it is applied to the FULL shift array before prefix selection so frame i's jitter does not
+    depend on the requested N (paired ladder by construction). std_px <= 0 returns the input
+    unchanged (default-off contract).
+    """
+    if not std_px or std_px <= 0:
+        return shifts
+    rng = np.random.default_rng([int(seed), zlib.crc32(str(scene_id).encode("utf-8"))])
+    noise = rng.normal(scale=float(std_px), size=np.asarray(shifts).shape)
+    return (np.asarray(shifts, dtype=np.float32) + noise).astype(np.float32)
+
+
+def resolve_dc_sigma(method: str, condition: str, scene_sigma: float, override: float | None) -> float:
+    """PSF sigma fed to a classical reconstructor; --dc-sigma-override wins over both conditions."""
+    if override is not None:
+        return float(override)
+    return PORTABLE_PSF[method] if condition == "portable" else float(scene_sigma)
+
+
+def resolve_neural_psf_params(md: dict[str, Any], override: float | None) -> dict[str, Any]:
+    """ScenePSF constructor values for the neural DC (override -> fixed isotropic Gaussian)."""
+    if override is not None:
+        return {"sigma_lr_px": float(override), "shape": "gaussian", "sigma_y_lr_px": None, "angle_deg": 0.0}
+    return {
+        "sigma_lr_px": float(md["psf_sigma_lr_px"]),
+        "shape": str(md.get("psf_shape", "gaussian")),
+        "sigma_y_lr_px": None if md.get("psf_sigma_y_lr_px") is None else float(md["psf_sigma_y_lr_px"]),
+        "angle_deg": float(md.get("psf_angle_deg", 0.0)),
+    }
 
 
 def select_prefix_frames(burst: np.ndarray, shifts: np.ndarray, n: int) -> tuple[np.ndarray, np.ndarray]:
@@ -277,7 +333,10 @@ def _classical_task(task: dict[str, Any]) -> dict[str, Any]:
         if p not in sys.path:
             sys.path.insert(0, p)
     scene = load_bench_scene(Path(task["scene_dir"]))
-    frames, shifts = select_prefix_frames(scene["burst"], scene["shifts"], task["n"])
+    dc_shifts = jitter_shifts(
+        scene["shifts"], task.get("jitter_std_px", 0.0), task.get("jitter_seed", 0), scene["scene_id"]
+    )
+    frames, shifts = select_prefix_frames(scene["burst"], dc_shifts, task["n"])
     t0 = time.time()
     if task["method"] == "tgv":
         from ep10_tgv_sr.tgv import reconstruct_map_tgv  # noqa: PLC0415
@@ -295,7 +354,7 @@ def _classical_task(task: dict[str, Any]) -> dict[str, Any]:
     out.parent.mkdir(parents=True, exist_ok=True)
     np.save(out, np.asarray(image, dtype=np.float32))
     elapsed = round(time.time() - t0, 2)
-    return {
+    row = {
         "scene_id": scene["scene_id"],
         "arm": task["arm"],
         "n": task["n"],
@@ -303,6 +362,12 @@ def _classical_task(task: dict[str, Any]) -> dict[str, Any]:
         "elapsed_sec": elapsed,
         "slow": elapsed > SLOW_TASK_SEC,
     }
+    if task.get("dc_sigma_override") is not None:
+        row["dc_sigma_override"] = task["dc_sigma_override"]
+    if task.get("jitter_std_px", 0.0) > 0:
+        row["dc_shift_jitter_std_px"] = task["jitter_std_px"]
+        row["dc_shift_jitter_seed"] = task["jitter_seed"]
+    return row
 
 
 def phase_recon_classical(args: argparse.Namespace) -> None:
@@ -318,7 +383,8 @@ def phase_recon_classical(args: argparse.Namespace) -> None:
 
     scene_dirs = _selected_scenes(args)
     ladder = _ladder(args)
-    jobs = [(m, c, f"{m}__{c}") for m in args.methods.split(",") for c in args.conditions.split(",")]
+    suffix = perturbation_suffix(args.dc_sigma_override, args.dc_shift_jitter_std_px)
+    jobs = [(m, c, f"{m}__{c}{suffix}") for m in args.methods.split(",") for c in args.conditions.split(",")]
     for method, cond, _arm in jobs:
         if method not in ("tgv", "maptv") or cond not in ("portable", "oracle"):
             raise ValueError(f"unknown method/condition: {method}/{cond}")
@@ -337,7 +403,7 @@ def phase_recon_classical(args: argparse.Namespace) -> None:
                 out = recon_path(args.output_dir, arm, scene_dir.name, n)
                 if args.skip_existing and out.exists():
                     continue
-                sigma = PORTABLE_PSF[method] if cond == "portable" else float(metadata["psf_sigma_lr_px"])
+                sigma = resolve_dc_sigma(method, cond, float(metadata["psf_sigma_lr_px"]), args.dc_sigma_override)
                 tasks.append(
                     {
                         "scene_dir": str(scene_dir),
@@ -346,6 +412,9 @@ def phase_recon_classical(args: argparse.Namespace) -> None:
                         "arm": arm,
                         "n": n,
                         "sigma": sigma,
+                        "dc_sigma_override": args.dc_sigma_override,
+                        "jitter_std_px": args.dc_shift_jitter_std_px,
+                        "jitter_seed": args.dc_shift_jitter_seed,
                         "inner_workers": args.inner_workers,
                         "blas_threads": args.blas_threads,
                         "out_path": str(out),
@@ -393,6 +462,7 @@ def phase_recon_neural(args: argparse.Namespace) -> None:
     device = torch.device(args.device if torch.cuda.is_available() or args.device == "cpu" else "cpu")
     scene_dirs = _selected_scenes(args)
     ladder = _ladder(args)
+    suffix = perturbation_suffix(args.dc_sigma_override, args.dc_shift_jitter_std_px)
     manifest: list[dict[str, Any]] = []
     for spec in args.arm:
         name, _, ckpt_path = spec.partition("=")
@@ -408,22 +478,25 @@ def phase_recon_neural(args: argparse.Namespace) -> None:
         solver.load_state_dict(ckpt["model_state_dict"])
         solver.eval()
         print(f"[stage2b] arm={name} ckpt_step={ckpt.get('step')} dropped_cfg_keys={dropped}", flush=True)
+        arm_out = f"{name}{suffix}"
         for scene_dir in scene_dirs:
             scene = load_bench_scene(scene_dir)
             md = scene["metadata"]
+            pp = resolve_neural_psf_params(md, args.dc_sigma_override)
             psf = ScenePSF(
-                sigma_lr_px=torch.tensor([float(md["psf_sigma_lr_px"])], dtype=torch.float32, device=device),
-                shape=[str(md.get("psf_shape", "gaussian"))],
-                sigma_y_lr_px=[
-                    None if md.get("psf_sigma_y_lr_px") is None else float(md["psf_sigma_y_lr_px"])
-                ],
-                angle_deg=torch.tensor([float(md.get("psf_angle_deg", 0.0))], dtype=torch.float32, device=device),
+                sigma_lr_px=torch.tensor([pp["sigma_lr_px"]], dtype=torch.float32, device=device),
+                shape=[pp["shape"]],
+                sigma_y_lr_px=[pp["sigma_y_lr_px"]],
+                angle_deg=torch.tensor([pp["angle_deg"]], dtype=torch.float32, device=device),
+            )
+            dc_shifts = jitter_shifts(
+                scene["shifts"], args.dc_shift_jitter_std_px, args.dc_shift_jitter_seed, scene["scene_id"]
             )
             for n in ladder:
-                out = recon_path(args.output_dir, name, scene["scene_id"], n)
+                out = recon_path(args.output_dir, arm_out, scene["scene_id"], n)
                 if args.skip_existing and out.exists():
                     continue
-                frames, shifts = select_prefix_frames(scene["burst"], scene["shifts"], n)
+                frames, shifts = select_prefix_frames(scene["burst"], dc_shifts, n)
                 t0 = time.time()
                 pred = infer_solver_from_burst_full_halo(
                     solver,
@@ -437,15 +510,21 @@ def phase_recon_neural(args: argparse.Namespace) -> None:
                 )
                 out.parent.mkdir(parents=True, exist_ok=True)
                 np.save(out, np.asarray(pred, dtype=np.float32))
-                manifest.append(
-                    {
-                        "scene_id": scene["scene_id"],
-                        "arm": name,
-                        "n": n,
-                        "elapsed_sec": round(time.time() - t0, 2),
-                    }
-                )
-        print(f"[stage2b] arm={name} done", flush=True)
+                mrow = {
+                    "scene_id": scene["scene_id"],
+                    "arm": arm_out,
+                    "n": n,
+                    "elapsed_sec": round(time.time() - t0, 2),
+                }
+                if args.dc_sigma_override is not None:
+                    mrow["base_arm"] = name
+                    mrow["dc_sigma_override"] = args.dc_sigma_override
+                if args.dc_shift_jitter_std_px > 0:
+                    mrow["base_arm"] = name
+                    mrow["dc_shift_jitter_std_px"] = args.dc_shift_jitter_std_px
+                    mrow["dc_shift_jitter_seed"] = args.dc_shift_jitter_seed
+                manifest.append(mrow)
+        print(f"[stage2b] arm={arm_out} done", flush=True)
     _append_manifest(args.output_dir, "recon_neural_manifest.jsonl", manifest)
 
 
@@ -643,6 +722,22 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--gate-scenes", type=int, default=3)
     parser.add_argument("--crop-lr-px", type=int, default=16)
     parser.add_argument("--skip-existing", action="store_true")
+    parser.add_argument(
+        "--dc-sigma-override",
+        type=float,
+        default=None,
+        help="A3 operator-error axis (ACL-060): feed this fixed isotropic-Gaussian sigma to the "
+        "DC/reconstructor (render/GT untouched); arm names gain __dcsig<X>",
+    )
+    parser.add_argument(
+        "--dc-shift-jitter-std-px",
+        type=float,
+        default=0.0,
+        help="A3: zero-mean Gaussian jitter (LR px) on the shifts fed to the DC/reconstructor; "
+        "deterministic per (seed, scene, frame), identical across neural/classical phases; "
+        "arm names gain __jit<X>",
+    )
+    parser.add_argument("--dc-shift-jitter-seed", type=int, default=20260708)
     return parser.parse_args(argv)
 
 

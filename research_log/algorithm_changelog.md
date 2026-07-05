@@ -24,6 +24,25 @@
 
 ## 变更记录
 
+### [ACL-060] 2026-07-08（夜）— OOD 套件 A3 轴（算子误差）旋钮交付：stage2b harness 新增 DC σ 覆盖与 DC shift 抖动（默认关＝字节级旧行为）；A3 扫描档位预注册
+
+**问题诊断**: OOD 泛化套件设计稿（`research_log/ood_generalization_suite_design.md`）A3 轴 = 算子误差鲁棒性——σ 不可自标定（ACL-059）后，σ 处理转为"鲁棒带"；η 跨域反转（ACL-054）的机理验证也需要"对算子撒谎"的对照实验。A3 零生成成本（复用 bench48 现有 GT/burst，只扰动喂给重建器的算子参数），排 OOD 五轴之首。
+
+**修改内容**（`algos/ep07_unet_sr/scripts/run_stage2b_synth_benchmark.py`）:
+1. **`--dc-sigma-override <float>`**：把喂给 DC/重建器的 PSF σ 替换为固定各向同性高斯（渲染/GT 不动，只骗算子）。神经路径＝替换 psf_override 内容（新纯函数 `resolve_neural_psf_params`，默认分支逐字段复现旧 ScenePSF 构造）；经典路径＝替换 oracle/portable 传给 TGV/MAP-TV 的 psf_sigma（新纯函数 `resolve_dc_sigma`，覆盖优先于两条件）。
+2. **`--dc-shift-jitter-std-px <float>` + `--dc-shift-jitter-seed`（默认 20260708）**：给喂给重建器的每帧 shift 加零均值高斯抖动（LR px）。确定性种子 =（seed, crc32(scene_id)）→ 神经与经典两阶段（不同进程）对同景同帧施加**完全相同**的扰动；抖动施加于**全帧数组、先于前缀选择**，故帧 i 的扰动与所选 N 无关（成对阶梯不破坏）。std≤0 原样直通（默认关合同）。
+3. **臂命名与分组**：扰动参数烧进臂名（`v14__dcsig0p25`、`tgv__oracle__jit0p1`、可复合 `__dcsig0p4__jit0p05`），重建落独立 recons/ 目录，gate/metrics 自动当独立臂分组，与未扰动行永不混淆；manifest 行记录 dc_sigma_override / jitter std+seed / base_arm。
+4. **测试**（`tests/test_stage2b_benchmark.py` 新增 5 项，ep07 全套 **111 passed + 3 skipped**）：后缀命名、抖动确定性/跨阶段一致性/前缀配对性/默认直通、σ 解析两路径、psf 参数默认分支逐字段复现旧构造、CLI 默认全关。
+
+**预期效果（A3 预注册档位，跑前立此为据）**: 池 = bench48 现有 GT/burst，N=96 单档先跑；评测臂 = 冻结 v14、v19_etaB + TGV oracle/portable 对照；**σ 覆盖档 σ_DC ∈ {0.10, 0.25, 0.40}**（对照 = 每景真 σ 的现有 oracle 行）；**shift 抖动档 ∈ {0.05, 0.10, 0.20} px**（对照 = 现有未扰动行；种子固定 20260708）。判读：各臂指标 vs 扰动强度的退化曲线；预期若 η 反转解读正确，v19（η0.09）对算子误差的退化应显著缓于 v14（η0.5）——这是 ACL-054 机理的直接检验。评测指标与 gate 流程照旧（帧级扰动为亚像素量级，网格门衡量的常数全局偏移不应显著移动；若某扰动臂 gate abort，如实报，不改门限）。
+
+**训练结果**: 待回填（A3 扫描远端跑后）。
+
+**涉及文件**: `algos/ep07_unet_sr/scripts/run_stage2b_synth_benchmark.py`、`algos/ep07_unet_sr/tests/test_stage2b_benchmark.py`。
+
+---
+
+
 ### [ACL-059] 2026-07-08（傍晚）— σ 线收口：Step 2 真实数据 = 估计器合法拒绝（0/8 边过质量门）；结论 = 系统 σ 在本靶上不可自标定；σ 处理策略从"点校准"转向"鲁棒带"
 
 **实验记录**（产物 `remote_inbox/20260712_sigma/`）:
