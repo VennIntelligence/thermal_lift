@@ -38,7 +38,10 @@
 
 **预期效果**: Step 1 = bench48 全景验证（判定线不变：median |rel err|≤15% + 噪声三分位无偏置；椭圆/airy 景标注退化拟合不剔除，gaussian-only 中位数并报）；通过则程序冻结、原样上真实 248 帧（`--aperture auto`→detector_box）。
 
-**训练结果**: 待回填（Step 1 远端跑后）。
+**训练结果**（2026-07-08 午后回填，产物 `remote_inbox/20260711_stage2b/sigma_esf_bench/`）:
+- **Step 1 = FAIL（合法负结果，预注册线未过）**: median |rel err| = 0.3139（全体）/ **0.2688（gaussian-only）** vs 线 0.15；27/48 景可评（21 景无合格直边）；**系统性偏正 +0.28~0.32（噪声三分位中位数全正）**。与交付时抽查（干净斜边 −6.7%~−0.4%）显著矛盾 → 高估是 bench 场景内容相关的，root-cause 诊断进行中（头号嫌疑 H_rot：v6 池 360° 旋转的 ndimage 插值 + SSAA 使 GT 边缘本身非理想阶跃，插值展宽被 σ̂ 吸收；备选：边缘曲率/孔径 preset/噪声偏置）。诊断结论回填至下一条目。
+- **算子一致性核查（发现 B 的"待查项"关闭）**: 渲染（scipy round 路径）与 DC（torch ceil 路径，`forward_torch.py`）的离散高斯核在 σ∈[0.10,1.00] 全程数值恒等（≤1e-16）——有效 σ 缺口两侧同步存在，**训练内部 render-vs-DC 无错配**；real_eval 占位 σ=0.5 处缺口 <0.01%。缺口只是"标称 vs 物理"的元数据语义问题（bench 对比层已改用有效 σ）。脚注：`dataset.py:598-601` 的 None 强转使 DC 快速 round 路径成为死代码（无数值后果）。分析脚本 `tmp/analysis_sigma_kernel_check.py`（保留）。
+- **σ 简并证伪归档偏差**: 按 ACL-056 建议命令 `--scene-limit 3` 跑崩（预注册判定需 ≥6 景，ValueError 而非优雅 FAIL）；3 景 E(σ) 平坦曲线 csv/png 已归档（`sigma_selfcal_falsify/scenes/`），≥6 景补跑待排。CLI 的 min-scenes 校验应前置（小修待办）。
 
 **涉及文件**: `algos/ep09_psf_calibration/src/psf_calibration/esf_selfcal.py`（新）、`scripts/sigma_selfcal.py`（--kernel/--aperture/--esf-*）、`tests/test_esf_selfcal.py`（新）、`research_log/sigma_selfcal_prereg_design.md`（状态块更新）。
 
@@ -109,6 +112,11 @@
 - **核实 B（v14 负 PSNR 溯源）**：真实低频幅值漂移（输出 std 9.0 vs GT 0.94、均值 +1.1°C、range 膨胀 7-10×），带内不受影响（band RMSE 0.0149 全场最优）；三臂输出约定逐字段相同，非量纲/harness bug。PSNR 用每景 GT 动态范围（此景仅 3.5°C）故暴负。
 - **统一假设（串起 4 条旧线索）**：DC 为未归一化 M 帧求和（`forward_torch.py:715`），有效步长=η×M×算子增益；低频增益最大 → η=0.5 时低频越过迭代稳定界（v14 漂移），高频被 PSF 衰减仍稳定且受强约束（v14 带内最优）；η=0.09 全带回稳但 DC 变弱（域内 0.78）。η 敏感性、m32 崩溃、v14 低频漂移、真实域 η 反转——同一病根：**DC 步长从未原则化**。
 - **裁决后行动（owner 批准）**：(1) 主攻"算子/DC 线"——σ 自校准 + 测试时 shift 精化 + DC sum→mean 归一化与 η 重扫（合成台带 GT 即时反馈低频稳定性）；(2) v7 池第二优先级；(3) 架构轮停。**owner 两条新规**：过程产物（分析脚本/图/中间输出）一律保留、发现随时入档；**所有校准必须做成分布无关的通用方法**（自校准流程，换分布可复用），禁止对本数据的特异性常数调校。
+- **终版附录回填（2026-07-08 午，产物 `remote_inbox/20260711_stage2b/`，160 文件）**：
+  - **η 域内曲线（7 臂 20k 同参族，@30µm N=96）**：0.773（η0.0625）/0.772（0.09）/0.786（0.125）/0.813（0.1875）/**0.830（0.25，网格内峰）**/0.700（1.0）/0.475（2.0）；v14（η0.5，50k）0.855。**η*_synth ≥0.25 vs 真实域 η*=0.09——跨域反转坐实为整条曲线**，"低 η 的真实域收益=补偿算子误差"从推断升级为测量。
+  - **低频稳定性三列（N=96：fullband_rmse/mean_offset/range_excursion）**：v19_etaB 最稳（0.136/−0.044/1.33×）；v14 带内王者但低频漂移显著（5.43/−0.149/33.6×）；v20_champion 低频爆炸（15202/−2160/104642×）——坏快照尸检闭环，也证明三新列作为体检项有效。
+  - **batch 吞吐探测（GPU 独占）**：4/6/8/12/16 → 25.7/27.6/**28.4/28.4**/26.0 samples/s，VRAM 10.1/17.9/19.0/26.4/31.9G——吞吐平台在 batch 8-12，**新系列定 batch 8（19G）**，owner "~20G 最快"直觉与 ACL-053 探测双复现。
+  - **过程教训**：55-way 并发下内存带宽饱和使单任务慢化 5-30×（独占 T=172s → 均值 2082-4896s），吞吐估算必须按带宽模型而非独占外推；夜间跑腿代理轮询链断裂致 GPU 空转 ~8.5h（01:30-10:47）——babysitter 需要自愈式双通道唤醒（教训入下次 runbook 模板）。SLOW_TASKS 539/540 属饱和预期；失败景 0；MISSING 0。
 
 **涉及文件**: `configs/synthetic/pool_2x_v6_bench48.json`、`algos/ep07_unet_sr/scripts/run_stage2b_synth_benchmark.py`、`algos/ep07_unet_sr/tests/test_stage2b_benchmark.py`、`algos/ep07_unet_sr/src/unet_sr/real_eval.py`、`research_log/stage2b_synth_benchmark_design.md`。
 
