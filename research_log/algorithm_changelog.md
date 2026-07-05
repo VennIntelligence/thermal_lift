@@ -24,6 +24,29 @@
 
 ## 变更记录
 
+### [ACL-058] 2026-07-08（傍晚）— Step 1 高估 root-cause = bench 真值又缺一项（isothermal 场景 edge_sigma 软化，属 x 不属 A）；真值改二次和后对原始数据离线重判 **PASS**（median 4.1%）；Step 2 解读警示预注册落盘；<6 景优雅跳过修复
+
+**问题诊断**:
+1. Step 1 FAIL（+28~31% 系统性高估）与交付抽查（干净斜边 −6.7%~−0.4%）矛盾。本地诊断（`tmp/analysis_esf_fail_diagnosis.py`，四假设逐一检验）：旋转角/边曲率/孔径选型/噪声相关性全不显著；真因 = `generate_training_pool.py` 的 isothermal 分支经 `render_isothermal_field`（`tcforge/realism.py`）对场景电平场**无条件施加 edge_sigma=0.6 HR px 高斯软化**（config 键 `temperature_isothermal.edge_sigma`，生成器默认 1.4）——它属于场景 x 而非算子 A，但 ESF 测的是总过渡宽度。"淬取项" sqrt(σ̂²−σ_true²) 中位 0.279 LR px、gaussian-only CV 3.8%（常数状），与 0.6 HR 的离散有效换算 0.2965 LR 吻合；把它按二次和代回真值，诊断内重算 median 0.3139→0.047。
+2. **叙事线**：估计器两次精确暴露的都是真值标签缺口——先是"标称 vs 有效 σ"（ACL-057 发现 B），再是场景 edge_sigma。E3 测的始终是帧里物理存在的模糊，错的都是标签；这正是"程序通用、标签要核"的教科书案例。
+3. 二级残差（不进真值，文档化）：旋转内容 SSAA/box 足迹的角度相关几何反走样宽度 ~0.16-0.30 LR px（order-0/1 皆然，非字面"插值"机制）；修正后剩余 ~4% 已含此项，在 15% 线内。
+
+**修改内容**:
+1. **bench 真值 = sqrt(σ_psf_eff² + σ_scene_edge²)**（`scene_edge_sigma_lr`/`combined_true_sigma_lr`，edge 项同样过离散有效换算；来源优先级 `--edge-sigma-hr` > `--pool-config` > 池目录内 config json，找不到 → 0 并显式 log，绝不猜值）；bench 行新增三列 `sigma_true_psf_only`/`sigma_scene_edge`/`sigma_true_total`（判定基准）。
+2. **`--reverdict-from`**：对既有 bench_rows.csv 离线重判（兼容旧 schema，旧 `sigma_true` 视为 psf-only），不重跑估计。
+3. **`safe_evaluate_prereg`**：<6 有效景优雅 SKIPPED（CLI exit 5，逐景产物照常落盘），修复 σ 简并证伪归档的 ValueError 崩溃路径；e1e2/esf 两内核 bench 驱动共用。
+4. 设计稿新增 **§2.5 Step 2 解读警示**（预注册）：σ̂_real 是系统 σ 的**上界**（真实热场边缘未必理想阶跃）；DC 算子的 σ 不含场景软度（属 x 不属 A）；内检 = 多边缘一致性 + EP09 路线对照；**禁止**收缩系数式数据集特异调校（owner 标准规则）。
+5. 测试 ep09 **26 passed**（新增 3：真值合成语义、离线重判（旧 schema + 零 edge 对照）、不足景跳过路径）。
+
+**训练结果**（对远端 Step 1 原始 bench_rows.csv 离线重判，产物 `output/sigma_esf_bench_reverdict/`）:
+- **Step 1 修正后 = PASS**：median |rel err| 0.3139→**0.0409**（27 可评景）／ gaussian-only 0.2688→**0.0305**；systematic_bias=false（三分位中位 −0.041/−0.016/−0.041，中段 CI 过零）；scene_edge_sigma_lr=0.2965（source=pool_config）。21/48 无边景不变（可评性限制如实保留）。
+- **程序按预注册冻结，Step 2（真实 248 帧）解锁**：材料已备（`output/real248_burst.npy` 在远端 + shifts/manifest 已拉回），执行与解读必须过设计稿 §2.5。
+
+**涉及文件**: `algos/ep09_psf_calibration/src/psf_calibration/esf_selfcal.py`、`src/psf_calibration/sigma_selfcal.py`（safe_evaluate_prereg）、`scripts/sigma_selfcal.py`（--reverdict-from/--pool-config/--edge-sigma-hr、exit 5）、`tests/test_esf_selfcal.py`、`research_log/sigma_selfcal_prereg_design.md`（状态块 + §2.5）。
+
+---
+
+
 ### [ACL-057] 2026-07-08（午后）— σ 自校准换代内核 E3（多帧投影 ESF）交付：参数化场景先验打破 E1/E2 简并；附带两项校准层发现（双线性核不可当常数 tent；**池渲染"标称 σ vs 有效 σ"缺口**）
 
 **问题诊断**: ACL-056 证伪 E1/E2 后的换代路线——自监督目标测不了 σ，因为补偿场景总能复现观测；E3 引入**参数化场景先验**（场景含直边阶跃，热靶通用结构，非数据集特异）：直边法向的观测过渡宽度 = 阶跃 ⊗ Gauss(σ) ⊗ 已知孔径，补偿者无法再自由，σ 可辨识。

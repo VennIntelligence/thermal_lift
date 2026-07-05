@@ -44,6 +44,7 @@ DEFAULT_SIGMA_GRID: tuple[float, ...] = tuple(
     float(f"{v:.4f}") for v in np.geomspace(0.05, 1.3, 12)
 )
 PREREG_MEDIAN_REL_ERR_TOL = 0.15  # prereg acceptance line (design doc §2 Step 1)
+PREREG_MIN_SCENES = 6  # tertile-bias test needs at least this many finite scenes
 
 
 # ---------------------------------------------------------------------------
@@ -526,8 +527,11 @@ def evaluate_prereg(
     noise = np.array([r["noise_sigma_c"] for r in rows], dtype=np.float64)
     ok = np.isfinite(rel) & np.isfinite(noise)
     rel, noise = rel[ok], noise[ok]
-    if len(rel) < 6:
-        raise ValueError("need at least 6 scenes with finite rel_err and noise for the prereg verdict")
+    if len(rel) < PREREG_MIN_SCENES:
+        raise ValueError(
+            f"need at least {PREREG_MIN_SCENES} scenes with finite rel_err and noise for the prereg verdict "
+            "(use safe_evaluate_prereg for a graceful skip)"
+        )
 
     median_abs = float(np.median(np.abs(rel)))
     q1, q2 = np.quantile(noise, [1 / 3, 2 / 3])
@@ -562,6 +566,43 @@ def evaluate_prereg(
         "noise_tertiles": tertiles,
         "systematic_bias": systematic_bias,
         "prereg_pass": bool(median_abs <= median_tol and not systematic_bias),
+    }
+
+
+def safe_evaluate_prereg(
+    rows: list[dict[str, Any]],
+    *,
+    median_tol: float = PREREG_MEDIAN_REL_ERR_TOL,
+) -> dict[str, Any]:
+    """evaluate_prereg with a graceful insufficient-scenes path (ACL-058).
+
+    Fewer than PREREG_MIN_SCENES finite scenes cannot support the tertile-bias
+    test, so instead of raising (which crashed the --scene-limit 3 falsification
+    archival run) we return a verdict dict with prereg_pass=None and
+    verdict_skipped=True; per-scene artifacts are unaffected. Callers/CLI map
+    this to a distinct exit code (neither PASS nor FAIL).
+    """
+
+    finite = [
+        r
+        for r in rows
+        if np.isfinite(float(r.get("rel_err_signed", float("nan"))))
+        and np.isfinite(float(r.get("noise_sigma_c", float("nan"))))
+    ]
+    if len(finite) >= PREREG_MIN_SCENES:
+        return evaluate_prereg(rows, median_tol=median_tol)
+    abs_errs = [abs(float(r["rel_err_signed"])) for r in finite]
+    return {
+        "n_scenes": int(len(finite)),
+        "median_abs_rel_err": float(np.median(abs_errs)) if abs_errs else float("nan"),
+        "median_abs_rel_err_gaussian_only": float("nan"),
+        "median_tol": float(median_tol),
+        "median_ok": None,
+        "noise_tertiles": [],
+        "systematic_bias": None,
+        "prereg_pass": None,
+        "verdict_skipped": True,
+        "skip_reason": f"insufficient scenes ({len(finite)} finite < {PREREG_MIN_SCENES} required); prereg verdict skipped",
     }
 
 
@@ -618,7 +659,7 @@ def run_bench_validation(
     else:
         rows = [_bench_scene_task(t) for t in tasks]
 
-    verdict = evaluate_prereg(rows, median_tol=median_tol)
+    verdict = safe_evaluate_prereg(rows, median_tol=median_tol)
     _write_rows_csv(out_dir / "bench_rows.csv", rows)
     (out_dir / "bench_verdict.json").write_text(json.dumps(verdict, indent=2), encoding="utf-8")
     _plot_bench(out_dir / "bench_summary.png", rows, verdict)
@@ -663,7 +704,7 @@ def _plot_bench(path: Path, rows: list[dict[str, Any]], verdict: dict[str, Any])
     ax2.hist([r["rel_err_signed"] for r in rows if np.isfinite(r["rel_err_signed"])], bins=24)
     ax2.axvline(0, color="k", lw=1)
     ax2.set_xlabel("signed relative error")
-    status = "PASS" if verdict["prereg_pass"] else "FAIL"
+    status = "SKIPPED" if verdict.get("verdict_skipped") else ("PASS" if verdict["prereg_pass"] else "FAIL")
     fig.suptitle(
         f"sigma self-cal bench validation — {status} "
         f"(median |rel err| = {verdict['median_abs_rel_err']:.3f}, tol {verdict['median_tol']:.2f})"

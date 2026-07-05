@@ -56,7 +56,10 @@ PROJECT_ROOT = bootstrap()
 from psf_calibration.esf_selfcal import (  # noqa: E402
     APERTURES,
     EsfSelfCalConfig,
+    edge_sigma_hr_to_effective_lr,
     resolve_aperture,
+    resolve_scene_edge_sigma,
+    reverdict_bench_rows,
     run_esf_bench_validation,
     run_esf_selfcal,
 )
@@ -133,6 +136,28 @@ def parse_args() -> argparse.Namespace:
         "generic bursts use detector_box (real detector). pool_block_average adds the known render-chain "
         "extra blur (raster box + bilinear tent, sigma_extra=0.25 LR px at scale=2)",
     )
+    parser.add_argument(
+        "--reverdict-from",
+        type=Path,
+        default=None,
+        help="esf bench: offline re-verdict of an existing bench_rows.csv under the ACL-058 corrected truth "
+        "(quadrature with the pool's scene edge_sigma); no re-estimation. Needs --pool-config or "
+        "--edge-sigma-hr (or --bench-pool-dir with a config json inside) for the edge term.",
+    )
+    parser.add_argument(
+        "--pool-config",
+        type=Path,
+        default=None,
+        help="esf bench: pool-generation config json (reads temperature_isothermal.edge_sigma; the pool dir "
+        "itself does not store a config copy). Missing/non-isothermal -> scene edge term 0 (logged).",
+    )
+    parser.add_argument(
+        "--edge-sigma-hr",
+        type=float,
+        default=None,
+        help="esf bench: explicit scene edge_sigma in HR px (overrides --pool-config); converted to the "
+        "effective LR value with the same discrete-kernel shave as the PSF term.",
+    )
     parser.add_argument("--esf-half-width", type=float, default=5.0, help="esf: profile half-width around the edge (LR px)")
     parser.add_argument("--esf-max-edges", type=int, default=8)
     parser.add_argument("--esf-min-r2", type=float, default=0.90)
@@ -141,7 +166,45 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
+def _verdict_exit(verdict: dict, kernel: str) -> int:
+    """Print the bench verdict line and map it to an exit code (0 PASS / 3 FAIL / 5 skipped)."""
+
+    print(json.dumps(verdict, indent=2))
+    if verdict.get("verdict_skipped"):
+        print(f"[sigma_selfcal/{kernel}] bench verdict: SKIPPED — {verdict['skip_reason']} (per-scene artifacts kept)")
+        return 5
+    extra = ""
+    if "n_no_edge_scenes" in verdict:
+        extra = f", no-edge scenes {verdict['n_no_edge_scenes']}/{verdict['n_scenes_total']}"
+    print(
+        f"[sigma_selfcal/{kernel}] bench verdict: {'PASS' if verdict['prereg_pass'] else 'FAIL'} "
+        f"(median |rel err| = {verdict['median_abs_rel_err']:.4f}, tol {verdict['median_tol']}{extra})"
+    )
+    return 0 if verdict["prereg_pass"] else 3
+
+
 def _main_esf(args: argparse.Namespace) -> int:
+    if args.reverdict_from is not None:
+        if args.edge_sigma_hr is not None:
+            edge_lr = edge_sigma_hr_to_effective_lr(args.edge_sigma_hr, args.scale)
+            source = "cli_override"
+        elif args.pool_config is not None or args.bench_pool_dir is not None:
+            edge_lr, source = resolve_scene_edge_sigma(
+                args.bench_pool_dir or Path("."), args.scale,
+                pool_config_path=args.pool_config, edge_sigma_hr=None,
+            )
+        else:
+            raise SystemExit("--reverdict-from needs --edge-sigma-hr or --pool-config (or --bench-pool-dir with a config json inside)")
+        print(f"[sigma_selfcal/esf] reverdict scene edge term: sigma_lr={edge_lr:.4f} effective (source={source})")
+        result = reverdict_bench_rows(
+            args.reverdict_from,
+            args.output_dir,
+            scene_edge_sigma_lr_eff=edge_lr,
+            edge_source=source,
+            median_tol=args.median_tol,
+        )
+        return _verdict_exit(result["verdict"], "esf")
+
     cfg = EsfSelfCalConfig(
         scale=args.scale,
         aperture="auto",  # resolved per scene (bench) or below (generic)
@@ -162,15 +225,10 @@ def _main_esf(args: argparse.Namespace) -> int:
             scene_limit=args.scene_limit,
             scene_plots=not args.no_scene_plots,
             median_tol=args.median_tol,
+            pool_config_path=args.pool_config,
+            edge_sigma_hr=args.edge_sigma_hr,
         )
-        verdict = result["verdict"]
-        print(json.dumps(verdict, indent=2))
-        print(
-            f"[sigma_selfcal/esf] bench verdict: {'PASS' if verdict['prereg_pass'] else 'FAIL'} "
-            f"(median |rel err| = {verdict['median_abs_rel_err']:.4f}, tol {verdict['median_tol']}, "
-            f"no-edge scenes {verdict['n_no_edge_scenes']}/{verdict['n_scenes_total']})"
-        )
-        return 0 if verdict["prereg_pass"] else 3
+        return _verdict_exit(result["verdict"], "esf")
     if args.burst_npy is None or args.shifts_csv is None:
         raise SystemExit("either --bench-pool-dir or both --burst-npy and --shifts-csv are required")
     import numpy as np  # noqa: PLC0415
@@ -215,11 +273,7 @@ def main() -> int:
             scene_plots=not args.no_scene_plots,
             median_tol=args.median_tol,
         )
-        verdict = result["verdict"]
-        print(json.dumps(verdict, indent=2))
-        print(f"[sigma_selfcal] bench verdict: {'PASS' if verdict['prereg_pass'] else 'FAIL'} "
-              f"(median |rel err| = {verdict['median_abs_rel_err']:.4f}, tol {verdict['median_tol']})")
-        return 0 if verdict["prereg_pass"] else 3
+        return _verdict_exit(result["verdict"], "e1e2")
     if args.burst_npy is None or args.shifts_csv is None:
         raise SystemExit("either --bench-pool-dir or both --burst-npy and --shifts-csv are required")
     import numpy as np  # noqa: PLC0415

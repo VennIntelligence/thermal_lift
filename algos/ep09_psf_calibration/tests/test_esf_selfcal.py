@@ -20,12 +20,17 @@ for path in [
 from psf_calibration.esf_selfcal import (  # noqa: E402
     EsfSelfCalConfig,
     aperture_projection,
+    combined_true_sigma_lr,
     discrete_gaussian_effective_sigma,
+    edge_sigma_hr_to_effective_lr,
     esf_model,
     fit_edge_profile,
     resolve_aperture,
+    reverdict_bench_rows,
     run_esf_selfcal,
+    scene_edge_sigma_lr,
 )
+from psf_calibration.sigma_selfcal import safe_evaluate_prereg  # noqa: E402
 from tcforge.forward import generate_lr_burst  # noqa: E402
 
 
@@ -162,6 +167,103 @@ def test_no_edge_rejection() -> None:
     summary = run_esf_selfcal(burst, shifts, cfg, out_dir=None, label="flat", make_plot=False)
     assert summary["status"] == "no_usable_edges"
     assert np.isnan(summary["sigma_hat"])
+
+
+def test_scene_edge_sigma_truth_composition() -> None:
+    # no config / non-isothermal pools -> no scene edge term, never guessed
+    assert scene_edge_sigma_lr(None, 2) == (0.0, "none")
+    value, source = scene_edge_sigma_lr({"temperature_model": "standard"}, 2)
+    assert value == 0.0 and "isothermal" in source
+    # bench48-style isothermal config: edge_sigma=0.6 HR px, same discrete shave as the PSF term
+    iso = {"temperature_model": "isothermal", "temperature_isothermal": {"edge_sigma": 0.6}}
+    value, source = scene_edge_sigma_lr(iso, 2)
+    assert np.isclose(value, edge_sigma_hr_to_effective_lr(0.6, 2))
+    assert np.isclose(value, discrete_gaussian_effective_sigma(0.3, 2))
+    assert 0.2 < value < 0.3 and "edge_sigma" in source
+    # isothermal WITHOUT the key -> generator default 1.4 HR px (mirrors generate_training_pool.py)
+    value_default, _ = scene_edge_sigma_lr({"temperature_model": "isothermal"}, 2)
+    assert np.isclose(value_default, edge_sigma_hr_to_effective_lr(1.4, 2))
+    # quadrature composition
+    assert np.isclose(combined_true_sigma_lr(0.3, 0.4), 0.5)
+    assert combined_true_sigma_lr(0.3, 0.0) == 0.3
+
+
+def _write_old_schema_rows_csv(path: Path, psf_only: list[float], edge_lr: float, jitter: list[float]) -> None:
+    """bench_rows.csv in the pre-ACL-058 schema: `sigma_true` IS the psf-only truth."""
+
+    import csv
+
+    rows = []
+    for i, (p, j) in enumerate(zip(psf_only, jitter)):
+        hat = combined_true_sigma_lr(p, edge_lr) * (1.0 + j)  # estimator sees the TOTAL width
+        rel = (hat - p) / p
+        rows.append(
+            {
+                "scene_id": f"scene_{i:04d}",
+                "kernel": "esf",
+                "status": "ok",
+                "sigma_true_nominal": p,
+                "sigma_true": p,
+                "sigma_hat_esf": hat,
+                "sigma_hat_e1": hat,
+                "ci_lo": hat - 0.02,
+                "ci_hi": hat + 0.02,
+                "rel_err_signed": rel,
+                "abs_rel_err": abs(rel),
+                "n_edges_valid": 4,
+                "rel_spread": 0.05,
+                "warnings": "",
+                "psf_shape": "gaussian" if i % 2 == 0 else "elliptical_gaussian",
+                "noise_sigma_c": 0.02 + 0.01 * i,
+                "delta_T_c": 3.0,
+                "aperture": "pool_block_average",
+            }
+        )
+    with path.open("w", newline="", encoding="utf-8") as f:
+        w = csv.DictWriter(f, fieldnames=list(rows[0].keys()))
+        w.writeheader()
+        w.writerows(rows)
+
+
+def test_reverdict_corrects_old_schema_rows(tmp_path: Path) -> None:
+    edge_lr = edge_sigma_hr_to_effective_lr(0.6, 2)
+    psf_only = [0.2, 0.25, 0.3, 0.35, 0.4, 0.45, 0.5, 0.55]
+    jitter = [0.01, -0.01, 0.02, -0.02, 0.01, -0.01, 0.02, -0.02]
+    rows_csv = tmp_path / "bench_rows.csv"
+    _write_old_schema_rows_csv(rows_csv, psf_only, edge_lr, jitter)
+
+    out = tmp_path / "reverdict"
+    result = reverdict_bench_rows(rows_csv, out, scene_edge_sigma_lr_eff=edge_lr)
+    verdict = result["verdict"]
+    # uncorrected rows were biased high (total vs psf-only truth); corrected verdict must pass
+    assert verdict["prereg_pass"] is True
+    assert verdict["median_abs_rel_err"] <= 0.03
+    assert not verdict["systematic_bias"]
+    assert verdict["scene_edge_sigma_lr"] == edge_lr
+    row0 = result["rows"][0]
+    assert np.isclose(row0["sigma_true_psf_only"], 0.2)
+    assert np.isclose(row0["sigma_true_total"], combined_true_sigma_lr(0.2, edge_lr))
+    assert np.isclose(row0["sigma_true"], row0["sigma_true_total"])
+    assert (out / "bench_rows.csv").exists()
+    assert (out / "bench_verdict.json").exists()
+    assert (out / "bench_summary.png").exists()
+    # with a zero edge term the reverdict must reproduce the original (biased) reading
+    result_zero = reverdict_bench_rows(rows_csv, tmp_path / "zero", scene_edge_sigma_lr_eff=0.0)
+    assert result_zero["verdict"]["median_abs_rel_err"] > 0.25
+
+
+def test_insufficient_scenes_verdict_skipped(tmp_path: Path) -> None:
+    # direct guard
+    verdict = safe_evaluate_prereg([], median_tol=0.15)
+    assert verdict["verdict_skipped"] is True and verdict["prereg_pass"] is None
+    # end-to-end via reverdict on a 3-row csv (the --scene-limit 3 crash scenario)
+    edge_lr = edge_sigma_hr_to_effective_lr(0.6, 2)
+    rows_csv = tmp_path / "rows3.csv"
+    _write_old_schema_rows_csv(rows_csv, [0.2, 0.3, 0.4], edge_lr, [0.0, 0.0, 0.0])
+    result = reverdict_bench_rows(rows_csv, tmp_path / "out3", scene_edge_sigma_lr_eff=edge_lr)
+    assert result["verdict"]["verdict_skipped"] is True
+    assert result["verdict"]["prereg_pass"] is None
+    assert (tmp_path / "out3" / "bench_rows.csv").exists()
 
 
 def test_cli_esf_generic_mode(tmp_path: Path, monkeypatch) -> None:

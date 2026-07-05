@@ -44,6 +44,21 @@ Anisotropic PSFs: E3 measures the DIRECTIONAL sigma along each edge normal.
 For elliptical/airy scenes the per-edge spread will be genuinely high and the
 comparison against a scalar metadata sigma is a documented degraded fit — such
 scenes are labelled, never silently dropped.
+
+Bench ground-truth composition (ACL-058): the estimator measures ALL blur that
+is physically in the frames. v6-family pools with temperature_model
+"isothermal" additionally smooth the SCENE's temperature level field with a
+fixed Gaussian (render_isothermal_field edge_sigma, HR px) before any PSF is
+applied — that softening lives in the scene x, not in the operator A, but it
+widens every edge the same way the PSF does. Bench truth must therefore be the
+quadrature sum sqrt(sigma_psf_eff^2 + sigma_scene_edge^2); omitting the scene
+term produced the Step-1 +28-31% systematic overestimate (root-caused in
+tmp/analysis_esf_fail_diagnosis.py). KNOWN SECOND-ORDER RESIDUAL, not modelled
+in the truth: the SSAA/box footprint of rotated content adds an angle-dependent
+geometric anti-aliasing width (~0.16 LR px near 0/90 deg up to ~0.30 LR px near
+45 deg, present for order-0 and order-1 resampling alike); with the scene-edge
+term corrected the remaining bench median error is ~4%, well inside the 15%
+prereg line, so this residual is documented rather than compensated.
 """
 
 from __future__ import annotations
@@ -63,8 +78,8 @@ from psf_calibration.sigma_selfcal import (
     PREREG_MEDIAN_REL_ERR_TOL,
     _plot_bench,
     _write_rows_csv,
-    evaluate_prereg,
     load_pool_scene,
+    safe_evaluate_prereg,
 )
 
 APERTURES = ("pool_block_average", "pool_point", "detector_box", "point")
@@ -339,6 +354,40 @@ def discrete_gaussian_effective_sigma(sigma_lr: float, scale: int, truncate: flo
     w = np.exp(-0.5 * (k / sd) ** 2)
     w /= w.sum()
     return float(np.sqrt(np.sum(w * k * k)) / scale)
+
+
+def scene_edge_sigma_lr(pool_config: dict[str, Any] | None, scale: int) -> tuple[float, str]:
+    """Effective LR-px sigma of the pool's scene-level edge softening (ACL-058).
+
+    Mirrors generate_training_pool.py's isothermal branch exactly: when
+    temperature_model == "isothermal", render_isothermal_field smooths the HR
+    level field with ndimage.gaussian_filter(sigma=edge_sigma HR px), generator
+    default 1.4 when the key is absent. Returns (effective sigma in LR px,
+    provenance). No config available -> (0.0, "none") — callers must log it,
+    never guess a value (owner rule: no dataset-specific constants).
+    """
+
+    if not pool_config:
+        return 0.0, "none"
+    if str(pool_config.get("temperature_model", "standard")) != "isothermal":
+        return 0.0, "temperature_model!=isothermal"
+    iso_cfg = dict(pool_config.get("temperature_isothermal", {}))
+    edge_sigma_hr = float(iso_cfg.get("edge_sigma", 1.4))  # generator default, generate_training_pool.py
+    return edge_sigma_hr_to_effective_lr(edge_sigma_hr, scale), "pool_config.temperature_isothermal.edge_sigma"
+
+
+def edge_sigma_hr_to_effective_lr(edge_sigma_hr: float, scale: int) -> float:
+    """HR-px nominal scene-edge sigma -> effective LR-px (same discrete-kernel shave as the PSF)."""
+
+    if edge_sigma_hr <= 0:
+        return 0.0
+    return discrete_gaussian_effective_sigma(edge_sigma_hr / scale, scale)
+
+
+def combined_true_sigma_lr(sigma_psf_eff_lr: float, sigma_scene_edge_lr: float) -> float:
+    """Bench truth = quadrature sum of PSF blur and scene-level edge softening (both effective LR px)."""
+
+    return float(np.hypot(sigma_psf_eff_lr, sigma_scene_edge_lr))
 
 
 def esf_model(d: np.ndarray, a: float, c: float, sigma: float, b: float, offs: np.ndarray, w: np.ndarray, extra_var: float) -> np.ndarray:
@@ -753,11 +802,15 @@ def _esf_bench_scene_task(args: dict[str, Any]) -> dict[str, Any]:
     sigma_nominal = float(md.get("psf_sigma_lr_px", float("nan")))
     # ground truth in EFFECTIVE terms: pool blurs with a truncated discrete kernel
     # whose variance undershoots the nominal sigma at the small end (see helper)
-    sigma_true = (
+    sigma_psf_only = (
         discrete_gaussian_effective_sigma(sigma_nominal, int(md.get("scale", cfg.scale)))
         if np.isfinite(sigma_nominal)
         else float("nan")
     )
+    # ACL-058: isothermal pools soften the scene's level field itself; the ESF
+    # sees that width too, so the verdict basis is the quadrature total.
+    edge_lr = float(args.get("scene_edge_sigma_lr", 0.0))
+    sigma_true = combined_true_sigma_lr(sigma_psf_only, edge_lr) if np.isfinite(sigma_psf_only) else float("nan")
     hat = float(summary["sigma_hat"])
     rel = (hat - sigma_true) / sigma_true if sigma_true > 0 else float("nan")
     return {
@@ -765,6 +818,9 @@ def _esf_bench_scene_task(args: dict[str, Any]) -> dict[str, Any]:
         "kernel": "esf",
         "status": summary["status"],
         "sigma_true_nominal": sigma_nominal,
+        "sigma_true_psf_only": sigma_psf_only,
+        "sigma_scene_edge": edge_lr,
+        "sigma_true_total": sigma_true,
         "sigma_true": sigma_true,
         "sigma_hat_esf": hat,
         "sigma_hat_e1": hat,  # key alias so evaluate_prereg/_plot_bench are reused unchanged
@@ -782,6 +838,34 @@ def _esf_bench_scene_task(args: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def resolve_scene_edge_sigma(
+    pool_dir: Path,
+    scale: int,
+    *,
+    pool_config_path: Path | None = None,
+    edge_sigma_hr: float | None = None,
+) -> tuple[float, str]:
+    """Resolve the pool's scene-level edge softening (effective LR px, provenance).
+
+    Priority: explicit HR override > explicit config path > config json shipped
+    inside the pool dir. Nothing found -> (0.0, "none") — logged by callers,
+    never guessed.
+    """
+
+    if edge_sigma_hr is not None:
+        return edge_sigma_hr_to_effective_lr(float(edge_sigma_hr), scale), "cli_override"
+    candidates = [pool_config_path] if pool_config_path is not None else [
+        Path(pool_dir) / "config.json",
+        Path(pool_dir) / "pool_config.json",
+    ]
+    for cand in candidates:
+        if cand is not None and Path(cand).exists():
+            config = json.loads(Path(cand).read_text(encoding="utf-8"))
+            value, source = scene_edge_sigma_lr(config, scale)
+            return value, f"{source} ({cand})"
+    return 0.0, "none"
+
+
 def run_esf_bench_validation(
     pool_dir: Path,
     cfg: EsfSelfCalConfig,
@@ -792,6 +876,8 @@ def run_esf_bench_validation(
     scene_limit: int | None = None,
     scene_plots: bool = True,
     median_tol: float = PREREG_MEDIAN_REL_ERR_TOL,
+    pool_config_path: Path | None = None,
+    edge_sigma_hr: float | None = None,
 ) -> dict[str, Any]:
     import os  # noqa: PLC0415
 
@@ -804,6 +890,11 @@ def run_esf_bench_validation(
     if not scene_dirs:
         raise FileNotFoundError(f"no scene directories under {pool_dir}")
 
+    edge_lr, edge_source = resolve_scene_edge_sigma(
+        pool_dir, cfg.scale, pool_config_path=pool_config_path, edge_sigma_hr=edge_sigma_hr
+    )
+    print(f"[esf_bench] scene edge softening: sigma_lr={edge_lr:.4f} effective (source={edge_source})")
+
     cfg_kwargs = {k: getattr(cfg, k) for k in EsfSelfCalConfig.__dataclass_fields__ if k not in ("extras", "aperture", "seed")}
     cfg_kwargs["aperture"] = cfg.aperture  # placeholder; resolved per scene from metadata when 'auto'
     tasks = [
@@ -814,6 +905,7 @@ def run_esf_bench_validation(
             "out_dir": str(out_dir),
             "scene_plots": scene_plots,
             "aperture": aperture,
+            "scene_edge_sigma_lr": edge_lr,
         }
         for i, d in enumerate(scene_dirs)
     ]
@@ -828,10 +920,84 @@ def run_esf_bench_validation(
     else:
         rows = [_esf_bench_scene_task(t) for t in tasks]
 
-    verdict = evaluate_prereg(rows, median_tol=median_tol)
+    verdict = safe_evaluate_prereg(rows, median_tol=median_tol)
     verdict["n_scenes_total"] = len(rows)
     verdict["n_no_edge_scenes"] = int(sum(1 for r in rows if r["status"] == "no_usable_edges"))
     verdict["kernel"] = "esf"
+    verdict["scene_edge_sigma_lr"] = edge_lr
+    verdict["scene_edge_sigma_source"] = edge_source
+    _write_rows_csv(out_dir / "bench_rows.csv", rows)
+    (out_dir / "bench_verdict.json").write_text(json.dumps(verdict, indent=2), encoding="utf-8")
+    _plot_bench(out_dir / "bench_summary.png", rows, verdict)
+    return {"rows": rows, "verdict": verdict}
+
+
+def reverdict_bench_rows(
+    rows_csv: Path,
+    out_dir: Path,
+    *,
+    scene_edge_sigma_lr_eff: float,
+    edge_source: str = "cli",
+    median_tol: float = PREREG_MEDIAN_REL_ERR_TOL,
+) -> dict[str, Any]:
+    """Offline re-verdict of an existing bench_rows.csv under the corrected truth (ACL-058).
+
+    Re-uses the already-estimated sigma_hat per scene — no re-estimation. Rows
+    written before ACL-058 carry the PSF-only truth in `sigma_true`; rows
+    written after already have `sigma_true_psf_only`. Either way the corrected
+    verdict basis is sqrt(psf_only^2 + scene_edge^2).
+    """
+
+    import csv  # noqa: PLC0415
+
+    rows_csv = Path(rows_csv)
+    out_dir = Path(out_dir)
+    out_dir.mkdir(parents=True, exist_ok=True)
+    with rows_csv.open(newline="", encoding="utf-8") as f:
+        raw_rows = list(csv.DictReader(f))
+    if not raw_rows:
+        raise ValueError(f"{rows_csv} has no rows")
+
+    def _f(row: dict[str, str], key: str) -> float:
+        text = row.get(key, "")
+        try:
+            return float(text)
+        except (TypeError, ValueError):
+            return float("nan")
+
+    rows: list[dict[str, Any]] = []
+    for raw in raw_rows:
+        psf_only = _f(raw, "sigma_true_psf_only")
+        if not np.isfinite(psf_only):
+            psf_only = _f(raw, "sigma_true")  # pre-ACL-058 rows: sigma_true WAS psf-only
+        hat = _f(raw, "sigma_hat_esf")
+        if not np.isfinite(hat):
+            hat = _f(raw, "sigma_hat_e1")
+        total = combined_true_sigma_lr(psf_only, scene_edge_sigma_lr_eff) if np.isfinite(psf_only) else float("nan")
+        rel = (hat - total) / total if total > 0 else float("nan")
+        row: dict[str, Any] = dict(raw)
+        row.update(
+            {
+                "sigma_true_psf_only": psf_only,
+                "sigma_scene_edge": scene_edge_sigma_lr_eff,
+                "sigma_true_total": total,
+                "sigma_true": total,
+                "sigma_hat_e1": hat,
+                "rel_err_signed": float(rel),
+                "abs_rel_err": float(abs(rel)),
+                "noise_sigma_c": _f(raw, "noise_sigma_c"),
+                "psf_shape": raw.get("psf_shape", "gaussian"),
+            }
+        )
+        rows.append(row)
+
+    verdict = safe_evaluate_prereg(rows, median_tol=median_tol)
+    verdict["n_scenes_total"] = len(rows)
+    verdict["n_no_edge_scenes"] = int(sum(1 for r in rows if r.get("status") == "no_usable_edges"))
+    verdict["kernel"] = "esf"
+    verdict["scene_edge_sigma_lr"] = scene_edge_sigma_lr_eff
+    verdict["scene_edge_sigma_source"] = edge_source
+    verdict["reverdict_of"] = str(rows_csv)
     _write_rows_csv(out_dir / "bench_rows.csv", rows)
     (out_dir / "bench_verdict.json").write_text(json.dumps(verdict, indent=2), encoding="utf-8")
     _plot_bench(out_dir / "bench_summary.png", rows, verdict)
