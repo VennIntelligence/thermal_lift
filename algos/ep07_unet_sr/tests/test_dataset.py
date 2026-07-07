@@ -10,6 +10,7 @@ from torch.utils.data import DataLoader
 
 from tcforge.reconstruct import reconstruct_hr_temperature
 from tcforge.storage import load_scene_compact, save_scene_compact
+from unet_sr.config import config_from_args
 from unet_sr.dataset import ThermalSRDataset
 
 
@@ -278,6 +279,65 @@ def test_operator_dr_jitters_dc_params_but_not_burst(tmp_path: Path) -> None:
     again = jittered_ds[0]
     assert torch.equal(again["burst_shifts"], jittered["burst_shifts"])
     assert again["psf_sigma_lr_px"] == jittered["psf_sigma_lr_px"]
+
+
+def test_dc_sigma_lie_band_floor_and_default_off(tmp_path: Path) -> None:
+    """sigma-DR absolute lie (§4): the per-sample delta added to the DC-term PSF sigma has
+    |delta| in [lo, hi], the SAME delta on x and y, a floor of 0.05, and it never touches the
+    burst pixels or shifts (true operator). lie=(0,0) is identical to not passing the knob."""
+    pool = _make_pool(tmp_path, scale=2, with_burst=True)
+    kwargs = dict(patch_size_hr=8, scale=2, seed=5, patches_per_scene=32,
+                  input_mode="hybrid_drizzle2x", provide_burst=True, solver_m_frames=12)
+    exact_ds = ThermalSRDataset(pool, **kwargs)
+    off_ds = ThermalSRDataset(pool, **kwargs, dc_psf_sigma_lie_px=(0.0, 0.0))
+    lie_ds = ThermalSRDataset(pool, **kwargs, dc_psf_sigma_lie_px=(0.05, 0.2))
+    base = 0.23                                   # scene psf_sigma_lr_px (no y-key => sigma_y == sigma_x)
+    n = len(exact_ds)
+    pos = neg = 0
+    for i in range(n):
+        e, o, l = exact_ds[i], off_ds[i], lie_ds[i]
+        # default off == not passing the knob (per value + burst)
+        assert o["psf_sigma_lr_px"] == e["psf_sigma_lr_px"]
+        assert o["psf_sigma_y_lr_px"] == e["psf_sigma_y_lr_px"]
+        assert torch.equal(o["lr_burst_patch"], e["lr_burst_patch"])
+        # lie leaves the burst + shifts on the TRUE operator
+        assert torch.equal(l["lr_burst_patch"], e["lr_burst_patch"])
+        assert torch.equal(l["burst_shifts"], e["burst_shifts"])
+        sx, sy = float(l["psf_sigma_lr_px"]), float(l["psf_sigma_y_lr_px"])
+        assert sx == sy                           # same delta on both axes
+        assert sx >= 0.05 - 1e-9                   # floor
+        if sx > 0.05 + 1e-9:                       # unfloored => |delta| in band
+            assert 0.05 - 1e-6 <= abs(sx - base) <= 0.2 + 1e-6
+            if sx > base:
+                pos += 1
+            else:
+                neg += 1
+    assert pos > 0 and neg > 0                     # Rademacher sign fires both ways
+    # dedicated floor check: |delta| == 0.2 exactly => negative-sign samples floor 0.23-0.2 -> 0.05
+    floor_ds = ThermalSRDataset(pool, **kwargs, dc_psf_sigma_lie_px=(0.2, 0.2))
+    vals = {round(float(floor_ds[i]["psf_sigma_lr_px"]), 6) for i in range(n)}
+    assert 0.05 in vals                            # floored branch present
+    assert any(abs(v - (base + 0.2)) < 1e-6 for v in vals)   # positive branch = base + 0.2
+    assert all(v >= 0.05 - 1e-9 for v in vals)
+    # deterministic per (index, epoch)
+    assert lie_ds[0]["psf_sigma_lr_px"] == \
+        ThermalSRDataset(pool, **kwargs, dc_psf_sigma_lie_px=(0.05, 0.2))[0]["psf_sigma_lr_px"]
+
+
+def test_config_validate_lie_exclusive_with_jitter_frac() -> None:
+    """§4.2: the absolute sigma lie requires 0 <= lo <= hi and is mutually exclusive with the
+    multiplicative sigma jitter (two sigma perturbations would confound the DR dose)."""
+    base = ["--training-pool-dir", "dummy_pool", "--input-mode", "hybrid_drizzle2x",
+            "--scale", "2", "--unroll-steps", "2", "--boundary-boost", "3.0"]
+    cfg = config_from_args(base + ["--solver-dc-psf-sigma-lie-px", "0.05", "0.2"])
+    assert cfg.solver_dc_psf_sigma_lie_px == (0.05, 0.2)
+    with pytest.raises(ValueError, match="mutually exclusive"):
+        config_from_args(base + ["--solver-dc-psf-sigma-lie-px", "0.05", "0.2",
+                                 "--solver-dc-psf-sigma-jitter-frac", "0.1"])
+    with pytest.raises(ValueError, match="0 <= lo <= hi"):
+        config_from_args(base + ["--solver-dc-psf-sigma-lie-px", "0.2", "0.05"])
+    with pytest.raises(ValueError, match="0 <= lo <= hi"):
+        config_from_args(base + ["--solver-dc-psf-sigma-lie-px", "-0.1", "0.2"])
 
 
 def test_lr_mode_unchanged_with_input_mode_default(tmp_path: Path) -> None:

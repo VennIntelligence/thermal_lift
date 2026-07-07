@@ -17,6 +17,8 @@ from __future__ import annotations
 import numpy as np
 from scipy import ndimage
 
+from . import physics
+
 
 def _disk(rad: float) -> np.ndarray:
     r = int(max(1, round(rad)))
@@ -542,10 +544,33 @@ def apply_thermal_defects(field, coverage, rng, *, t_bg_c, delta_t_c,
 
 
 def field_noise_burst(burst, rng, *, vignette_c=0.13, stripe_c=0.028,
-                      stripe_col_sigma=(2.5, 5.0), grain_c=0.10):
-    """Detector noise on an LR burst (M,h,w): a smooth vignette + a smooth low-amplitude column
-    stripe FPN (BOTH fixed across the burst, so multi-frame averaging does NOT remove them) plus
-    per-frame fine Gaussian grain. Returns the noisy burst (same shape)."""
+                      stripe_col_sigma=(2.5, 5.0), grain_c=0.10,
+                      # v7 additions — every default is OFF, so with defaults the output AND the
+                      # RNG stream are bit-identical to the legacy implementation (golden-pinned):
+                      row_stripe_c=0.0,            # (a) row-stripe FPN amplitude, deg C
+                      stripe_row_sigma=(4.5, 6.5),  # (a) row-smoothing sigma, px (drawn only if row_stripe_c>0)
+                      lowfreq_c=0.0,               # (b) 1/f^alpha static field amplitude, deg C
+                      lowfreq_alpha=(1.7, 1.8),    # (b) PSD slope range (drawn only if lowfreq_c>0)
+                      pixel_fpn_c=0.0,             # (d) static per-pixel FPN amplitude, deg C
+                      grain_ar1_rho=0.0):          # (c) grain frame-to-frame AR(1) lag-1 coefficient
+    """Detector noise on an LR burst (M,h,w). Burst semantics (v7):
+
+      Fixed across the burst (survive multi-frame averaging):
+        - vignette (parabolic bowl + linear tilt)         [legacy]
+        - column-stripe FPN (smoothed 1D column pattern)  [legacy]
+        - (a) row-stripe FPN     (smoothed 1D row pattern, dual of the column stripe)
+        - (b) 1/f^alpha field    (true power-law low-frequency detector field, physics.powerlaw_field)
+        - (d) per-pixel FPN      (white, un-smoothed, fixed per pixel)
+      Per-frame:
+        - fine Gaussian grain    [legacy], optionally with (c) frame-to-frame AR(1) correlation
+          rho — so averaging M frames reduces the grain variance by (1+rho)/((1-rho)*M) instead
+          of 1/M (the mechanism that makes multi-frame fusion gain realistic).
+
+    All v7 additions default OFF. RNG discipline: each new fixed component draws only inside an
+    ``if <amp> > 0`` guard, inserted after the legacy column-stripe draw and before the grain draw,
+    in the fixed order row -> lowfreq -> pixel_fpn. AR(1) introduces NO new draw (it reuses the
+    legacy grain draws as innovations; e_0 = w_0 is already at the stationary variance, so every
+    frame's marginal std stays == grain_c). Returns the noisy burst (same shape)."""
     burst = np.asarray(burst, dtype=np.float32)
     squeeze = burst.ndim == 2
     if squeeze:
@@ -560,6 +585,26 @@ def field_noise_burst(burst, rng, *, vignette_c=0.13, stripe_c=0.028,
     col = ndimage.gaussian_filter(rng.normal(size=(1, w)).astype(np.float32), sigma=(0, csig))
     stripe = (col - col.mean()) / (col.std() + 1e-6)
     fixed = (float(vignette_c) * large + float(stripe_c) * stripe).astype(np.float32)    # (h,w), fixed
+    # (a) row-stripe FPN — dual of the column stripe (smoothed 1D row pattern), burst-fixed.
+    if row_stripe_c > 0:
+        rsig = float(rng.uniform(*stripe_row_sigma)) if isinstance(stripe_row_sigma, (tuple, list)) else float(stripe_row_sigma)
+        row = ndimage.gaussian_filter(rng.normal(size=(h, 1)).astype(np.float32), sigma=(rsig, 0))
+        row_stripe = (row - row.mean()) / (row.std() + 1e-6)
+        fixed = fixed + float(row_stripe_c) * row_stripe
+    # (b) true 1/f^alpha static low-frequency detector field, burst-fixed.
+    if lowfreq_c > 0:
+        alpha = float(rng.uniform(*lowfreq_alpha)) if isinstance(lowfreq_alpha, (tuple, list)) else float(lowfreq_alpha)
+        fixed = fixed + float(lowfreq_c) * physics.powerlaw_field((h, w), alpha, rng)
+    # (d) static per-pixel FPN (white, no smoothing), burst-fixed => never averages away.
+    if pixel_fpn_c > 0:
+        fixed = fixed + float(pixel_fpn_c) * rng.normal(size=(h, w)).astype(np.float32)
+    fixed = fixed.astype(np.float32)
     grain = rng.normal(0.0, float(grain_c), size=burst.shape).astype(np.float32)         # per-frame
+    # (c) frame-to-frame AR(1) grain: zero extra draws (reuse the legacy grain as innovations).
+    if grain_ar1_rho > 0.0:
+        rho = float(grain_ar1_rho)
+        innov_scale = float(np.sqrt(1.0 - rho * rho))
+        for t in range(1, m):
+            grain[t] = rho * grain[t - 1] + innov_scale * grain[t]
     out = (burst + fixed[None] + grain).astype(np.float32)
     return out[0] if squeeze else out

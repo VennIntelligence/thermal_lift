@@ -269,6 +269,7 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         dc_shift_jitter_std_px: float = 0.0,
         dc_psf_sigma_jitter_frac: float = 0.0,
         dc_psf_angle_jitter_deg: float = 0.0,
+        dc_psf_sigma_lie_px: tuple[float, float] = (0.0, 0.0),
     ) -> None:
         if scale <= 0:
             raise ValueError("scale must be positive")
@@ -301,6 +302,9 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
         self.dc_shift_jitter_std_px = float(dc_shift_jitter_std_px)
         self.dc_psf_sigma_jitter_frac = float(dc_psf_sigma_jitter_frac)
         self.dc_psf_angle_jitter_deg = float(dc_psf_angle_jitter_deg)
+        # sigma-DR absolute lie: per-sample absolute offset on the DC-term PSF sigma (train-only;
+        # (0,0) = off). Mutually exclusive with dc_psf_sigma_jitter_frac (enforced in TrainingConfig).
+        self.dc_psf_sigma_lie_px = (float(dc_psf_sigma_lie_px[0]), float(dc_psf_sigma_lie_px[1]))
         if self.provide_burst and input_mode != "hybrid_drizzle2x":
             raise ValueError("provide_burst (unrolled solver) requires input_mode='hybrid_drizzle2x'")
         if self.input_mode == "hybrid_drizzle2x" and patch_size_hr % self.data_scale != 0:
@@ -613,8 +617,21 @@ class ThermalSRDataset(Dataset[dict[str, Any]]):
             sigma_y *= factor
         if self.dc_psf_angle_jitter_deg > 0:
             angle += float(rng.normal(0.0, self.dc_psf_angle_jitter_deg))
+        # sigma-DR absolute lie: add a per-sample absolute delta to the sigma fed to the DC term,
+        # |delta| ~ U(lo, hi) LR px with a Rademacher sign, the SAME delta on both axes (biases the
+        # overall width belief), floored at 0.05 so the smallest scene sigma (0.15) can't be pushed
+        # <= 0. The burst pixels stay rendered with the TRUE operator; only the DC belief moves.
+        # Guarded => no extra draw on the default path (reuses the same per-sample rng, line ~590).
+        lie_lo, lie_hi = self.dc_psf_sigma_lie_px
+        if lie_hi > 0:
+            delta = float(rng.uniform(lie_lo, lie_hi)) * (1.0 if rng.integers(0, 2) else -1.0)
+            sigma_x = max(sigma_x + delta, 0.05)
+            sigma_y = max(sigma_y + delta, 0.05)
         sample["lr_burst_patch"] = torch.from_numpy(burst_patch)
         sample["burst_shifts"] = torch.from_numpy(shifts_sel)
+        # NOTE (sigma-hint boundary, dataset.md §4.3): psf_sigma_lr_px is "the sigma the pipeline
+        # currently believes" (post-lie). A future sigma-hint input channel must read THIS key; the
+        # true render sigma lives only in scene["metadata"] and is diagnostic-only, never fed to the net.
         sample["psf_sigma_lr_px"] = sigma_x
         sample["psf_sigma_y_lr_px"] = sigma_y
         sample["psf_angle_deg"] = angle

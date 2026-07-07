@@ -180,12 +180,14 @@ def add_noise(
     noise_model: NoiseModel = "iid_gaussian",
     fpn_sigma_px: float = 5.0,
     stripe_sigma_c: float | None = None,
+    mix_weights: Mapping[str, float] | None = None,
 ) -> np.ndarray:
     """Add reproducible LR detector noise in Celsius.
 
     ``noise_sigma_c`` is the total residual RMS anchor. Correlated models
     normalize their generated residual field back to this target so adding
-    spatial texture does not silently change the noise budget.
+    spatial texture does not silently change the noise budget. ``mix_weights``
+    (default None => historical blend) is forwarded to :func:`make_noise`.
     """
 
     arr = _as_float_array(image, "image")
@@ -201,6 +203,7 @@ def add_noise(
         noise_model=noise_model,
         fpn_sigma_px=fpn_sigma_px,
         stripe_sigma_c=stripe_sigma_c,
+        mix_weights=mix_weights,
     )
     return (arr + residual).astype(np.float32, copy=False)
 
@@ -257,6 +260,30 @@ def _spatial_correlated_noise(shape: tuple[int, ...], rng: np.random.Generator, 
     return _normalize_noise(field, 1.0)
 
 
+def powerlaw_field(
+    shape: tuple[int, int],
+    alpha: float,
+    rng: np.random.Generator,
+) -> np.ndarray:
+    """Unit-std zero-mean 2D field whose radial power spectrum follows P(f) ~ f^-alpha.
+
+    FFT synthesis: one white-noise draw -> FFT -> multiply amplitude by f^(-alpha/2) (so
+    power ~ f^-alpha), zero the DC (f=0) bin -> inverse FFT real part -> _normalize_noise(.,1).
+    Exactly ONE rng.normal(size=shape) draw (deterministic order), returns float32. Used by
+    realism.field_noise_burst for the true 1/f^alpha static low-frequency detector field."""
+    h, w = int(shape[0]), int(shape[1])
+    white = rng.normal(size=(h, w)).astype(np.float64)
+    fy = np.fft.fftfreq(h)[:, None]
+    fx = np.fft.fftfreq(w)[None, :]
+    f = np.sqrt(fy * fy + fx * fx)
+    amp = np.zeros_like(f)
+    nz = f > 0
+    amp[nz] = f[nz] ** (-float(alpha) / 2.0)   # amplitude^2 ~ f^-alpha => PSD ~ f^-alpha
+    spec = np.fft.fft2(white) * amp
+    field = np.fft.ifft2(spec).real.astype(np.float32)
+    return _normalize_noise(field, 1.0)
+
+
 def make_noise(
     shape: tuple[int, ...],
     *,
@@ -265,8 +292,21 @@ def make_noise(
     noise_model: NoiseModel = "iid_gaussian",
     fpn_sigma_px: float = 5.0,
     stripe_sigma_c: float | None = None,
+    mix_weights: Mapping[str, float] | None = None,
 ) -> np.ndarray:
-    """Generate a zero-mean detector-noise residual field."""
+    """Generate a zero-mean detector-noise residual field.
+
+    ``mix_weights`` (default None => the historical hard-coded blend, bit-identical) overrides the
+    relative family mixing coefficients per model. Recognised keys / defaults:
+      - fpn_lowfreq:        fpn_w=0.75, iid_w=0.25
+      - column_stripe:      stripe_default_scale=0.5, stripe_scale_cap=0.95
+      - spatial_correlated: corr_w=0.70, iid_w=0.30
+      - mixed:              fpn_w=0.55, stripe_default_scale=0.25, stripe_scale_cap=0.75, iid_w=0.35
+      - detector_realistic: fpn_w=0.45, corr_w=0.30, stripe_default_scale=0.20, stripe_scale_cap=0.50,
+                            iid_w=0.25, corr_sigma_factor=0.5, corr_sigma_min=1.0
+    These are RELATIVE weights: the summed residual is always renormalized by _normalize_noise to
+    the ``noise_sigma_c`` anchor, so mix_weights change the spatial *character*, not the RMS budget.
+    They alter neither the number nor the order of RNG draws (stream-invariant)."""
 
     shape = tuple(int(v) for v in shape)
     if len(shape) not in (2, 3) or any(v <= 0 for v in shape):
@@ -285,36 +325,48 @@ def make_noise(
     if noise_model == "iid_gaussian":
         return rng.normal(0.0, sigma, size=shape).astype(np.float32)
     if noise_model == "fpn_lowfreq":
+        mw = {"fpn_w": 0.75, "iid_w": 0.25}
+        mw.update(mix_weights or {})
         fpn = _lowfreq_fpn(shape, rng, fpn_sigma_px)
         iid = rng.normal(size=shape).astype(np.float32)
-        residual = 0.75 * fpn + 0.25 * _normalize_noise(iid, 1.0)
+        residual = mw["fpn_w"] * fpn + mw["iid_w"] * _normalize_noise(iid, 1.0)
         return _normalize_noise(residual, sigma)
     if noise_model == "column_stripe":
-        stripe_scale = float(stripe_sigma_c) / sigma if stripe_sigma_c is not None else 0.5
-        iid_scale = max(0.0, 1.0 - min(stripe_scale, 0.95))
+        mw = {"stripe_default_scale": 0.5, "stripe_scale_cap": 0.95}
+        mw.update(mix_weights or {})
+        stripe_scale = float(stripe_sigma_c) / sigma if stripe_sigma_c is not None else mw["stripe_default_scale"]
+        iid_scale = max(0.0, 1.0 - min(stripe_scale, mw["stripe_scale_cap"]))
         stripes = _column_stripes(shape, rng)
         iid = _normalize_noise(rng.normal(size=shape).astype(np.float32), 1.0)
         residual = stripe_scale * stripes + iid_scale * iid
         return _normalize_noise(residual, sigma)
     if noise_model == "spatial_correlated":
+        mw = {"corr_w": 0.70, "iid_w": 0.30}
+        mw.update(mix_weights or {})
         corr = _spatial_correlated_noise(shape, rng, fpn_sigma_px)
         iid = _normalize_noise(rng.normal(size=shape).astype(np.float32), 1.0)
-        residual = 0.70 * corr + 0.30 * iid
+        residual = mw["corr_w"] * corr + mw["iid_w"] * iid
         return _normalize_noise(residual, sigma)
     if noise_model == "mixed":
-        stripe_scale = float(stripe_sigma_c) / sigma if stripe_sigma_c is not None else 0.25
+        mw = {"fpn_w": 0.55, "stripe_default_scale": 0.25, "stripe_scale_cap": 0.75, "iid_w": 0.35}
+        mw.update(mix_weights or {})
+        stripe_scale = float(stripe_sigma_c) / sigma if stripe_sigma_c is not None else mw["stripe_default_scale"]
         fpn = _lowfreq_fpn(shape, rng, fpn_sigma_px)
         stripes = _column_stripes(shape, rng)
         iid = _normalize_noise(rng.normal(size=shape).astype(np.float32), 1.0)
-        residual = 0.55 * fpn + min(stripe_scale, 0.75) * stripes + 0.35 * iid
+        residual = mw["fpn_w"] * fpn + min(stripe_scale, mw["stripe_scale_cap"]) * stripes + mw["iid_w"] * iid
         return _normalize_noise(residual, sigma)
     if noise_model == "detector_realistic":
-        stripe_scale = float(stripe_sigma_c) / sigma if stripe_sigma_c is not None else 0.20
+        mw = {"fpn_w": 0.45, "corr_w": 0.30, "stripe_default_scale": 0.20, "stripe_scale_cap": 0.50,
+              "iid_w": 0.25, "corr_sigma_factor": 0.5, "corr_sigma_min": 1.0}
+        mw.update(mix_weights or {})
+        stripe_scale = float(stripe_sigma_c) / sigma if stripe_sigma_c is not None else mw["stripe_default_scale"]
         fpn = _lowfreq_fpn(shape, rng, fpn_sigma_px)
-        corr = _spatial_correlated_noise(shape, rng, max(1.0, fpn_sigma_px * 0.5))
+        corr = _spatial_correlated_noise(shape, rng, max(mw["corr_sigma_min"], fpn_sigma_px * mw["corr_sigma_factor"]))
         stripes = _column_stripes(shape, rng)
         iid = _normalize_noise(rng.normal(size=shape).astype(np.float32), 1.0)
-        residual = 0.45 * fpn + 0.30 * corr + min(stripe_scale, 0.50) * stripes + 0.25 * iid
+        residual = (mw["fpn_w"] * fpn + mw["corr_w"] * corr
+                    + min(stripe_scale, mw["stripe_scale_cap"]) * stripes + mw["iid_w"] * iid)
         return _normalize_noise(residual, sigma)
     raise ValueError(
         "noise_model must be one of: iid_gaussian, fpn_lowfreq, column_stripe, "
@@ -474,8 +526,15 @@ def sample_psf_parameters(
     sigma_range: tuple[float, float] = (0.15, 0.55),
     elliptical_probability: float = 0.30,
     airy_probability: float = 0.10,
+    elliptical_ratio_range: tuple[float, float] = (0.80, 1.20),
+    airy_ratio_range: tuple[float, float] = (0.85, 1.20),
 ) -> dict[str, float | str | None]:
-    """Sample a PSF shape and LR-grid sigma parameters for domain randomization."""
+    """Sample a PSF shape and LR-grid sigma parameters for domain randomization.
+
+    ``elliptical_ratio_range`` scales each of the two elliptical-Gaussian axes off the base sigma
+    (two independent draws); ``airy_ratio_range`` scales the airy y-axis. Both default to the
+    historical hard-coded ranges, so the number and order of RNG draws — and hence a fixed-seed
+    parameter sequence — are unchanged (golden-pinned)."""
 
     if rng is not None and seed is not None:
         raise ValueError("pass either rng or seed, not both")
@@ -493,14 +552,14 @@ def sample_psf_parameters(
         return {
             "psf_shape": "airy_disk",
             "psf_sigma_lr_px": sigma,
-            "psf_sigma_y_lr_px": sigma * float(local_rng.uniform(0.85, 1.20)),
+            "psf_sigma_y_lr_px": sigma * float(local_rng.uniform(*airy_ratio_range)),
             "psf_angle_deg": float(local_rng.uniform(0.0, 180.0)),
         }
     if draw < p_airy + p_elliptical:
         return {
             "psf_shape": "elliptical_gaussian",
-            "psf_sigma_lr_px": sigma * float(local_rng.uniform(0.80, 1.20)),
-            "psf_sigma_y_lr_px": sigma * float(local_rng.uniform(0.80, 1.20)),
+            "psf_sigma_lr_px": sigma * float(local_rng.uniform(*elliptical_ratio_range)),
+            "psf_sigma_y_lr_px": sigma * float(local_rng.uniform(*elliptical_ratio_range)),
             "psf_angle_deg": float(local_rng.uniform(0.0, 180.0)),
         }
     return {

@@ -124,6 +124,12 @@ class TrainingConfig:
     solver_dc_shift_jitter_std_px: float = 0.0
     solver_dc_psf_sigma_jitter_frac: float = 0.0
     solver_dc_psf_angle_jitter_deg: float = 0.0
+    # sigma-DR "absolute lie" (dataset.md §3.1, owner dose +/-[0.05,0.2]): at TRAIN time only, add a
+    # per-sample absolute delta to the PSF sigma fed to the DC term — |delta| ~ U(lo, hi) LR px,
+    # Rademacher sign, SAME delta on x and y (biases the overall width belief, unlike the multiplicative
+    # jitter_frac which preserves anisotropy), floored at 0.05. (0,0) = off (default). Mutually
+    # exclusive with solver_dc_psf_sigma_jitter_frac (keeps the sigma-perturbation dose interpretable).
+    solver_dc_psf_sigma_lie_px: tuple[float, float] = (0.0, 0.0)
     # Stage 2a E1 (ACL-051 pending, design draft stage2a_perframe_fusion_design_draft.md):
     # per-frame corner-grid lift + permutation/M-invariant fusion feeding the prox, so the
     # solver finally sees per-frame sub-pixel phase instead of only 5 aggregated statistics.
@@ -259,6 +265,13 @@ class TrainingConfig:
                 raise ValueError("solver_dc_psf_sigma_jitter_frac must be in [0, 1)")
             if self.solver_dc_psf_angle_jitter_deg < 0:
                 raise ValueError("solver_dc_psf_angle_jitter_deg must be >= 0")
+            lie_lo, lie_hi = self.solver_dc_psf_sigma_lie_px
+            if not 0.0 <= lie_lo <= lie_hi:
+                raise ValueError("solver_dc_psf_sigma_lie_px must satisfy 0 <= lo <= hi")
+            if lie_hi > 0 and self.solver_dc_psf_sigma_jitter_frac > 0:
+                raise ValueError(
+                    "solver_dc_psf_sigma_lie_px and solver_dc_psf_sigma_jitter_frac are mutually "
+                    "exclusive (two sigma perturbations would confound the DR dose axis)")
             if self.solver_fusion not in ("none", "perframe"):
                 raise ValueError("solver_fusion must be 'none' or 'perframe'")
             if self.solver_fusion_channels < 1:
@@ -683,6 +696,12 @@ def build_arg_parser() -> argparse.ArgumentParser:
                         default=TrainingConfig.solver_dc_psf_angle_jitter_deg,
                         help="Stage 1a DR: Gaussian jitter (deg) on the PSF angle fed to the DC term. "
                              "0 = exact (default).")
+    parser.add_argument("--solver-dc-psf-sigma-lie-px", type=float, nargs=2, metavar=("LO", "HI"),
+                        default=list(TrainingConfig.solver_dc_psf_sigma_lie_px),
+                        help="sigma-DR absolute lie (dataset.md §3.1): at TRAIN time add a per-sample "
+                             "absolute delta to the PSF sigma fed to the DC term, |delta| ~ U(LO, HI) "
+                             "LR px, random sign, same on x/y, floored at 0.05. '0 0' = off (default). "
+                             "Mutually exclusive with --solver-dc-psf-sigma-jitter-frac. v7 dose: 0.05 0.2.")
     parser.add_argument("--solver-fusion", choices=("none", "perframe"),
                         default=TrainingConfig.solver_fusion,
                         help="Stage 2a E1: 'perframe' lifts each burst frame onto the solver's "
@@ -805,6 +824,7 @@ def config_from_args(argv: list[str] | None = None) -> TrainingConfig:
         solver_dc_shift_jitter_std_px=args.solver_dc_shift_jitter_std_px,
         solver_dc_psf_sigma_jitter_frac=args.solver_dc_psf_sigma_jitter_frac,
         solver_dc_psf_angle_jitter_deg=args.solver_dc_psf_angle_jitter_deg,
+        solver_dc_psf_sigma_lie_px=tuple(args.solver_dc_psf_sigma_lie_px),
     )
     cfg.validate()
     return cfg

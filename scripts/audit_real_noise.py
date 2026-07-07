@@ -27,10 +27,20 @@ from __future__ import annotations
 
 import csv
 import json
+import sys
 from pathlib import Path
 
 import numpy as np
 from scipy import ndimage
+
+# §5.0 sink: the flat-region estimators now live in tcforge._noise_stats so the synthetic
+# audit and the realism tests measure with byte-for-byte the same code. Import them here
+# (tcforge/src is added to sys.path the same way the other repo scripts do).
+_PROJECT_ROOT = Path(__file__).resolve().parents[1]
+_TCFORGE_SRC = _PROJECT_ROOT / "tcforge" / "src"
+if _TCFORGE_SRC.exists() and str(_TCFORGE_SRC) not in sys.path:
+    sys.path.insert(0, str(_TCFORGE_SRC))
+from tcforge._noise_stats import autocorr_1e_length, radial_psd_slope  # noqa: E402
 
 RAW_DIR = Path("data/data_raw/infrared_avi")
 FRAME_AUDIT_CSV = Path("output/ep01_data_processing/frame_audit.csv")
@@ -58,72 +68,6 @@ def load_burst_manifest() -> tuple[list[str], list[int], list[tuple[float, float
     acq_order = [int(r["acquisition_order"]) for r in sel]
     xy = [(float(r["X"]), float(r["Y"])) for r in sel]
     return files, acq_order, xy
-
-
-def autocorr_1e_length(profile: np.ndarray, valid: np.ndarray) -> int | None:
-    """1D autocorrelation of `profile` (NaN-masked by ~valid, mean-subtracted over valid entries,
-    invalid entries zero-filled), first lag where it drops below 1/e. None if never / all-invalid."""
-    if valid.sum() == 0:
-        return None
-    mu = float(np.mean(profile[valid]))
-    full = np.where(valid, profile - mu, 0.0)
-    n = len(full)
-    ac = np.correlate(full, full, mode="full")[n - 1:]
-    if ac[0] <= 0:
-        return None
-    ac = ac / ac[0]
-    below = np.where(ac < 1.0 / np.e)[0]
-    return int(below[0]) if len(below) else None
-
-
-def radial_psd_slope(crop: np.ndarray, crop_size: int) -> dict:
-    """Quadratic-detrend + Hann window + 2D FFT power spectrum, radially averaged (excluding the
-    exact kx=0/ky=0 axes to avoid column/row-stripe contamination of the isotropic estimate),
-    log-log slope fit -> alpha such that P(f) ~ f^-alpha."""
-    yy, xx = np.mgrid[0:crop_size, 0:crop_size].astype(np.float64)
-    xr, yr = xx.ravel(), yy.ravel()
-    A = np.stack([np.ones_like(xr), xr, yr, xr * xr, yr * yr, xr * yr], axis=1)
-    coef, *_ = np.linalg.lstsq(A, crop.ravel(), rcond=None)
-    trend = (A @ coef).reshape(crop.shape)
-    dcrop = crop - trend
-
-    win = np.outer(np.hanning(crop_size), np.hanning(crop_size))
-    windowed = dcrop * win
-    F = np.fft.fftshift(np.fft.fft2(windowed))
-    P = (np.abs(F) ** 2).astype(np.float64)
-
-    c = crop_size // 2
-    ky, kx = np.mgrid[-c:crop_size - c, -c:crop_size - c]
-    kr = np.hypot(kx, ky)
-    axis_mask = (kx == 0) | (ky == 0)
-    valid_spec = ~axis_mask
-
-    kmax = c
-    bins = np.arange(1, kmax)
-    radial = np.full(len(bins), np.nan)
-    for i, kbin in enumerate(bins):
-        sel = valid_spec & (kr >= kbin - 0.5) & (kr < kbin + 0.5)
-        if sel.any():
-            radial[i] = P[sel].mean()
-
-    freq = bins / crop_size  # cycles / px
-    fit_lo, fit_hi = 2, int(kmax * 0.6)
-    fit_sel = (bins >= fit_lo) & (bins <= fit_hi) & np.isfinite(radial) & (radial > 0)
-    logf = np.log10(freq[fit_sel])
-    logp = np.log10(radial[fit_sel])
-    slope, intercept = np.polyfit(logf, logp, 1)
-    alpha = -float(slope)
-    pred = slope * logf + intercept
-    ss_res = float(np.sum((logp - pred) ** 2))
-    ss_tot = float(np.sum((logp - logp.mean()) ** 2))
-    r2 = 1.0 - ss_res / ss_tot if ss_tot > 0 else float("nan")
-    return {
-        "alpha": alpha, "intercept": float(intercept), "r2_loglog_fit": r2,
-        "fit_freq_min_cyc_px": float(freq[fit_sel].min()),
-        "fit_freq_max_cyc_px": float(freq[fit_sel].max()),
-        "n_fit_bins": int(fit_sel.sum()),
-        "freq": freq, "radial_psd": radial, "fit_sel": fit_sel,
-    }
 
 
 def main() -> None:

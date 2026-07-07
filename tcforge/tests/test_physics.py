@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -11,6 +12,8 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import tcforge.physics as physics
+
+_DATA = Path(__file__).parent / "data"
 
 
 def test_temperature_field_respects_mask_semantics_and_bounds() -> None:
@@ -146,6 +149,73 @@ def test_psf_kernel_sampling_and_blur_are_normalized_and_finite() -> None:
     assert np.isclose(float(kernel.sum()), 1.0, atol=1e-5)
     assert np.isfinite(blurred).all()
     assert np.isclose(float(blurred.sum()), 1.0, atol=1e-4)
+
+
+def test_make_noise_mix_weights_none_matches_golden() -> None:
+    """Byte-identity contract (v7 §2): with mix_weights=None (default), make_noise reproduces the
+    pre-change hard-coded blend for the `mixed` and `detector_realistic` families exactly.
+    Golden pinned from HEAD by scratchpad/make_noise_goldens.py."""
+    golden = np.load(_DATA / "make_noise_golden_v1.npz")
+    shape = (3, 48, 60)
+    mixed_out = physics.make_noise(shape, noise_sigma_c=0.08, seed=123,
+                                   noise_model="mixed", fpn_sigma_px=5.0, stripe_sigma_c=None)
+    detector_out = physics.make_noise(shape, noise_sigma_c=0.08, seed=456,
+                                      noise_model="detector_realistic", fpn_sigma_px=5.0,
+                                      stripe_sigma_c=0.03)
+    assert mixed_out.dtype == golden["mixed_out"].dtype
+    assert mixed_out.tobytes() == golden["mixed_out"].tobytes()
+    assert detector_out.tobytes() == golden["detector_out"].tobytes()
+
+
+def test_sample_psf_parameters_default_ratio_matches_golden() -> None:
+    """Byte-identity contract (v7 §3): with the elliptical/airy ratio ranges at their defaults,
+    a fixed-seed 50-draw sequence of PSF parameter dicts is unchanged. Golden pinned from HEAD."""
+    golden = np.load(_DATA / "psf_params_golden_v1.npz", allow_pickle=False)
+    rng = np.random.default_rng(2024)
+    seq = [physics.sample_psf_parameters(rng=rng) for _ in range(50)]
+    assert json.dumps(seq, sort_keys=True) == str(golden["params_json"])
+
+
+def test_make_noise_mix_weights_custom() -> None:
+    """§5.2: custom mix_weights shift the `mixed` family blend (more FPN weight => smoother,
+    more spatially-correlated field) while the total residual RMS stays anchored to noise_sigma_c."""
+    shape = (64, 80)
+    sigma = 0.08
+    base = physics.make_noise(shape, noise_sigma_c=sigma, seed=7, noise_model="mixed", fpn_sigma_px=6.0)
+    fpn_heavy = physics.make_noise(shape, noise_sigma_c=sigma, seed=7, noise_model="mixed",
+                                   fpn_sigma_px=6.0, mix_weights={"fpn_w": 0.95, "iid_w": 0.05})
+    iid_heavy = physics.make_noise(shape, noise_sigma_c=sigma, seed=7, noise_model="mixed",
+                                   fpn_sigma_px=6.0, mix_weights={"fpn_w": 0.05, "iid_w": 0.95})
+    for arr in (base, fpn_heavy, iid_heavy):
+        assert abs(float(arr.std()) - sigma) < 1e-3        # RMS renormalized to the anchor
+
+    def _hf(a: np.ndarray) -> float:
+        return float(np.mean(np.abs(np.diff(a, axis=1))))  # per-pixel finite-difference energy
+    assert _hf(fpn_heavy) < _hf(base) < _hf(iid_heavy)
+
+
+def test_psf_ratio_range_respected() -> None:
+    """§5.2: a narrow elliptical/airy ratio range is honoured on BOTH shapes. A degenerate base
+    sigma_range=(1,1) makes ratio == the drawn sigma, so the ratio bounds are directly observable.
+    (Draw-count invariance under default ranges is proven by the golden test above.)"""
+    lo, hi = 0.5, 0.6
+    rng = np.random.default_rng(11)
+    n_ell = n_airy = 0
+    for _ in range(400):
+        p = physics.sample_psf_parameters(
+            rng=rng, sigma_range=(1.0, 1.0), elliptical_probability=0.5, airy_probability=0.5,
+            elliptical_ratio_range=(lo, hi), airy_ratio_range=(lo, hi))
+        sx = float(p["psf_sigma_lr_px"])
+        sy = p["psf_sigma_y_lr_px"]
+        if p["psf_shape"] == "elliptical_gaussian":
+            assert lo - 1e-6 <= sx <= hi + 1e-6            # x-axis == an independent ratio
+            assert sy is not None and lo - 1e-6 <= float(sy) <= hi + 1e-6
+            n_ell += 1
+        elif p["psf_shape"] == "airy_disk":
+            assert abs(sx - 1.0) < 1e-6                     # airy x-axis == base sigma (no ratio)
+            assert sy is not None and lo - 1e-6 <= float(sy) <= hi + 1e-6
+            n_airy += 1
+    assert n_ell > 0 and n_airy > 0
 
 
 def test_physics_parameter_sampling_covers_wide_range_specs() -> None:
