@@ -4,7 +4,7 @@ from pathlib import Path
 
 import numpy as np
 
-from tcforge import realism
+from tcforge import _noise_stats, physics, realism
 
 _GOLDEN = Path(__file__).parent / "data" / "defects_golden_v1.npz"
 _GOLDEN_FIELD = Path(__file__).parent / "data" / "field_noise_golden_v1.npz"
@@ -222,3 +222,144 @@ def test_field_noise_default_path_matches_golden():
     assert out.dtype == ref.dtype
     assert out.tobytes() == ref.tobytes()
     assert sentinel == float(golden["legacy_sentinel"])
+
+
+# ---------------------------------------------------------------------------------------------
+# §5.2 per-item statistical acceptance of the four v7 noise upgrades (all measured with the
+# §5.0 same-source estimators in tcforge._noise_stats, i.e. identically to the real-noise audit).
+# ---------------------------------------------------------------------------------------------
+
+def _flat_burst(m, h, w) -> np.ndarray:
+    return np.zeros((m, h, w), np.float32)
+
+
+def test_row_stripe_amplitude_and_corr_length():
+    """(a) row-stripe FPN. The generator injects a UNIT-STD row profile scaled by row_stripe_c, so
+    the RAW row-profile std == row_stripe_c essentially exactly (§1.2 'unit-std x coef'); the
+    correlation length ~ 2*sigma_row. No column leakage.
+
+    NOTE (deviation from the plan's literal wording): the §5.0 stripe_profiles estimator BG-subtracts
+    a sigma=25 px Gaussian (matched to the real audit), which high-pass-attenuates the *measured*
+    row amplitude to ~0.66-0.8x the injected value. That attenuation is identical for real and
+    synthetic data, so the absolute °C calibration is closed by the §5.4 pilot loop; here we assert
+    the generator's unit invariant on the RAW profile and only that the estimator sees the stripe."""
+    amp = 0.049
+    rng = np.random.default_rng(101)
+    field = realism.field_noise_burst(
+        _flat_burst(1, 200, 200), rng, vignette_c=0.0, stripe_c=0.0, grain_c=0.0,
+        row_stripe_c=amp, stripe_row_sigma=(5.5, 5.5))[0]
+    raw_row_std = float(field.mean(axis=1).std())          # RAW row profile (no BG subtraction)
+    assert abs(raw_row_std - amp) <= 0.15 * amp
+    sp = _noise_stats.stripe_profiles(field)               # §5.0 same-source estimator
+    assert sp["row_amp"] > 5.0 * max(sp["col_amp"], 1e-9)  # row stripe present & dominant
+    assert sp["col_amp"] < 0.1 * amp                        # no column leakage
+    lens = []
+    for s in range(40):
+        f = realism.field_noise_burst(
+            _flat_burst(1, 200, 200), np.random.default_rng(3000 + s),
+            vignette_c=0.0, stripe_c=0.0, grain_c=0.0,
+            row_stripe_c=amp, stripe_row_sigma=(5.5, 5.5))[0]
+        L = _noise_stats.autocorr_1e_length(f.mean(axis=1), np.ones(f.shape[0], bool))
+        if L is not None:
+            lens.append(L)
+    assert 8 <= int(np.median(lens)) <= 14                  # ~ 2*sigma_row = 11
+
+
+def test_col_stripe_corr_length_formula():
+    """Pin the column-stripe 2*sigma correlation-length mapping: sigma_col=3.5 => 1/e in [5,9] px."""
+    lens = []
+    for s in range(40):
+        f = realism.field_noise_burst(
+            _flat_burst(1, 200, 200), np.random.default_rng(3000 + s),
+            vignette_c=0.0, stripe_c=0.065, grain_c=0.0, stripe_col_sigma=(3.5, 3.5))[0]
+        L = _noise_stats.stripe_profiles(f)["col_1e_length_px"]
+        if L is not None:
+            lens.append(L)
+    assert 5 <= int(np.median(lens)) <= 9
+
+
+def test_powerlaw_field_slope():
+    """(b) physics.powerlaw_field: radial PSD slope ~ target, high log-log R^2, unit std."""
+    target = 1.77
+    alphas, r2s, stds = [], [], []
+    for s in range(8):
+        f = physics.powerlaw_field((160, 160), target, np.random.default_rng(s))
+        stds.append(float(f.std()))
+        sl = _noise_stats.radial_psd_slope(f.astype(np.float64), 160)
+        alphas.append(sl["alpha"])
+        r2s.append(sl["r2_loglog_fit"])
+    assert abs(float(np.mean(alphas)) - target) <= 0.15
+    assert min(r2s) > 0.85
+    assert abs(float(np.mean(stds)) - 1.0) < 0.05
+
+
+def test_field_noise_composite_psd_slope():
+    """(b) with the full v7 amplitude set on, the composite mean-image PSD slope stays in a
+    detector-like band alpha in [1.5, 2.0] (1/f field + white pixel-FPN floor combined)."""
+    rng = np.random.default_rng(7)
+    o = realism.field_noise_burst(
+        _flat_burst(64, 180, 180), rng,
+        vignette_c=0.13, stripe_c=0.065, stripe_col_sigma=(2.5, 4.5), grain_c=0.10,
+        row_stripe_c=0.049, stripe_row_sigma=(5.5, 5.5), lowfreq_c=0.07, lowfreq_alpha=(1.77, 1.77),
+        pixel_fpn_c=0.07, grain_ar1_rho=0.63)
+    crop = o.mean(axis=0)[10:170, 10:170].astype(np.float64)
+    alpha = _noise_stats.radial_psd_slope(crop, 160)["alpha"]
+    assert 1.5 <= alpha <= 2.0
+
+
+def test_grain_ar1_lag1_and_fusion_gain():
+    """(c) AR(1) grain: lag-1 autocorr == rho; per-frame marginal std == grain_c; multi-frame mean
+    std == grain_c*sqrt((1+rho)/((1-rho)*M)) — the realistic (slowed) multi-frame fusion gain."""
+    rho, gc, M = 0.63, 0.10, 248
+    o = realism.field_noise_burst(
+        _flat_burst(M, 64, 64), np.random.default_rng(3),
+        vignette_c=0.0, stripe_c=0.0, grain_c=gc, grain_ar1_rho=rho)
+    assert abs(_noise_stats.lag1_autocorr_median(o) - rho) <= 0.05
+    per_frame_std = float(o.std(axis=(1, 2)).mean())
+    assert abs(per_frame_std - gc) <= 0.10 * gc
+    mean_std = float(o.mean(axis=0).std())
+    pred = gc * np.sqrt((1.0 + rho) / ((1.0 - rho) * M))
+    assert abs(mean_std - pred) <= 0.20 * pred
+
+
+def test_grain_ar1_rho_zero_bit_identical():
+    """(c) rho=0 leaves the grain (and thus the whole output + RNG stream) bit-identical to not
+    passing the knob — the AR(1) recursion introduces no extra draw."""
+    b = np.full((16, 48, 60), 20.0, np.float32)
+    r1 = np.random.default_rng(9)
+    o1 = realism.field_noise_burst(b, r1, grain_c=0.1)
+    s1 = float(r1.random())
+    r2 = np.random.default_rng(9)
+    o2 = realism.field_noise_burst(b, r2, grain_c=0.1, grain_ar1_rho=0.0)
+    s2 = float(r2.random())
+    assert o1.tobytes() == o2.tobytes()
+    assert s1 == s2
+
+
+def test_pixel_fpn_static_across_burst():
+    """(d) static per-pixel FPN: zero temporal std, spatial std == pixel_fpn_c, and it survives
+    multi-frame averaging (mean-image std unchanged)."""
+    pc, M = 0.07, 32
+    o = realism.field_noise_burst(
+        _flat_burst(M, 120, 120), np.random.default_rng(2),
+        vignette_c=0.0, stripe_c=0.0, grain_c=0.0, pixel_fpn_c=pc)
+    assert float(o.std(axis=0).mean()) < 1e-6                   # identical across frames
+    assert abs(float(o.mean(axis=0).std()) - pc) <= 0.10 * pc   # spatial amplitude == pc
+    assert abs(float(o[0].std()) - pc) <= 0.10 * pc             # single frame carries the full FPN
+
+
+def test_burst_semantics_partition():
+    """Variance decomposition with everything on: resid.mean(axis=0) recovers the fixed structure
+    (vignette + col/row stripes + 1/f field + pixel FPN) well above the averaged-grain floor, and
+    resid.std(axis=0) recovers the per-frame grain marginal std (== grain_c at rho=0)."""
+    gc, M = 0.10, 64
+    base = np.full((M, 96, 96), 20.0, np.float32)
+    o = realism.field_noise_burst(
+        base, np.random.default_rng(11),
+        vignette_c=0.13, stripe_c=0.065, stripe_col_sigma=(2.5, 4.5), grain_c=gc,
+        row_stripe_c=0.049, stripe_row_sigma=(5.5, 5.5), lowfreq_c=0.07, lowfreq_alpha=(1.77, 1.77),
+        pixel_fpn_c=0.07, grain_ar1_rho=0.0)
+    resid = o - base
+    assert float(resid.mean(axis=0).std()) > 0.10           # fixed structure present
+    per_frame_std = float(resid.std(axis=0).mean())
+    assert abs(per_frame_std - gc) <= 0.12 * gc             # per-frame grain == grain_c

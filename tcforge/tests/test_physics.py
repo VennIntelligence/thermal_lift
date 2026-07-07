@@ -176,6 +176,48 @@ def test_sample_psf_parameters_default_ratio_matches_golden() -> None:
     assert json.dumps(seq, sort_keys=True) == str(golden["params_json"])
 
 
+def test_make_noise_mix_weights_custom() -> None:
+    """§5.2: custom mix_weights shift the `mixed` family blend (more FPN weight => smoother,
+    more spatially-correlated field) while the total residual RMS stays anchored to noise_sigma_c."""
+    shape = (64, 80)
+    sigma = 0.08
+    base = physics.make_noise(shape, noise_sigma_c=sigma, seed=7, noise_model="mixed", fpn_sigma_px=6.0)
+    fpn_heavy = physics.make_noise(shape, noise_sigma_c=sigma, seed=7, noise_model="mixed",
+                                   fpn_sigma_px=6.0, mix_weights={"fpn_w": 0.95, "iid_w": 0.05})
+    iid_heavy = physics.make_noise(shape, noise_sigma_c=sigma, seed=7, noise_model="mixed",
+                                   fpn_sigma_px=6.0, mix_weights={"fpn_w": 0.05, "iid_w": 0.95})
+    for arr in (base, fpn_heavy, iid_heavy):
+        assert abs(float(arr.std()) - sigma) < 1e-3        # RMS renormalized to the anchor
+
+    def _hf(a: np.ndarray) -> float:
+        return float(np.mean(np.abs(np.diff(a, axis=1))))  # per-pixel finite-difference energy
+    assert _hf(fpn_heavy) < _hf(base) < _hf(iid_heavy)
+
+
+def test_psf_ratio_range_respected() -> None:
+    """§5.2: a narrow elliptical/airy ratio range is honoured on BOTH shapes. A degenerate base
+    sigma_range=(1,1) makes ratio == the drawn sigma, so the ratio bounds are directly observable.
+    (Draw-count invariance under default ranges is proven by the golden test above.)"""
+    lo, hi = 0.5, 0.6
+    rng = np.random.default_rng(11)
+    n_ell = n_airy = 0
+    for _ in range(400):
+        p = physics.sample_psf_parameters(
+            rng=rng, sigma_range=(1.0, 1.0), elliptical_probability=0.5, airy_probability=0.5,
+            elliptical_ratio_range=(lo, hi), airy_ratio_range=(lo, hi))
+        sx = float(p["psf_sigma_lr_px"])
+        sy = p["psf_sigma_y_lr_px"]
+        if p["psf_shape"] == "elliptical_gaussian":
+            assert lo - 1e-6 <= sx <= hi + 1e-6            # x-axis == an independent ratio
+            assert sy is not None and lo - 1e-6 <= float(sy) <= hi + 1e-6
+            n_ell += 1
+        elif p["psf_shape"] == "airy_disk":
+            assert abs(sx - 1.0) < 1e-6                     # airy x-axis == base sigma (no ratio)
+            assert sy is not None and lo - 1e-6 <= float(sy) <= hi + 1e-6
+            n_airy += 1
+    assert n_ell > 0 and n_airy > 0
+
+
 def test_physics_parameter_sampling_covers_wide_range_specs() -> None:
     params = physics.sample_physics_parameters(
         seed=3,
