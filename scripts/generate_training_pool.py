@@ -365,6 +365,12 @@ def _generate_one_scene(
             sigma_range=_range_pair(psf_cfg.get("sigma_range", physics["psf_sigma_lr_px"]), "psf_randomization.sigma_range"),
             elliptical_probability=float(psf_cfg.get("elliptical_probability", 0.30)),
             airy_probability=float(psf_cfg.get("airy_probability", 0.10)),
+            # §3: expose the elliptical/airy axis-ratio ranges (defaults reproduce the previous
+            # hard-coded 0.80-1.20 / 0.85-1.20; _range_pair only parses, so no rng draw changes).
+            elliptical_ratio_range=_range_pair(
+                psf_cfg.get("elliptical_ratio_range", [0.80, 1.20]), "psf_randomization.elliptical_ratio_range"),
+            airy_ratio_range=_range_pair(
+                psf_cfg.get("airy_ratio_range", [0.85, 1.20]), "psf_randomization.airy_ratio_range"),
         )
         psf_sigma_lr_px = float(psf_params["psf_sigma_lr_px"])
         psf_shape = str(psf_params["psf_shape"])
@@ -488,13 +494,31 @@ def _generate_one_scene(
     if noise_model == "field_vignette_stripe":
         # Realism noise: smooth vignette + smooth column-stripe FPN (fixed across the burst)
         # + per-frame fine grain (synthetic_data_realism.md). Matches the real IR frames.
+        # Legacy amplitudes are drawn first, in the historical order (vignette, stripe, grain), so
+        # configs WITHOUT any v7 key reproduce the v6 pool byte-for-byte (the extras dict stays
+        # empty => zero extra rng draws and an unchanged noise_params_resolved metadata dict).
+        vignette = _uniform_range(rng, noise_cfg.get("vignette_c", 0.13), "noise_model.vignette_c")
+        stripe = _uniform_range(rng, noise_cfg.get("stripe_c", 0.028), "noise_model.stripe_c")
+        grain = _uniform_range(rng, noise_cfg.get("grain_c", 0.10), "noise_model.grain_c")
+        # v7 noise upgrades: draw the amplitude ONLY when the config explicitly gives the key, in a
+        # fixed key order (row -> lowfreq -> pixel_fpn -> grain_ar1); the *_sigma / *_alpha ranges
+        # are passed through verbatim (drawn inside field_noise_burst, like stripe_col_sigma).
+        extras: dict[str, Any] = {}
+        if "row_stripe_c" in noise_cfg:
+            extras["row_stripe_c"] = _uniform_range(rng, noise_cfg["row_stripe_c"], "noise_model.row_stripe_c")
+            extras["stripe_row_sigma"] = noise_cfg.get("stripe_row_sigma", [4.5, 6.5])
+        if "lowfreq_c" in noise_cfg:
+            extras["lowfreq_c"] = _uniform_range(rng, noise_cfg["lowfreq_c"], "noise_model.lowfreq_c")
+            extras["lowfreq_alpha"] = noise_cfg.get("lowfreq_alpha", [1.7, 1.8])
+        if "pixel_fpn_c" in noise_cfg:
+            extras["pixel_fpn_c"] = _uniform_range(rng, noise_cfg["pixel_fpn_c"], "noise_model.pixel_fpn_c")
+        if "grain_ar1_rho" in noise_cfg:
+            extras["grain_ar1_rho"] = _uniform_range(rng, noise_cfg["grain_ar1_rho"], "noise_model.grain_ar1_rho")
         lr_burst = _realism.field_noise_burst(
-            lr_burst, rng,
-            vignette_c=_uniform_range(rng, noise_cfg.get("vignette_c", 0.13), "noise_model.vignette_c"),
-            stripe_c=_uniform_range(rng, noise_cfg.get("stripe_c", 0.028), "noise_model.stripe_c"),
+            lr_burst, rng, vignette_c=vignette, stripe_c=stripe,
             stripe_col_sigma=noise_cfg.get("stripe_col_sigma", [2.5, 5.0]),
-            grain_c=_uniform_range(rng, noise_cfg.get("grain_c", 0.10), "noise_model.grain_c"),
-        )
+            grain_c=grain, **extras)
+        noise_params_resolved.update(extras)   # dict update consumes no rng; empty for legacy configs
     else:
         lr_burst = add_noise(
             lr_burst,
@@ -507,6 +531,8 @@ def _generate_one_scene(
                 if noise_params_resolved["stripe_sigma_c"] is None
                 else float(noise_params_resolved["stripe_sigma_c"])
             ),
+            # §2: forward the optional per-family mix weights (None => historical blend, no change).
+            mix_weights=noise_cfg.get("mix_weights"),
         )
 
     drift_params = dict(config.get("drift_parameters", {}))
