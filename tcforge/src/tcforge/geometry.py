@@ -1623,6 +1623,8 @@ def build_scene_mask_with_metadata(
     ssaa_factor: int = DEFAULT_SSAA_FACTOR,
     inscribe_disc: bool = False,
     motif_weights: dict[str, float] | None = None,
+    scene_composer: str | None = None,
+    composer_params: dict[str, object] | None = None,
 ) -> tuple[np.ndarray, dict[str, object]]:
     """Build a dense IC-layout-style chip mask with blocks and routing.
 
@@ -1660,6 +1662,38 @@ def build_scene_mask_with_metadata(
     common: dict[str, object] = dict(
         canvas_shape=draw_shape, pixel_size_um=pixel_size_um, scale=draw_scale,
     )
+
+    # ── panel_cluster_v7 scene dispatch (v7 integration §1.1) ────────────────────
+    # A dedicated composer key, NOT a motif_weights entry: v7 has its own tier
+    # system and its own FLOOR-derived floors. This branch runs BEFORE any RNG is
+    # consumed on the v6/legacy paths (the levels dict + `common` above draw zero
+    # RNG), so with scene_composer in (None, "legacy") the v6/legacy RNG streams and
+    # outputs are BYTE-IDENTICAL — pinned by geometry_golden_v1.npz. `rng` was
+    # created at default_rng(seed) above and is passed pristine to the composer.
+    if scene_composer == "panel_cluster_v7":
+        from tcforge.composer_v7 import compose_panel_cluster_scene
+        v7_mask, v7_prims, v7_extra = compose_panel_cluster_scene(
+            rng, params=(composer_params or {}), common=common,
+            draw_shape=draw_shape, canvas_w_um=canvas_w_um, canvas_h_um=canvas_h_um,
+            detector_pitch_um=float(pixel_size_um))
+        cov, meta = _finalize_scene_mask(
+            v7_mask, v7_prims, "panel_cluster_v7",
+            rng=rng,
+            rotation_deg_center=rotation_deg_center,
+            rotation_jitter_deg=rotation_jitter_deg,
+            antialias=bool(antialias),
+            aa_factor=aa_factor,
+            inscribe_disc=bool(inscribe_disc),
+            draw_shape=draw_shape,
+            difficulty=difficulty,
+            density=None,
+        )
+        meta.update(v7_extra)  # scene_tier / panels / traces / zones / secondary_part
+        return cov, meta
+    if scene_composer not in (None, "legacy"):
+        raise ValueError(
+            f"unknown scene_composer {scene_composer!r}; expected None, 'legacy' or "
+            "'panel_cluster_v7'")
 
     # CPU / electronic-part geometry family (v6): when motif weights are supplied
     # the scene is composed from part motifs (die outlines, fine pad grids, buses,
