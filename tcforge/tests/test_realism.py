@@ -7,6 +7,15 @@ import numpy as np
 from tcforge import realism
 
 _GOLDEN = Path(__file__).parent / "data" / "defects_golden_v1.npz"
+_ISO_GOLDEN = Path(__file__).parent / "data" / "isothermal_golden_v1.npz"
+
+
+def _iso_golden_mask() -> np.ndarray:
+    mask = np.zeros((160, 200), np.float32)
+    mask[20:70, 30:90] = 1.0
+    mask[90:140, 110:170] = 1.0
+    mask[95:110, 40:60] = 1.0
+    return mask
 
 
 def _solid_block_cov() -> np.ndarray:
@@ -156,6 +165,38 @@ def test_small_soft_holes_render_nonempty_and_not_full_depth():
         intermediate = affected & (removal < 1.0 - 1e-6)
         assert int(intermediate.sum()) > 0                   # soft edges: partial depth exists
         assert int(intermediate.sum()) < int(affected.sum()) or float(removal.max()) < 1.0
+
+
+def test_isothermal_default_path_matches_golden():
+    """Byte-identity contract (v7 integration §3.6): the new zones/zone_rotation/
+    zone_level_jitter keywords must leave the default (zones=None) path of
+    render_isothermal_field BIT-IDENTICAL — output array + trailing RNG sentinel.
+    Golden generated from pre-change HEAD by scratchpad/make_v7_goldens.py."""
+    golden = np.load(_ISO_GOLDEN, allow_pickle=False)
+    rng = np.random.default_rng(777)
+    field = realism.render_isothermal_field(
+        _iso_golden_mask(), rng, t_bg_c=21.0, delta_t_c=2.6, level_min=0.82,
+        edge_sigma=1.4, low_freq_amplitude_c=0.1, low_freq_sigma_px=96.0)
+    sentinel = float(rng.random())
+    ref = golden["field"]
+    assert str(field.dtype) == str(golden["dtype"])
+    assert field.shape == tuple(int(v) for v in golden["shape"])
+    assert field.tobytes() == ref.tobytes()
+    assert sentinel == float(golden["sentinel"])
+
+
+def test_isothermal_zones_none_matches_no_zones_kwarg():
+    """Explicitly passing zones=None equals omitting it (inert new keyword)."""
+    rng_a = np.random.default_rng(31)
+    a = realism.render_isothermal_field(_iso_golden_mask(), rng_a, level_min=0.7)
+    sa = rng_a.random()
+    rng_b = np.random.default_rng(31)
+    b = realism.render_isothermal_field(
+        _iso_golden_mask(), rng_b, level_min=0.7,
+        zones=None, zone_rotation_deg=17.0, zone_level_jitter=0.05)
+    sb = rng_b.random()
+    assert a.tobytes() == b.tobytes()
+    assert sa == sb
 
 
 def test_isothermal_is_uniform_within_a_connected_structure():

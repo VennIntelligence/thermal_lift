@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -11,6 +12,19 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import tcforge.geometry as geometry
+
+_GEOM_GOLDEN = Path(__file__).parent / "data" / "geometry_golden_v1.npz"
+
+_V6_WEIGHTS = {  # pool_2x_v6_cpu.json verbatim
+    "pga_grid": 0.28, "die_bga": 0.24, "multi_die": 0.18,
+    "trace_bus": 0.14, "heat_spreader": 0.10, "generic": 0.06,
+}
+
+_GOLDEN_GEOM_KW = dict(
+    rotation_deg_center=0.0, rotation_jitter_deg=0.0,
+    canvas_shape=(240, 320), pixel_size_um=20.0, scale=2,
+    antialias=True, ssaa_factor=2, inscribe_disc=True,
+)
 
 
 def test_geometry_defaults_remain_2x_and_exposes_4x_constants() -> None:
@@ -227,6 +241,40 @@ def test_inscribe_disc_conserves_inscribed_mass_across_rotations() -> None:
         )
         drift = abs(float(rot[disc].sum()) - base_mass) / (base_mass + 1e-9)
         assert drift < 0.05
+
+
+def test_scene_mask_legacy_and_v6_paths_match_golden() -> None:
+    """Hard byte-identity contract (v7 integration §1.2): adding the scene_composer /
+    composer_params keywords must leave the legacy (no-motif) and v6-motif code paths
+    BIT-IDENTICAL — mask bytes + full metadata JSON. Golden generated from pre-change
+    HEAD by scratchpad/make_v7_goldens.py."""
+    golden = np.load(_GEOM_GOLDEN, allow_pickle=False)
+
+    legacy_mask, legacy_meta = geometry.build_scene_mask_with_metadata(
+        "medium", 101, motif_weights=None, **_GOLDEN_GEOM_KW)
+    assert str(legacy_mask.dtype) == str(golden["legacy_dtype"])
+    assert legacy_mask.tobytes() == golden["legacy_mask"].tobytes()
+    assert json.dumps(legacy_meta, sort_keys=True) == str(golden["legacy_meta_json"])
+
+    for seed, tag in ((202303, "v6a"), (404505, "v6b")):
+        mask, meta = geometry.build_scene_mask_with_metadata(
+            "medium", seed, motif_weights=_V6_WEIGHTS, **_GOLDEN_GEOM_KW)
+        assert str(mask.dtype) == str(golden[f"{tag}_dtype"])
+        assert mask.tobytes() == golden[f"{tag}_mask"].tobytes()
+        assert json.dumps(meta, sort_keys=True) == str(golden[f"{tag}_meta_json"])
+
+
+def test_scene_composer_default_none_is_inert() -> None:
+    """Explicitly passing scene_composer=None (and composer_params=None) is byte-for-byte
+    identical to not passing them — the new keywords default to legacy behaviour with zero
+    extra RNG draws."""
+    base_mask, base_meta = geometry.build_scene_mask_with_metadata(
+        "medium", 202303, motif_weights=_V6_WEIGHTS, **_GOLDEN_GEOM_KW)
+    explicit_mask, explicit_meta = geometry.build_scene_mask_with_metadata(
+        "medium", 202303, motif_weights=_V6_WEIGHTS,
+        scene_composer=None, composer_params=None, **_GOLDEN_GEOM_KW)
+    assert base_mask.tobytes() == explicit_mask.tobytes()
+    assert json.dumps(base_meta, sort_keys=True) == json.dumps(explicit_meta, sort_keys=True)
 
 
 def test_inscribe_disc_default_false_unchanged() -> None:
