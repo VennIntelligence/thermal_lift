@@ -53,6 +53,32 @@ def mtf_cutoff(sigma_hr, thresh=0.1):
     return float(fg[np.argmax(m < thresh)]) if (m < thresh).any() else 0.5
 
 
+def check_defect_schema(scene: dict) -> dict:
+    """v7 defect-annotation spot check (§6 test 15): schema_version 2, dense 1-based ids,
+    label-map ids subset of the instance ids, dot (hole) count. Absent annotations => inert
+    ({} => scene ignored by the pool-level zero-dot / schema aggregation)."""
+    m = scene["metadata"]
+    da = m.get("defect_annotations")
+    if not da:
+        return {}
+    inst = da.get("instances", [])
+    ids = [i.get("id") for i in inst]
+    problems: list[str] = []
+    if da.get("schema_version") != 2:
+        problems.append(f"schema_version={da.get('schema_version')}")
+    if ids != list(range(1, len(inst) + 1)):
+        problems.append("ids not dense/1-based")
+    di = scene.get("defect_instances")
+    if di is not None:
+        import numpy as _np
+        lm_ids = set(int(v) for v in _np.unique(di)) - {0}
+        if not lm_ids.issubset(set(ids)):
+            problems.append("label-map ids not subset of instances")
+    counts = da.get("counts_by_type", {})
+    n_dots = int(counts.get("hole", sum(1 for i in inst if i.get("type") == "hole")))
+    return {"has_annotations": True, "n_dots": n_dots, "defect_problems": problems}
+
+
 def audit_scene(scene_dir: Path) -> dict:
     s = load_scene_compact(scene_dir)
     m = s["metadata"]
@@ -94,6 +120,8 @@ def audit_scene(scene_dir: Path) -> dict:
         problems.append(f"psf_sigma {m['psf_sigma_lr_px']}")
     if not np.isfinite(burst).all():
         problems.append("burst has non-finite")
+    defect_info = check_defect_schema(s)
+    problems.extend(defect_info.get("defect_problems", []))
     return {
         "scene": scene_dir.name, "n_frames": int(len(burst)), "difficulty": m.get("difficulty"),
         "psf_shape": m.get("psf_shape"), "psf_sigma": round(float(m["psf_sigma_lr_px"]), 3),
@@ -102,6 +130,8 @@ def audit_scene(scene_dir: Path) -> dict:
         "resid_rms": round(float(np.median(rms)), 4),
         "noise_sigma_c": round(float(m.get("noise_sigma_c", np.nan)), 4),
         "E_above_LRnyq": round(e_above_lr, 4), "E_unrecoverable": round(e_unrec, 4),
+        "has_annotations": defect_info.get("has_annotations", False),
+        "n_dots": defect_info.get("n_dots"),
         "problems": problems,
     }
 
@@ -137,10 +167,18 @@ def main() -> int:
     corr_med = float(np.median([r["hp_corr_med"] for r in ok_rows])) if ok_rows else 0.0
     n_problem = sum(1 for r in rows if r.get("problems") or r.get("error"))
     e_unrec_med = float(np.median([r["E_unrecoverable"] for r in ok_rows])) if ok_rows else 0.0
+    # v7 defect-schema aggregate: zero-dot-scene ratio MUST be 0 (the G6 silent-floor fix).
+    annotated = [r for r in ok_rows if r.get("has_annotations")]
+    zero_dot = [r for r in annotated if (r.get("n_dots") or 0) == 0]
+    zero_dot_ratio = (len(zero_dot) / len(annotated)) if annotated else 0.0
     print(f"\nmedian hp-corr(clean A(target) vs saved burst) = {corr_med:.4f}   (want > 0.90: roundtrip sound)")
     print(f"median GT unrecoverable-band energy            = {e_unrec_med:.4f}   (want < ~0.05: data honest)")
     print(f"scenes with structural problems/errors         = {n_problem} / {len(rows)}")
-    verdict = corr_med > 0.90 and n_problem == 0
+    if annotated:
+        print(f"v7 defect annotations                          = {len(annotated)} / {len(ok_rows)} scenes")
+        print(f"zero-dot-scene ratio (want == 0)               = {zero_dot_ratio:.4f}  "
+              f"({len(zero_dot)} zero-dot scenes)")
+    verdict = corr_med > 0.90 and n_problem == 0 and zero_dot_ratio == 0.0
     print("\nPOOL AUDIT:", "PASS" if verdict else "INVESTIGATE")
     if args.out:
         Path(args.out).write_text(json.dumps({"median_hp_corr": corr_med, "rows": rows}, indent=2))

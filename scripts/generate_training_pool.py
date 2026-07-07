@@ -473,6 +473,7 @@ def _generate_one_scene(
             zone_rotation_deg=float(geo_meta["rotation_deg"]),
             zone_level_jitter=float(iso_cfg.get("zone_level_jitter", 0.03)),
             hr_pitch_um=float(config["pixel_size_um"]) / scale,
+            stratified_anchor=bool(iso_cfg.get("stratified_anchor", False)),
         )
     else:
         hr_temperature = render_temperature_field(

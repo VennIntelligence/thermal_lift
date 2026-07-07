@@ -183,6 +183,7 @@ def apply_defects(coverage, rng, *, severity_range=(0.3, 1.0),
                   min_holes=0,
                   # ── v7 integration §3.4/§3.1 ──
                   hole_margin_px=8, hole_margin_adaptive=False, hole_edge_fraction=0.0,
+                  min_notches=0,
                   record_instances=False, label_map=None, next_id=1):
     """Subtract irregular holes (interior), broken edges (boundary) and jagged cracks from a
     coverage mask. All defects are > pitch (recoverable). Per-scene `severity` randomizes counts.
@@ -289,7 +290,11 @@ def apply_defects(coverage, rng, *, severity_range=(0.3, 1.0),
             instances.append(_instance(nid - 1, "hole", "coverage", hy, hx,
                                        radius_px=radius, depth_or_amplitude=depth,
                                        edge_softness_px=softness, context=ctx, area_px=area))
-    for _ in range(int(rng.integers(0, round(max_notches * sev) + 1))):
+    # min_notches floor (default 0 => rng.integers(0, ...) == legacy => byte-identical;
+    # v7 sets a floor so every scene carries >=1 edge notch, matching the prototype's 2-5).
+    notch_ceil = round(max_notches * sev)
+    notch_floor = max(0, min(int(min_notches), int(notch_ceil)))
+    for _ in range(int(rng.integers(notch_floor, notch_ceil + 1))):
         if len(by) == 0:
             break
         j = rng.integers(len(by))
@@ -378,7 +383,7 @@ def _apply_zone_levels(rng, per, lbl, n, cov, zones, rot_deg, jitter, hr_pitch, 
 def render_isothermal_field(mask, rng, *, t_bg_c=22.0, delta_t_c=2.6, level_min=0.82,
                             edge_sigma=1.4, low_freq_amplitude_c=0.0, low_freq_sigma_px=96.0,
                             zones=None, zone_rotation_deg=0.0, zone_level_jitter=0.03,
-                            hr_pitch_um=None):
+                            hr_pitch_um=None, stratified_anchor=False):
     """Near-isothermal temperature field: each connected structure at ~one level (modest spread
     `[level_min, 1.0]`), soft edges (coverage-weighted + small Gaussian). Optional gentle low-freq
     scene background. No thickness->temperature coupling — connected metal is ~isothermal.
@@ -394,6 +399,16 @@ def render_isothermal_field(mask, rng, *, t_bg_c=22.0, delta_t_c=2.6, level_min=
     lvl = np.zeros(cov.shape, dtype=np.float32)
     if n > 0:
         per = rng.uniform(float(level_min), 1.0, size=n).astype(np.float32)
+        if stratified_anchor:
+            # Guarantee per-scene bright/dark spread (v7 G7 / prototype level_render): among
+            # sizeable components pin one to the dark end and one to the bright end. Gated =>
+            # default draws nothing extra. per[k] <-> component (k+1).
+            areas = np.bincount(lbl.ravel(), minlength=n + 1)
+            big = np.where(areas[1:] >= 50)[0]
+            if len(big) >= 2:
+                pick = rng.choice(len(big), size=2, replace=False)
+                per[big[pick[0]]] = float(level_min) + float(rng.uniform(0.0, 0.05))
+                per[big[pick[1]]] = 1.0 - float(rng.uniform(0.0, 0.05))
         if zones:
             if hr_pitch_um is None:
                 raise ValueError("render_isothermal_field: hr_pitch_um required when zones given")

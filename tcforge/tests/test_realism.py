@@ -428,6 +428,44 @@ def test_defect_instance_schema_and_label_map():
                                  "width_px", "gap_px", "context", "trace_index", "area_px"}
 
 
+def test_min_notches_floor_and_default_inert():
+    """min_notches enforces a per-scene edge-notch floor (G8); default 0 is byte-identical."""
+    cov = _solid_block_cov()
+    for seed in range(6):
+        rng = np.random.default_rng(seed)
+        _, m = realism.apply_defects(cov, rng, severity_range=(1.0, 1.0), max_holes=0,
+                                     max_notches=6, max_cracks=0, min_notches=2)
+        assert m["notches"] >= 2
+    # default (min_notches=0) unchanged vs omitting
+    a, ma = realism.apply_defects(cov, np.random.default_rng(3), severity_range=(1.0, 1.0))
+    b, mb = realism.apply_defects(cov, np.random.default_rng(3), severity_range=(1.0, 1.0),
+                                  min_notches=0)
+    assert a.tobytes() == b.tobytes() and json.dumps(ma, sort_keys=True) == json.dumps(mb, sort_keys=True)
+
+
+def test_stratified_anchor_widens_spread_and_default_inert():
+    """stratified_anchor pins one big component dark + one bright (G7); default off is inert."""
+    cov = np.zeros((200, 200), np.float32)
+    cov[10:60, 10:60] = 1.0
+    cov[10:60, 130:180] = 1.0
+    cov[130:180, 10:60] = 1.0
+    cov[130:180, 130:180] = 1.0     # four big components
+    # anchored: spread spans nearly the full [level_min, 1] range
+    f = realism.render_isothermal_field(cov, np.random.default_rng(1), t_bg_c=0.0, delta_t_c=1.0,
+                                        level_min=0.6, edge_sigma=0.0, stratified_anchor=True)
+    lbl, n = ndimage.label(cov >= 0.5)
+    means = ndimage.mean(f, lbl, index=np.arange(1, n + 1))
+    assert float(np.max(means) - np.min(means)) >= 0.30
+    # default off == omitting (byte-identical + sentinel)
+    ra = np.random.default_rng(2)
+    a = realism.render_isothermal_field(cov, ra, level_min=0.6)
+    sa = ra.random()
+    rb = np.random.default_rng(2)
+    b = realism.render_isothermal_field(cov, rb, level_min=0.6, stratified_anchor=False)
+    sb = rb.random()
+    assert a.tobytes() == b.tobytes() and sa == sb
+
+
 def test_isothermal_zones_group_levels():
     """§6 test 11: components inside a zone share the zone base level (spread within a zone <<
     the global spread); zones=None path is unaffected (pinned separately by the golden test)."""
