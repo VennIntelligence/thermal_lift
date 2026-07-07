@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -11,6 +12,8 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import tcforge.physics as physics
+
+_DATA = Path(__file__).parent / "data"
 
 
 def test_temperature_field_respects_mask_semantics_and_bounds() -> None:
@@ -146,6 +149,31 @@ def test_psf_kernel_sampling_and_blur_are_normalized_and_finite() -> None:
     assert np.isclose(float(kernel.sum()), 1.0, atol=1e-5)
     assert np.isfinite(blurred).all()
     assert np.isclose(float(blurred.sum()), 1.0, atol=1e-4)
+
+
+def test_make_noise_mix_weights_none_matches_golden() -> None:
+    """Byte-identity contract (v7 §2): with mix_weights=None (default), make_noise reproduces the
+    pre-change hard-coded blend for the `mixed` and `detector_realistic` families exactly.
+    Golden pinned from HEAD by scratchpad/make_noise_goldens.py."""
+    golden = np.load(_DATA / "make_noise_golden_v1.npz")
+    shape = (3, 48, 60)
+    mixed_out = physics.make_noise(shape, noise_sigma_c=0.08, seed=123,
+                                   noise_model="mixed", fpn_sigma_px=5.0, stripe_sigma_c=None)
+    detector_out = physics.make_noise(shape, noise_sigma_c=0.08, seed=456,
+                                      noise_model="detector_realistic", fpn_sigma_px=5.0,
+                                      stripe_sigma_c=0.03)
+    assert mixed_out.dtype == golden["mixed_out"].dtype
+    assert mixed_out.tobytes() == golden["mixed_out"].tobytes()
+    assert detector_out.tobytes() == golden["detector_out"].tobytes()
+
+
+def test_sample_psf_parameters_default_ratio_matches_golden() -> None:
+    """Byte-identity contract (v7 §3): with the elliptical/airy ratio ranges at their defaults,
+    a fixed-seed 50-draw sequence of PSF parameter dicts is unchanged. Golden pinned from HEAD."""
+    golden = np.load(_DATA / "psf_params_golden_v1.npz", allow_pickle=False)
+    rng = np.random.default_rng(2024)
+    seq = [physics.sample_psf_parameters(rng=rng) for _ in range(50)]
+    assert json.dumps(seq, sort_keys=True) == str(golden["params_json"])
 
 
 def test_physics_parameter_sampling_covers_wide_range_specs() -> None:

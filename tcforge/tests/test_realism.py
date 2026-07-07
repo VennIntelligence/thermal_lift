@@ -7,6 +7,15 @@ import numpy as np
 from tcforge import realism
 
 _GOLDEN = Path(__file__).parent / "data" / "defects_golden_v1.npz"
+_GOLDEN_FIELD = Path(__file__).parent / "data" / "field_noise_golden_v1.npz"
+
+
+def _field_noise_burst_fixture() -> np.ndarray:
+    """Exact burst construction mirrored from scratchpad/make_noise_goldens.py (golden pin)."""
+    m, h, w = 8, 64, 80
+    yy, xx = np.mgrid[0:h, 0:w].astype(np.float32)
+    base = 20.0 + 0.01 * yy + 0.005 * xx
+    return np.broadcast_to(base, (m, h, w)).astype(np.float32).copy()
 
 
 def _solid_block_cov() -> np.ndarray:
@@ -185,3 +194,31 @@ def test_field_noise_accepts_single_frame():
     rng = np.random.default_rng(3)
     out = realism.field_noise_burst(np.full((48, 60), 19.0, np.float32), rng)
     assert out.shape == (48, 60)
+
+
+def test_field_noise_default_path_matches_golden():
+    """Hard contract (v7 noise upgrade): with the new noise knobs at their defaults (all OFF),
+    field_noise_burst is BIT-IDENTICAL to the pre-change implementation — output array AND the
+    RNG stream (sentinel draw after the call). Golden pinned from HEAD by
+    scratchpad/make_noise_goldens.py; both the fully-default and explicit-legacy-kwargs cases."""
+    golden = np.load(_GOLDEN_FIELD)
+
+    # Case 1: fully default kwargs.
+    rng = np.random.default_rng(20260708)
+    out = realism.field_noise_burst(_field_noise_burst_fixture(), rng)
+    sentinel = float(rng.random())
+    ref = golden["default_out"]
+    assert out.dtype == ref.dtype
+    assert out.tobytes() == ref.tobytes()
+    assert sentinel == float(golden["default_sentinel"])
+
+    # Case 2: explicit legacy kwargs (all pre-existing parameters spelled out, no v7 knobs).
+    rng = np.random.default_rng(77)
+    out = realism.field_noise_burst(
+        _field_noise_burst_fixture(), rng,
+        vignette_c=0.13, stripe_c=0.028, stripe_col_sigma=(2.5, 5.0), grain_c=0.10)
+    sentinel = float(rng.random())
+    ref = golden["legacy_out"]
+    assert out.dtype == ref.dtype
+    assert out.tobytes() == ref.tobytes()
+    assert sentinel == float(golden["legacy_sentinel"])
