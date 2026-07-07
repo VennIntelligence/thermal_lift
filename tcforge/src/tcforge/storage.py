@@ -31,6 +31,7 @@ def save_scene_compact(
     lr_burst: np.ndarray | None = None,
     phase_bin_drizzle: np.ndarray | None = None,
     hr_temperature: np.ndarray | None = None,
+    defect_instances: np.ndarray | None = None,
     compress_burst: bool = True,
 ) -> Path:
     """Save one compact scene (optionally with the HR temperature GT array).
@@ -89,6 +90,13 @@ def save_scene_compact(
         if not np.isfinite(hrt).all():
             raise ValueError("hr_temperature contains NaN or Inf")
         np.save(root / "hr_temperature_2x.npy", hrt)
+    if defect_instances is not None:
+        labels = np.asarray(defect_instances)
+        if labels.ndim != 2:
+            raise ValueError("defect_instances must be 2D (H_hr, W_hr)")
+        # Optional companion (like classical_sr): compact int16 instance-id label map;
+        # NOT part of COMPACT_SCENE_FILES so legacy loaders are unaffected. ~KB compressed.
+        np.savez_compressed(root / "defect_instances_2x.npz", labels=labels.astype(np.int16, copy=False))
     (root / "metadata.json").write_text(json.dumps(meta, indent=2, ensure_ascii=False), encoding="utf-8")
     return root
 
@@ -139,6 +147,11 @@ def load_scene_compact(scene_dir: str | Path) -> dict[str, Any]:
     hrt_path = root / "hr_temperature_2x.npy"
     if hrt_path.exists():
         result["hr_temperature"] = np.load(hrt_path, mmap_mode="r")
+    di_path = root / "defect_instances_2x.npz"
+    if di_path.exists():
+        with np.load(di_path) as data:
+            key = "labels" if "labels" in data else data.files[0]
+            result["defect_instances"] = np.asarray(data[key])
     drizzle_variants_path = root / f"drizzle_variants_{scale}x.npy"
     if drizzle_variants_path.exists():
         result["drizzle_variants"] = np.load(drizzle_variants_path, mmap_mode="r")

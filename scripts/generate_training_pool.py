@@ -390,6 +390,10 @@ def _generate_one_scene(
     # outlines, fine pad grids, buses, fins) via weighted choice. Absent => the
     # legacy generic IC-layout composition (v5 and earlier behaviour preserved).
     motif_weights = geometry_cfg.get("motif_weights")
+    # v7 integration: dedicated composer dispatch (panel_cluster_v7). Absent => None =>
+    # legacy/motif path, byte-identical to prior behaviour.
+    scene_composer = geometry_cfg.get("scene_composer")
+    composer_params = geometry_cfg.get("composer_params")
     # Use the finer SSAA factor on the hardest "stress" scenes to bound
     # rasteriser aliasing on the finest rotated lines.
     if plan.difficulty == "stress":
@@ -409,24 +413,67 @@ def _generate_one_scene(
         ssaa_factor=ssaa_factor,
         inscribe_disc=inscribe_disc,
         motif_weights=motif_weights,
+        scene_composer=scene_composer,
+        composer_params=composer_params,
     )
     # Realism (synthetic_data_realism.md): inject irregular defects (holes / broken edges /
     # cracks), all > pitch so they stay recoverable. Per-scene severity randomizes counts.
+    #
+    # v7 integration §3/§4: a single shared int16 label map + globally-unique id counter is
+    # threaded through THREE defect stages (trace-break -> coverage -> thermal) when
+    # defects.record_instances is set. Every gate below is absent-by-default so a v6-seed run
+    # draws ZERO extra RNG and produces byte-identical legacy output.
     defects_cfg = dict(config.get("defects", {}))
+    broken_cfg = dict(defects_cfg.get("broken_traces") or {})
+    record_instances = bool(defects_cfg.get("record_instances", False))
+    label_map = np.zeros(hr_mask.shape, dtype=np.int16) if record_instances else None
+    next_id = 1
+    trace_instances: list[dict[str, Any]] = []
     if defects_cfg.get("enabled", False):
-        defect_params = {k: v for k, v in defects_cfg.items() if k != "enabled"}
-        hr_mask, defect_meta = _realism.apply_defects(hr_mask, rng, **defect_params)
+        # (i) broken-trace carving from the composer trace table (post-rotation HR coords),
+        #     BEFORE apply_defects so notch/crack/hr_edge act on the broken coverage.
+        traces = geo_meta.get("traces") or []
+        if broken_cfg.get("enabled", False) and traces:
+            center_yx = ((hr_shape[0] - 1) / 2.0, (hr_shape[1] - 1) / 2.0)
+            hr_mask, trace_instances, next_id = _realism.carve_trace_breaks(
+                hr_mask, traces, rng,
+                scene_rotation_deg=float(geo_meta["rotation_deg"]),
+                canvas_center_yx=center_yx,
+                hr_pitch_um=float(config["pixel_size_um"]) / scale,
+                break_p=float(broken_cfg.get("break_p", 0.7)),
+                count_range=tuple(broken_cfg.get("count_range", (1, 2))),
+                gap_px=tuple(broken_cfg.get("gap_px", (6.0, 20.0))),
+                record_instances=record_instances, label_map=label_map, next_id=next_id,
+            )
+        # (ii) holes / notches / cracks. All v7 knobs live in defects_cfg and default to legacy.
+        defect_params = {k: v for k, v in defects_cfg.items()
+                         if k not in ("enabled", "broken_traces", "record_instances")}
+        hr_mask, defect_meta = _realism.apply_defects(
+            hr_mask, rng, record_instances=record_instances,
+            label_map=label_map, next_id=next_id, **defect_params)
+        next_id = int(defect_meta.pop("next_id", next_id))
+        coverage_instances = defect_meta.pop("instances", [])
         geo_meta["defects"] = defect_meta
+    else:
+        defect_meta = {}
+        coverage_instances = []
     # Temperature: 'isothermal' = connected metal ~one level (real chips are ~isothermal);
     # legacy 'standard' = 2-level coverage field.
+    thermal_instances: list[dict[str, Any]] = []
     if str(config.get("temperature_model", "standard")) == "isothermal":
         iso_cfg = dict(config.get("temperature_isothermal", {}))
+        iso_zones = geo_meta.get("zones") if bool(iso_cfg.get("zones_enabled", False)) else None
         hr_temperature = _realism.render_isothermal_field(
             hr_mask, rng, t_bg_c=t_bg_c, delta_t_c=delta_t_c,
             level_min=float(iso_cfg.get("level_min", 0.82)),
             edge_sigma=float(iso_cfg.get("edge_sigma", 1.4)),
             low_freq_amplitude_c=low_freq_amplitude_c,
             low_freq_sigma_px=low_freq_sigma_px,
+            zones=iso_zones,
+            zone_rotation_deg=float(geo_meta["rotation_deg"]),
+            zone_level_jitter=float(iso_cfg.get("zone_level_jitter", 0.03)),
+            hr_pitch_um=float(config["pixel_size_um"]) / scale,
+            stratified_anchor=bool(iso_cfg.get("stratified_anchor", False)),
         )
     else:
         hr_temperature = render_temperature_field(
@@ -436,6 +483,26 @@ def _generate_one_scene(
             low_freq_amplitude_c=low_freq_amplitude_c,
             low_freq_sigma_px=low_freq_sigma_px,
             seed=low_freq_seed,
+        )
+    # (iii) temperature-layer defects (hot spots / dark blobs) — scene-layer GT features,
+    #       injected into hr_temperature after isothermal, before the LR forward chain.
+    thermal_cfg = dict(config.get("thermal_defects", {}))
+    if thermal_cfg.get("enabled", False):
+        hot = dict(thermal_cfg.get("hot_spots", {}))
+        dark = dict(thermal_cfg.get("dark_blobs", {}))
+        hr_temperature, thermal_instances, next_id = _realism.apply_thermal_defects(
+            hr_temperature, hr_mask, rng, t_bg_c=t_bg_c, delta_t_c=delta_t_c,
+            hot_spot_count=tuple(hot.get("count", (2, 8))),
+            hot_radius_px=tuple(hot.get("radius_px", (1.0, 4.0))),
+            hot_amp_frac=tuple(hot.get("amp_frac", (0.3, 1.0))),
+            hot_edge_softness_px=float(hot.get("edge_softness_px", 1.0)),
+            hot_on_structure_p=float(hot.get("on_structure_p", 0.7)),
+            dark_blob_p=float(dark.get("prob", 0.6)),
+            dark_blob_count=tuple(dark.get("count", (1, 2))),
+            dark_blob_radius_px=tuple(dark.get("radius_px", (8.0, 16.0))),
+            dark_blob_depth=tuple(dark.get("depth", (0.15, 0.40))),
+            dark_blob_edge_softness_px=float(dark.get("edge_softness_px", 3.0)),
+            record_instances=record_instances, label_map=label_map, next_id=next_id,
         )
     hr_edge = edge_map(hr_mask >= 0.5, edge_width_px=2)
 
@@ -591,6 +658,27 @@ def _generate_one_scene(
             output_shape=hr_shape,
         )
 
+    # v7 defect annotations (metadata schema_version 2): merge the three defect stages into
+    # one instance list (globally-unique ids); only present when defects.record_instances.
+    defect_annotations = None
+    if record_instances:
+        all_instances = list(trace_instances) + list(coverage_instances) + list(thermal_instances)
+        counts_by_type: dict[str, int] = {}
+        for inst in all_instances:
+            counts_by_type[inst["type"]] = counts_by_type.get(inst["type"], 0) + 1
+        defect_annotations = {
+            "schema_version": 2,
+            "instances": all_instances,
+            "counts_by_type": counts_by_type,
+            "next_id": int(next_id),
+            "label_map_file": "defect_instances_2x.npz",
+        }
+        if "hole_margin_effective_px" in defect_meta:
+            defect_annotations["hole_margin_effective_px"] = int(defect_meta["hole_margin_effective_px"])
+        if "holes_shortfall" in defect_meta:
+            defect_annotations["holes_shortfall"] = int(defect_meta["holes_shortfall"])
+    occupancy_hr = float((np.asarray(hr_mask) >= 0.5).mean())
+
     metadata = {
         "scene_id": plan.scene_id,
         "scene_index": int(plan.scene_index),
@@ -621,6 +709,8 @@ def _generate_one_scene(
         "detector_defects": defect_params_resolved,
         "rotation_deg": float(geo_meta["rotation_deg"]),
         "geometry_metadata": geo_meta,
+        "occupancy_hr": occupancy_hr,
+        "defect_annotations": defect_annotations,
         "n_frames": n_frames,
         "forward_mode": config["forward_mode"],
         "shift_profile": config.get("shift_profile", "real_default_contour_refined"),
@@ -662,6 +752,11 @@ def _generate_one_scene(
         ),
         phase_bin_drizzle=phase_bin_drizzle_stack,
         hr_temperature=(hr_temperature if bool(storage_cfg.get("save_hr_temperature", False)) else None),
+        defect_instances=(
+            label_map
+            if (record_instances and bool(storage_cfg.get("save_defect_instances", False)))
+            else None
+        ),
         compress_burst=bool(storage_cfg.get("compress_burst", True)),
     )
     return {

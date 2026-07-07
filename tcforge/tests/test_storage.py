@@ -37,6 +37,35 @@ def _metadata() -> dict[str, object]:
     }
 
 
+def test_defect_instances_roundtrip(tmp_path: Path) -> None:
+    """§6 test 12: int16 defect-instance label map round-trips faithfully; absence is a no-op
+    (no defect_instances key, COMPACT_SCENE_FILES contract unchanged)."""
+    mask = np.zeros((48, 64), dtype=np.uint8)
+    mask[8:32, 10:40] = 1
+    edge = np.zeros_like(mask)
+    edge[8, 10:40] = 1
+    obs = np.zeros((5, 12, 16), np.float32)
+    shifts = np.zeros((5, 2), np.float32)
+    labels = np.zeros((48, 64), np.int16)
+    labels[10:14, 12:16] = 1
+    labels[20:26, 30:33] = 2
+    labels[5:9, 50:55] = 30000                 # exercise the int16 range
+
+    d = save_scene_compact(tmp_path / "with_inst", hr_mask=mask, hr_edge=edge,
+                           obs_features=obs, shifts=shifts, metadata=_metadata(),
+                           defect_instances=labels)
+    assert (d / "defect_instances_2x.npz").exists()
+    loaded = load_scene_compact(d)
+    assert loaded["defect_instances"].dtype == np.int16
+    assert np.array_equal(loaded["defect_instances"], labels)
+
+    # absent => no key, no file, loader unaffected
+    d0 = save_scene_compact(tmp_path / "no_inst", hr_mask=mask, hr_edge=edge,
+                            obs_features=obs, shifts=shifts, metadata=_metadata())
+    assert not (d0 / "defect_instances_2x.npz").exists()
+    assert "defect_instances" not in load_scene_compact(d0)
+
+
 def test_compact_scene_storage_round_trip(tmp_path: Path) -> None:
     mask = np.zeros((48, 64), dtype=np.uint8)
     mask[8:32, 10:40] = 1

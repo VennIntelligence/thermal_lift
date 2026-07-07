@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import sys
 from pathlib import Path
 
@@ -11,6 +12,19 @@ if str(SRC) not in sys.path:
     sys.path.insert(0, str(SRC))
 
 import tcforge.geometry as geometry
+
+_GEOM_GOLDEN = Path(__file__).parent / "data" / "geometry_golden_v1.npz"
+
+_V6_WEIGHTS = {  # pool_2x_v6_cpu.json verbatim
+    "pga_grid": 0.28, "die_bga": 0.24, "multi_die": 0.18,
+    "trace_bus": 0.14, "heat_spreader": 0.10, "generic": 0.06,
+}
+
+_GOLDEN_GEOM_KW = dict(
+    rotation_deg_center=0.0, rotation_jitter_deg=0.0,
+    canvas_shape=(240, 320), pixel_size_um=20.0, scale=2,
+    antialias=True, ssaa_factor=2, inscribe_disc=True,
+)
 
 
 def test_geometry_defaults_remain_2x_and_exposes_4x_constants() -> None:
@@ -227,6 +241,128 @@ def test_inscribe_disc_conserves_inscribed_mass_across_rotations() -> None:
         )
         drift = abs(float(rot[disc].sum()) - base_mass) / (base_mass + 1e-9)
         assert drift < 0.05
+
+
+def test_scene_mask_legacy_and_v6_paths_match_golden() -> None:
+    """Hard byte-identity contract (v7 integration §1.2): adding the scene_composer /
+    composer_params keywords must leave the legacy (no-motif) and v6-motif code paths
+    BIT-IDENTICAL — mask bytes + full metadata JSON. Golden generated from pre-change
+    HEAD by scratchpad/make_v7_goldens.py."""
+    golden = np.load(_GEOM_GOLDEN, allow_pickle=False)
+
+    legacy_mask, legacy_meta = geometry.build_scene_mask_with_metadata(
+        "medium", 101, motif_weights=None, **_GOLDEN_GEOM_KW)
+    assert str(legacy_mask.dtype) == str(golden["legacy_dtype"])
+    assert legacy_mask.tobytes() == golden["legacy_mask"].tobytes()
+    assert json.dumps(legacy_meta, sort_keys=True) == str(golden["legacy_meta_json"])
+
+    for seed, tag in ((202303, "v6a"), (404505, "v6b")):
+        mask, meta = geometry.build_scene_mask_with_metadata(
+            "medium", seed, motif_weights=_V6_WEIGHTS, **_GOLDEN_GEOM_KW)
+        assert str(mask.dtype) == str(golden[f"{tag}_dtype"])
+        assert mask.tobytes() == golden[f"{tag}_mask"].tobytes()
+        assert json.dumps(meta, sort_keys=True) == str(golden[f"{tag}_meta_json"])
+
+
+def _v7_scene(seed, tier, *, rot=0.0, canvas=(480, 640), ssaa=4):
+    return geometry.build_scene_mask_with_metadata(
+        "medium", seed, rotation_deg_center=rot, rotation_jitter_deg=0.0,
+        canvas_shape=canvas, pixel_size_um=20.0, scale=2,
+        antialias=True, ssaa_factor=ssaa, inscribe_disc=True,
+        scene_composer="panel_cluster_v7", composer_params={"force_tier": tier})
+
+
+def test_panel_cluster_v7_contract() -> None:
+    """Composer contract (v7 integration §6 test 13): seed reproducibility, occupancy
+    tier bands (G3), trace width >= 28um floor, no >=0.9mm plain panels, XL roles in
+    {lined,textured}, every void crossed by >= 1 trace, cluster inside the inscribe disc."""
+    FLOOR = 28.0
+
+    # seed reproducibility (mask bytes + metadata JSON)
+    a_cov, a_meta = _v7_scene(4242, "high", rot=91.0)
+    b_cov, b_meta = _v7_scene(4242, "high", rot=91.0)
+    assert a_cov.tobytes() == b_cov.tobytes()
+    assert json.dumps(a_meta, sort_keys=True) == json.dumps(b_meta, sort_keys=True)
+
+    seeds = range(6000, 6016)
+    occ = {"mid": [], "high": [], "xl": []}
+    for seed in seeds:
+        for tier in ("mid", "high", "xl"):
+            cov, meta = _v7_scene(seed, tier, rot=float((seed * 7) % 360))
+            occ[tier].append(float((cov > 0.5).mean()))
+            assert meta["scene_tier"] == tier
+            assert meta["scene_family"] == "panel_cluster_v7"
+            # trace narrow-dim >= FLOOR
+            for t in meta["traces"]:
+                assert min(t["h_um"], t["w_um"]) >= FLOOR - 0.5
+            # XL: every panel role in {lined, textured}
+            if tier == "xl":
+                assert all(p["role"] in ("lined", "textured") for p in meta["panels"])
+            # cluster inside inscribe disc: 0.7x circumradius acceptance (v6 die rule)
+            H_um = cov.shape[0] * 10.0
+            W_um = cov.shape[1] * 10.0
+            disc_r = min(W_um, H_um) / 2.0
+            for p in meta["panels"]:
+                reach = (np.hypot(p["cy_um"] - H_um / 2, p["cx_um"] - W_um / 2)
+                         + 0.7 * np.hypot(p["h_um"], p["w_um"]) / 2)
+                assert reach <= disc_r * 0.975
+
+    med = {k: float(np.median(v)) for k, v in occ.items()}
+    assert 0.05 <= med["mid"] <= 0.16, med
+    assert med["high"] >= 0.16, med
+    assert min(min(v) for v in occ.values()) >= 0.02, med
+    # XL capability tier (occ>=0.40) is a full-frame property (the small canvas above
+    # underestimates absolute occupancy); pooled max over 8 full-res XL scenes >= 0.40.
+    xl_full = []
+    for seed in range(2020001, 2020009):
+        cov, _ = geometry.build_scene_mask_with_metadata(
+            "medium", seed, rotation_deg_center=float((seed * 7) % 360),
+            rotation_jitter_deg=0.0, canvas_shape=(960, 1280), pixel_size_um=20.0,
+            scale=2, antialias=True, ssaa_factor=4, inscribe_disc=True,
+            scene_composer="panel_cluster_v7", composer_params={"force_tier": "xl"})
+        xl_full.append(float((cov > 0.5).mean()))
+    assert max(xl_full) >= 0.40, xl_full
+
+    # no >=0.9mm plain panel: every large panel carries carved dark structure
+    # (checked unrotated so bboxes align with the coverage grid)
+    for seed in (6100, 6101, 6102, 6103):
+        for tier in ("mid", "high", "xl"):
+            cov, meta = _v7_scene(seed, tier, rot=0.0)
+            H, W = cov.shape
+            for p in meta["panels"]:
+                if min(p["h_um"], p["w_um"]) >= 900.0:
+                    y0 = max(int((p["cy_um"] - p["h_um"] / 2) / 10.0), 0)
+                    y1 = min(int((p["cy_um"] + p["h_um"] / 2) / 10.0), H)
+                    x0 = max(int((p["cx_um"] - p["w_um"] / 2) / 10.0), 0)
+                    x1 = min(int((p["cx_um"] + p["w_um"] / 2) / 10.0), W)
+                    sub = cov[y0:y1, x0:x1]
+                    if sub.size:
+                        assert float((sub > 0.5).mean()) < 0.995, (seed, tier, p["role"])
+
+    # every void carries >= 1 crossing trace (owner r3 verdict, no empty voids):
+    # direct invariant on the private carver — a windowed panel void always records
+    # at least one void_span trace with a >= FLOOR narrow dimension.
+    import tcforge.composer_v7 as C
+    rng = np.random.default_rng(0)
+    comp = C._PanelClusterComposer(rng, {}, (1920, 2560), 12800.0, 9600.0, 20.0)
+    before = len(comp.traces)
+    comp._void_with_traces(4800.0, 6400.0, 3000.0, 4000.0, 60.0, island=True, w_floor=FLOOR)
+    spans = [t for t in comp.traces[before:] if t["kind"] == "void_span"]
+    assert len(spans) >= 1
+    assert all(min(t["h_um"], t["w_um"]) >= FLOOR - 0.5 for t in spans)
+
+
+def test_scene_composer_default_none_is_inert() -> None:
+    """Explicitly passing scene_composer=None (and composer_params=None) is byte-for-byte
+    identical to not passing them — the new keywords default to legacy behaviour with zero
+    extra RNG draws."""
+    base_mask, base_meta = geometry.build_scene_mask_with_metadata(
+        "medium", 202303, motif_weights=_V6_WEIGHTS, **_GOLDEN_GEOM_KW)
+    explicit_mask, explicit_meta = geometry.build_scene_mask_with_metadata(
+        "medium", 202303, motif_weights=_V6_WEIGHTS,
+        scene_composer=None, composer_params=None, **_GOLDEN_GEOM_KW)
+    assert base_mask.tobytes() == explicit_mask.tobytes()
+    assert json.dumps(base_meta, sort_keys=True) == json.dumps(explicit_meta, sort_keys=True)
 
 
 def test_inscribe_disc_default_false_unchanged() -> None:
