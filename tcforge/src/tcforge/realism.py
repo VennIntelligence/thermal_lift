@@ -115,6 +115,7 @@ def apply_defects(coverage, rng, *, severity_range=(0.3, 1.0),
     hole_floor = max(0, min(int(min_holes), hole_ceil))
     hole_depths: list[float] = []
     hole_radii: list[float] = []
+    hole_centers_yx: list[list[int]] = []
     for _ in range(int(rng.integers(hole_floor, hole_ceil + 1))):
         if len(iy) == 0:
             break
@@ -127,6 +128,9 @@ def apply_defects(coverage, rng, *, severity_range=(0.3, 1.0),
         np.maximum(hole_removal, depth * blob.astype(np.float32), out=hole_removal)
         counts["holes"] += 1
         hole_radii.append(round(radius, 4))
+        # Center pixel (HR-grid coords, same frame as `coverage`/hr_mask) — no extra RNG
+        # draw, so this is safe to record unconditionally within the holes_custom branch.
+        hole_centers_yx.append([int(iy[j]), int(ix[j])])
         if depth_active:
             hole_depths.append(round(depth, 4))
     for _ in range(int(rng.integers(0, round(max_notches * sev) + 1))):
@@ -153,6 +157,7 @@ def apply_defects(coverage, rng, *, severity_range=(0.3, 1.0),
         counts["hole_edge_softness_px"] = softness
         counts["min_holes"] = int(min_holes)
         counts["min_holes_effective"] = hole_floor
+        counts["hole_centers_yx"] = hole_centers_yx
         if depth_active:
             counts["hole_depths"] = hole_depths
     return defected, counts
