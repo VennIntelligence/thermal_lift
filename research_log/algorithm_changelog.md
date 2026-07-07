@@ -19,10 +19,45 @@
 7. **经典基线（要打败的对象）**：TGV×drz cutoff 23.03µm / FRC@30µm 0.702；MAP-TV×drz 24.62µm / 0.690（精修对齐+校正口径，ACL-049）。
 8. **基础设施**：`remote_inbox/` 只走 rsync/scp 增量，严禁 git（AGENTS.md 硬规则）。
 9. **冠军臂裁决（ACL-053 回填）**：η0.09+band 的 50k/batch8 冠军 0.647@30µm **未达标**，且较 20k/batch4 组合臂倒退 0.023；synth↑/real↓ 反相关再现。神经最佳纪录 = 20k 组合臂 **0.6705**（gap 0.031）。单数据集调参终止，方向转 **Stage 2b 合成基准**（TGV 首次上合成集，判决 H1 域差 vs H2 架构）。
+10. **V7 池已生成（ACL-065，2026-07-08 夜）**：`data/synthetic/pool_2x_v7_5k`（5000 景）取代 v6 主池（已删）；新增 panel_cluster_v7 内容 + 小暗点缺陷族（半径 1-4px）+ 噪声算子四项升级。depb9v6 9-bin vs 4-bin 复评训练中（`solver_v23_depb9v7_{9bin,bin4}_30k`），结果未出，**champion 选型仍未定论**。
 
 ---
 
 ## 变更记录
+
+### [ACL-065] 2026-07-08（夜间自治，owner 睡眠期间）— V7 生成器落地：composer_v7 + 缺陷体系升级 + 噪声算子升级全部接入 tcforge 生产管线；5000 景 V7 主池已生成；depb9v6 9-bin vs 4-bin 三轴复评（ACL-064 指定的下一步）已在 v7 上起训
+
+**背景**: owner 睡前授权整夜自主执行完整流水线：把 `research_log/v7_composer_defects_integration_plan.md`（内容/缺陷轴）与 `research_log/v7_noise_operator_integration_plan.md`（噪声/PSF/σ-DR 轴）两份"待实现"方案落成生产代码，然后删 v6、生成 v7、起训练。两份方案在会前已由不同规划代理产出（commit 6e81d5a/a9a7c3c），但代码从未写。
+
+**实现**: 两个 Opus 子代理并行在独立 git worktree 里分别实现两份方案（互不干扰同一批文件），完成后本会话亲自复核测试 + merge：
+- composer+defects（`v7-composer-defects-integration` 分支 → merge `104793e`）：新模块 `tcforge/src/tcforge/composer_v7.py`（614 行，r4 原型的字节级忠实移植，1200 例 seed 验证与原型逐 bit 一致）；`geometry.build_scene_mask_with_metadata` 新增 `scene_composer="panel_cluster_v7"` 分派（v6/legacy RNG 流零改动，金样本钉死）；`realism.py` 五项升级（统一缺陷实例 schema + `record_instances`、`apply_thermal_defects` 热点/暗斑、`carve_trace_breaks` 断线查表、erosion `hole_margin_px/adaptive/edge_fraction` 旋钮、`render_isothermal_field` zones 分组）全部默认字节不变。tcforge 门禁复跑 7/8（`audit_v7_tcforge_gates.py`，G5 场景内疏密对比度 1.44，与原型自身的 1.446 一致，非回归，划定为内容轴既有局限）。
+- 噪声算子（`worktree-agent-a4b1574848700fc6d` 分支 → merge `8395317`）：`field_noise_burst` 四项升级（行条纹 FPN、真 1/f^α 低频场 `physics.powerlaw_field`、静态逐像素 FPN、grain 帧间 AR(1)）；`make_noise`/`sample_psf_parameters` 的 mix_weights / 椭圆比暴露为 config；ep07 侧 σ-DR "绝对谎言" 训练管线（`--solver-dc-psf-sigma-lie-px`）。全部默认路径零额外 RNG draw，金样本 + v6-seed 字节级冒烟测试双重验证。
+- 两分支 merge 时 `tcforge/tests/test_realism.py` 有一处结构性冲突（双方都在文件尾追加互不重叠的新测试函数），按纯拼接解决（仅删冲突标记行，两侧内容全保留），合并后 tcforge 113 passed / ep07 113 passed+3 skipped。
+- 新增 config：`configs/synthetic/pool_2x_v7_pilot.json`（24 景，seed 20260901）、`pool_2x_v7_cpu.json`（5000 景，seed 20260902）、`pool_2x_v7_bench48.json`（48 景，seed 20260903，暂未生成）——由本会话合并两个子代理各自报告的 config 片段组装，非子代理自动产出（分工上明确排除，避免两边各写一份冲突）。
+- commit 6e81d5a→19d1672 全部 push 到 origin/main。
+
+**验证**（本会话亲自复核，未采信子代理报告直接过关）：
+1. 本地 tcforge 113 passed、ep07 113 passed+3 skipped（3 skip 是既有 CUDA-only 测试，与本次改动无关）。
+2. **远端 5090 环境一致性**：pull 后远端复跑同一测试套件，2 个金样本测试失败（`test_scene_mask_legacy_and_v6_paths_match_golden`、`test_sample_psf_parameters_default_ratio_matches_golden`）——排查后确认是 Mac↔Linux 跨平台浮点数最后一位精度差异（geometry primitive 的 `h_um` 等字段差在 ~1e-13 相对量级，栅格化后被像素网格完全吸收），**不是逻辑 bug**。用更有说服力的验证替代：在远端本机对比 merge 前(6e81d5a)后(19d1672)代码跑同一 v6-seed 3 景，`lr_burst.npy`/`hr_temperature_2x.npy` 逐字节相同、metadata 零差异键——这才是真正要紧的"默认行为不变"证明，在生产机器上坐实。
+3. **24 景 v7 pilot**（远端实跑 `generate_training_pool.py`）：`audit_v7_tcforge_gates.py` 7/8、`audit_generated_pool.py` 全绿（24/24 有缺陷标注、0 zero-dot 景、0 结构问题）；肉眼复核 4 张 `hr_mask_4x.png`（含一张验证 360° 旋转）确认面板簇几何、纹理面板、窗口镂空、断线曲线、缺陷点分布均符合设计、无 artifact。
+4. **5000 景主池生成**：删除 v6 主池（`data/synthetic/pool_2x_v6_5k`，236GB，bench48 未动）后，61 workers 跑 2h44m 生成完毕（exit 0，manifest 5000 行），磁盘 238GB（655GB 空闲，充裕）。
+5. **k=200 抽样 pool 审核**：`POOL AUDIT: INVESTIGATE`（非 PASS）——1/200 景 `scene_1828` 的 `psf_sigma_lr_px=0.6017` 超出审核脚本硬编码的 `[0.10,0.60]` 泛化健康区间。溯源 `physics.py:561`：椭圆 PSF 分支 `psf_sigma_lr_px = sigma * uniform(*elliptical_ratio_range)`，base sigma 上限 0.55 乘椭圆比上限 1.20 可达 0.66，**这是椭圆 PSF 采样的固有统计行为**（v6 用完全相同的硬编码默认比例范围，同样概率会出现，只是从未有人在 v6 上跑过这个深度的 k=200 抽样审核）。非 v7 特有 bug，不阻塞。审核脚本的健康区间硬编码值未来可考虑改为按 `sigma_range × ratio_range` 动态推导，本次未改（不在授权范围内，记录留痕）。
+
+**训练**（owner 授权无需等待的下一步，非本次自主延伸——ACL-064 已明确指定"champion 长训前在 v7 上复评 9-bin vs bin4 三轴"）：
+- Batch 探针（bs 8/12/16/20，各 150 步，并发 nvidia-smi 轮询取峰值显存）：bs20 峰值显存 20823MiB（~20GB，命中既定甜点）且吞吐全场最高（14.9 samples/s vs bs8 的 6.7），选定。
+- `solver_v23_depb9v7_9bin_30k`（`--phase-bin-channels 9 --solver-phasebin-ontf --solver-warmstart aligned_mean --solver-m-frames 12 --solver-dc-weight 0 --solver-prox-highpass-residual --solver-prox-highpass-sigma-hr 4`，复刻 ACL-062/064 的 depb9v6 配方，仅换 v7 池）与 `solver_v23_depb9v7_bin4_30k`（同配方 `--phase-bin-channels 4`）成对锚定同一 batch(20)/steps(30000)/seed(42)，在远端 tmux 窗口 `v7train` 串行跑（GPU 装不下两个 ~20GB 任务同时跑）。`--save-every 10000 --real-eval-every 1000 --synth-eval-every 1000`（ACL-053 定下的"今后"评测节奏，与 v22 arms 用过的 save5k 不同——本轮不是收敛曲线研究，选更省的节奏）。
+- 已验证真正跑起来（非卡死）：torch.compile 冷启动编译耗时约 8-10 分钟（主进程 CPU 占用持续攀升，非空转），编译完成后 step 2300 时稳定在 ~390-420ms/step（较 batch 探针的未编译 ~1.3-1.4s/step 提速 ~3×）。30k 步预计每臂约 3.2-3.5 小时，两臂串行约 6.5-7 小时——9bin 臂预计在 owner 起床前后完成，bin4 臂会跑到之后。
+- **依据本轮 v7 池首次系统性纳入小暗点缺陷族（半径 1-4px、每景 min_holes 20、hole_edge_fraction 0.12），预期 dot-retention 三轴指标（尤其 9-bin vs 4-bin 的点保真权衡，ACL-064 判读）应有别于 v6 池上的历史读数——待训练完成后用 `probe_dot_retention.py` 复评，不在本次自主范围内先行判定。**
+
+**已知局限/待 owner 裁决**（记录不隐瞒）：
+- `hole_edge_fraction=0.12`、噪声块 `lowfreq_c=[0.04,0.10]`/`vignette_c=[0.10,0.16]` 等参数是两份方案文档标注的"待 pilot 目检/`audit_synth_noise.py` 标定"占位值，本次未做该标定闭环（5000 景已用占位值生成，如后续标定发现需调整，需重新生成——记录在案供 owner 决策是否接受）。
+- G5（场景内疏密对比度）仍是唯一未过的门禁，继承自原型本身，非本次引入。
+- 审核脚本 `audit_generated_pool.py` 的 psf_sigma 健康区间硬编码，产生良性误报，未修。
+- 9-bin vs 4-bin 训练结果本身（含点保真三轴复评）尚未产出，champion 长训决策仍待这轮结果 + owner 裁决。
+
+**涉及文件**: `tcforge/src/tcforge/{composer_v7.py(新),geometry.py,realism.py,physics.py,storage.py,_noise_stats.py(新)}`、`scripts/{generate_training_pool.py,audit_v7_tcforge_gates.py(新),audit_generated_pool.py,audit_real_noise.py}`、`algos/ep07_unet_sr/src/unet_sr/{config.py,dataset.py,solver_train.py}`、`configs/synthetic/pool_2x_v7_{pilot,cpu,bench48}.json(新)`、约 15 个新 tcforge/ep07 测试 + 6 个金样本 fixture。远端产物：`data/synthetic/pool_2x_v7_5k`（5000 景，238GB）、`data/synthetic/pool_2x_v7_pilot`（24 景，保留供后续参考）、`algos/ep07_unet_sr/outputs/solver_v23_depb9v7_{9bin,bin4}_30k`（训练中）。
+
+---
 
 ### [ACL-064] 2026-07-08（凌晨自治）— v22 三跟进臂裁决：eta 重标定证实治好 meanDC 灾难性发散(ACL-062 假设成立,range 10^4→~10)但仅平 v14；9-vs-4 bin 隔离**推翻 ACL-062"9-bin 实锤"**(4 bin 双域≥9 bin)；**depb9v6_bin4 = 神经真实域新高 0.668(平 v19 纪录)+低频干净+通道更省 → 双轴 champion 候选**
 
