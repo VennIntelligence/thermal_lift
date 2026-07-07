@@ -252,6 +252,7 @@ def train(config: TrainingConfig) -> Path:
         dc_shift_jitter_std_px=config.solver_dc_shift_jitter_std_px,
         dc_psf_sigma_jitter_frac=config.solver_dc_psf_sigma_jitter_frac,
         dc_psf_angle_jitter_deg=config.solver_dc_psf_angle_jitter_deg,
+        dc_psf_sigma_lie_px=config.solver_dc_psf_sigma_lie_px,
     )
     # cond/warm-start channels: lean path uses 5ch upsampled fused + aligned_mean (ch0);
     # hybrid path uses 9ch obs and warm-starts from the first phase-bin channel (ch5) by default,
@@ -290,9 +291,11 @@ def train(config: TrainingConfig) -> Path:
         config.solver_dc_shift_jitter_std_px == 0
         and config.solver_dc_psf_sigma_jitter_frac == 0
         and config.solver_dc_psf_angle_jitter_deg == 0
+        and config.solver_dc_psf_sigma_lie_px[1] == 0
     ) else (f"shift±{config.solver_dc_shift_jitter_std_px:g}px "
             f"psfσ±{config.solver_dc_psf_sigma_jitter_frac:.0%} "
-            f"angle±{config.solver_dc_psf_angle_jitter_deg:g}°")
+            f"angle±{config.solver_dc_psf_angle_jitter_deg:g}° "
+            f"psfσ-lie±[{config.solver_dc_psf_sigma_lie_px[0]:g},{config.solver_dc_psf_sigma_lie_px[1]:g}]px")
     fusion_label = "off" if config.solver_fusion == "none" else (
         f"{config.solver_fusion}(E={config.solver_fusion_channels}, "
         f"+{3 * config.solver_fusion_channels}ch, chunk={config.solver_fusion_frame_chunk})")
