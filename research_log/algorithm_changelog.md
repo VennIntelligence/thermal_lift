@@ -19,11 +19,24 @@
 7. **经典基线（要打败的对象）**：TGV×drz cutoff 23.03µm / FRC@30µm 0.702；MAP-TV×drz 24.62µm / 0.690（精修对齐+校正口径，ACL-049）。
 8. **基础设施**：`remote_inbox/` 只走 rsync/scp 增量，严禁 git（AGENTS.md 硬规则）。
 9. **冠军臂裁决（ACL-053 回填）**：η0.09+band 的 50k/batch8 冠军 0.647@30µm **未达标**，且较 20k/batch4 组合臂倒退 0.023；synth↑/real↓ 反相关再现。神经最佳纪录 = 20k 组合臂 **0.6705**（gap 0.031）。单数据集调参终止，方向转 **Stage 2b 合成基准**（TGV 首次上合成集，判决 H1 域差 vs H2 架构）。
-10. **V7 池已生成，点保真度崩溃且确认是数据问题非训练问题（ACL-065/066/067，2026-07-08 夜）**：`data/synthetic/pool_2x_v7_5k`（5000 景）取代 v6 主池（已删）。depb9v6 9-bin/bin4 配方在 v7 上复训：real cross-FRC（0.674/0.676@30µm）与合成低频稳定性均小幅改善，**但点保真度崩溃**（ALL retention 0.60/0.48→~0.33，孤立点 erased% 4.7%/9.6%→~43%）——与建池初衷（修复 ACL-063 的小点抹除）方向相反。ACL-067 用对齐 batch/patch 的对照实验排除了训练超参混杂：**病根锁定在 v7 池的缺陷分布设计本身**，不是算法/训练配置问题。champion 选型冻结；下一步是消融 v7 defects 参数（密度/半径/深度），不建议直接用于对外产出。
+10. ⚠️（已解决，见 #11）**V7 池点保真度崩溃，确认是数据问题非训练问题（ACL-065/066/067，2026-07-08 夜）**：depb9v6 配方在 v7 池复训后 real cross-FRC 小幅改善（0.674/0.676@30µm）但孤立点 erased% 4.7%→~43%；batch/patch 对照实验排除训练超参，病根锁定 v7 缺陷分布设计。**v7 池已删除（2026-07-09，owner 令）。**
+11. **V8 池 = 当前生产训练池，点保真崩溃已修复（ACL-068/069/070，2026-07-09 整夜自治）**：`data/synthetic/pool_2x_v8_5k`（5000 景，seed 20260911）= v7 仅改两旋钮——密度 min/max_holes 20-50→**2-8**、深度下限 hole_depth_range 0.3→**0.55**。验证臂 `solver_v25_depb9v8_9bin_30k`：**isolated erased% 4.35%（v6 基线 4.66%，v7 病理 43%）**，ALL retention 0.547。机制发现：(a) "v7 点物理不可见"被 L1 审计证伪，病理角落=半径 1-2px×深度 0.3-0.5（ACL-068）；(b) 抹除先验需要池规模级数据多样性才形成——300 景 24k 步全程 0% 抹除，故 300 景廉价消融对此病理是盲的（ACL-069）；密度-vs-深度归因保持开放。**新池验收制度**：pilot 必过 tcforge gates + `scripts/audit_defect_detectability.py`（L1，已验证有效）+ 生产级验证训练；配置不得含未标定占位参数。悬置：v8 上的三轴复评（cross-FRC/低频稳定性是否保留 v7 的小幅改善）与 9-bin vs bin4 champion 选型。held-out 基准池 `pool_2x_v8_bench48`（seed 20260912）勿训。
 
 ---
 
 ## 变更记录
+
+### [ACL-070] 2026-07-09（清晨，整夜自治收官）— **v8 池修复终裁：成立**。孤立点 erased% 43%→4.35%（略好于 v6 基线 4.66%），ALL retention 0.331→0.547；v8 =v7 仅动密度（min/max_holes 20-50→2-8）+ 深度下限（0.3→0.55）两个旋钮
+
+**执行链**（全部当夜完成，owner 睡眠期间）: v8 pilot 24 景过三闸（tcforge gates 7/8 与 v7 原型持平、L1 可探测性审计 r1|lo 病理角落 55%→~22% 且病理剂量 ~5.3→~0.9 个/景、24 洞 hand-check 目检全清晰）→ **按 owner 硬性顺序先完全删除 v7 池**（rm 同步等待 + ls/du 双重确认）→ 生产 5000 景（seed 20260911，60 workers，~1h05m，236G）→ manifest 完整性检查 → `solver_v25_depb9v8_9bin_30k`（depb9v6 配方，b8/p384/seed42/30k，与 v24 ctrl 逐旗标一致）→ 渲染 halves + 3562 点真实域探针。
+
+**终裁读数**（`remote_inbox/20260716_v8_verdict/`，sanity 臂 depb9v6 同批次精确复现 0.5984/4.66%——仪器可信）:
+- **depb9v8: ALL retention 0.5471，isolated erased% 4.35%**。对照：v6 基线 0.598/4.66%，v7 病理 0.331/43.48%（ACL-066）、0.337/39.75%（ACL-067 ctrl）。
+- 判读：点保真崩溃**完全逆转**，erased% 回到并略优于 v6 区间；retention 0.547 略低于 v6 的 0.598（-0.05，健康带内）。v8 保留了小点缺陷族（半径 1-4px、每景 2-8 个、深度≥0.55）+ v7 全部 composer/噪声升级。
+
+**含义与未决**: (1) "密度+深度下限"捆绑修复有效，但两者的单变量归因仍开放（ACL-069；可日后 1000 景级消融补做）；(2) v7 曾带来的 cross-FRC 小幅改善（0.661→0.674）与低频稳定性改善是否被 v8 保留——**三轴复评尚未跑**（9-bin vs bin4 的 champion 选型也悬置中），是显式的下一步；(3) pool acceptance gate 制度落地：L1 审计已验证有效并进 gate；L2 微型探针以 300 景尺度对本病理无效（ACL-069），gate 中以"生产级验证训练"替代，未来如需廉价 L2 需先在 ≥1000 景尺度重标定。
+
+**涉及文件**: `configs/synthetic/pool_2x_v8_{pilot,cpu,bench48}.json`；远端 `data/synthetic/pool_2x_v8_5k`（训练池）、`pool_2x_v8_bench48`（held-out，勿训）、`outputs/solver_v25_depb9v8_9bin_30k/`；本地 `remote_inbox/20260716_{micro_calib,micro_horizon,v8_verdict}/`、`output/defect_detectability/`（5090）。v7 池已删（owner 顺序令）；v7ab 消融池×4 + 微型端点 checkpoints 留存于 5090。
 
 ### [ACL-069] 2026-07-09（夜间自治）— L2 微型探针标定**阴性且信息量大**：点抹除先验在 300 景尺度上根本不出现（8k-24k 步全程 0% 抹除）——**先验形成依赖数据多样性/池规模**；300 景消融梯取消，v8 改为"捆绑修复+生产级验证"，归因（密度 vs 深度）留为开放问题
 
