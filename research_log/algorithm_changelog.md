@@ -25,6 +25,23 @@
 
 ## 变更记录
 
+### [ACL-068] 2026-07-09（夜间自治，owner 授权修数据）— L1 零训练可探测性审计落地并出裁决：**"v7 点物理不可见"强假设被证伪**；不可探测尾部精确定位在"小半径×浅深度"角落（r1|lo：55% 低于 CNR3）；"密集分布教坏先验"升为主嫌
+
+**背景**: ACL-067 把点保真崩溃锁定在 v7 池缺陷分布后，owner 拍板方向：验证必须前移（"不能每次生成 5000 景、训完才发现数据有问题"），授权整夜自治按三层验证阶梯（L1 零训练审计 → L2 微型训练探针 → L3 生产）修出 v8 池。计划文档 `research_log/v8_pool_repair_plan.md`（含预注册判定规则与今后所有新池的 acceptance gate 四条前置）。
+
+**新仪器**: `scripts/audit_defect_detectability.py`（fable 子代理实现，78f9797）——对每个 hole 实例算输入端 CNR 两种：analytic（HR 扰动模板按 realism.py 语义重建，经池生成器自己的 `tcforge.physics.apply_psf_blur`+`forward._block_average_from_blurred` 投影，白噪声匹配滤波多帧合成，另有 AR(1) 惩罚版）+ empirical（模板注入真实含噪 burst 后局部测量，吃得到结构化噪声）。v6 legacy 配方不记录 hole 坐标（realism.py holes_custom 门控）→ `--simulate-from-config` 模式从 defects 配置采样假想洞走同一投影。本地 3 景微型池验证 4 项全过（含独立坐标核对，中位 |offset|≤0.05 LR px，无 0.5px 级系统偏移）。
+
+**正式读数**（v7 池 200 景 7074 洞 instance 模式 vs v6 bench48 48 景 504 洞 simulate 模式，`output/defect_detectability/`，5090 CPU 877s/230s）:
+- **强假设死刑**: v7 中位 analytic CNR 93.7（AR1 校正 46.7）、empirical 10.4；analytic 低于 CNR3 仅 1.7%。大多数 v7 小点在输入端明确可恢复——网络"看得见还抹"，不是"看不见只好抹"。
+- **真实的不可探测尾部且高度局域化**: 按半径×深度三分位分层，r1|lo 单元中位 empirical CNR 2.8、55%/75% 低于 CNR3/5；r2|lo 23%/42%；而 r3/r4|hi 只有 4-6%/8-11%。尾部质量集中在"半径 1-2px × 深度低三分位（~0.3-0.5）"角落 + edge-fraction 子族（局部对比≈0，但该类在 GT 里同样无对比，属无害 no-op 而非教抹除的病理群体）。
+- **v6 参照**: 中位 analytic 216-723，比 v7 高约一个数量级（empirical 尾部偏高是模拟洞落在弱结构区的放置伪影，同属 GT 无对比的 no-op，跨池对比以 analytic 为准）。
+
+**判读**: (1) v7 训练分布里确有一撮"GT 有对比但输入端不可恢复"的浅小点（教网络抹除的病理样本），但占比不足以单独解释 43% 的孤立点抹除率——**ACL-066 假说 1（密度：min_holes=20/景 的密集小点把"小暗点=该抹除的噪声"学成强先验）升为主嫌**，L2 消融梯以 density 臂为最高优先级；(2) 无论 L2 结果如何，v8 的缺陷族都应裁掉病理角落——深度下限 0.3→~0.55，小半径配深深度（radius-gated depth floor）。
+
+**涉及文件**: `scripts/audit_defect_detectability.py`（新）；`algos/ep07_unet_sr/scripts/eval_arms_dot_probe.py`（新，9cbaf4d——两阶段批量点保真评测：5090 渲染 halves/Mac 探针，probe 阶段对历史 inbox 实测复现 depb9v6 0.598/4.66%、depb9v7 0.331/43.2%、v24ctrl 0.337/39.75%，retention 取 by_size/ALL 行的修正一并落地）；微型池/消融配置 5 份 + 计划文档（03b4bfc）。空间清理：v23/v24 中间 step ckpt 已删（各 341M→92M）；v7 池裁到 1000 景（238G→48G，全量 manifest 备份 `manifest_full5000.csv`）。**owner 硬性顺序（2026-07-09）：v8 生产池开跑前先完全删除 v7 剩余池并 ls+du 确认，再启动生成。**
+
+**下一步**: L2 端点标定（micro_v7end/micro_v6end 8k 步，跑着）→ 消融梯（density 优先）→ v8 组装过三闸 → 删 v7 → 生产。
+
 ### [ACL-067] 2026-07-08（owner 在线跟进）— 决定性对照实验：batch/patch 对齐历史配置后点保真度依然崩溃 —— **锁定为 v7 池缺陷分布问题，非训练超参问题**
 
 **问题诊断**: ACL-066 记录的 depb9v7 三轴复评存在一个未察觉的混杂变量——本会话从 changelog 文字描述重建 depb9v6 配方时，只核对了 DE-prox 相关旋钮，漏查了 `batch_size`/`patch_size_hr`。事后从历史 checkpoint（`solver_v21_depb9v6_30k`、`solver_v22_depb9v6_bin4_30k`）的 `torch.load(...)["config"]` 直接读出：历史轮次实际用 `batch_size=8, patch_size_hr=384`，而本次 v7 轮用的是 `batch_size=20`（自己探针选的"甜点"）、`patch_size_hr=256`（默认值，未显式设置）。也就是说 ACL-066 的对比同时改变了三件事（池子 + batch + patch size），不是干净的单变量实验——owner 直接追问"到底是数据集问题还是算法训练问题"，倒逼出这个疏漏。
