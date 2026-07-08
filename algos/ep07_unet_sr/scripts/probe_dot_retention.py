@@ -124,11 +124,22 @@ ARM_FILES = {
                     "meandc_eta8_b_corrected.npy"),
     "meandc_eta4": ("meandc_eta4_a_corrected.npy",
                     "meandc_eta4_b_corrected.npy"),
+    # v23 supplemental arms (2026-07-08 addendum): v7-pool retrain of the
+    # depb9 DE-prox recipe (9-bin vs 4-bin).  Same additive mechanism as the
+    # v22 arms above — consumed only by --extra-arms mode, default pipeline
+    # untouched.
+    "depb9v7": ("depb9v7_a_corrected.npy", "depb9v7_b_corrected.npy"),
+    "depb9v7_bin4": ("depb9v7_bin4_a_corrected.npy",
+                     "depb9v7_bin4_b_corrected.npy"),
 }
 MEASURE_ARMS = ["drizzle", "tgv", "v14", "v19", "de_pb9", "depb9v6", "meanDC"]
 NEURAL_ARMS = ["v14", "v19", "de_pb9", "depb9v6", "meanDC"]
 BOARD_COLS = ["drizzle", "tgv", "v14", "v19", "de_pb9", "depb9v6", "meanDC"]
-EXTRA_ARMS = ["depb9v6_bin4", "meandc_eta8", "meandc_eta4"]  # v22 addendum
+# v23 round: the two new v7 arms + their v6 counterparts, all measured on the
+# identical detection set (recomputing the v6 arms doubles as a sanity check
+# against the ACL-064 recorded numbers).  (v22 addendum was
+# ["depb9v6_bin4", "meandc_eta8", "meandc_eta4"].)
+EXTRA_ARMS = ["depb9v7", "depb9v7_bin4", "depb9v6", "depb9v6_bin4"]
 
 
 # --------------------------------------------------------------------------
