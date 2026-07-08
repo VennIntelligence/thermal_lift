@@ -19,11 +19,35 @@
 7. **经典基线（要打败的对象）**：TGV×drz cutoff 23.03µm / FRC@30µm 0.702；MAP-TV×drz 24.62µm / 0.690（精修对齐+校正口径，ACL-049）。
 8. **基础设施**：`remote_inbox/` 只走 rsync/scp 增量，严禁 git（AGENTS.md 硬规则）。
 9. **冠军臂裁决（ACL-053 回填）**：η0.09+band 的 50k/batch8 冠军 0.647@30µm **未达标**，且较 20k/batch4 组合臂倒退 0.023；synth↑/real↓ 反相关再现。神经最佳纪录 = 20k 组合臂 **0.6705**（gap 0.031）。单数据集调参终止，方向转 **Stage 2b 合成基准**（TGV 首次上合成集，判决 H1 域差 vs H2 架构）。
-10. **V7 池已生成，但点保真度不升反降（ACL-065/066，2026-07-08 夜）**：`data/synthetic/pool_2x_v7_5k`（5000 景）取代 v6 主池（已删）。depb9v6 9-bin/bin4 配方在 v7 上复训：real cross-FRC（0.674/0.676@30µm）与合成低频稳定性均小幅改善，**但点保真度崩溃**（ALL retention 0.60/0.48→~0.33，孤立点 erased% 4.7%/9.6%→~43%）——与建池初衷（修复 ACL-063 的小点抹除）方向相反。champion 选型冻结，v7 defects 配置（密度/半径/深度）待排查，不建议直接用于对外产出。
+10. **V7 池已生成，点保真度崩溃且确认是数据问题非训练问题（ACL-065/066/067，2026-07-08 夜）**：`data/synthetic/pool_2x_v7_5k`（5000 景）取代 v6 主池（已删）。depb9v6 9-bin/bin4 配方在 v7 上复训：real cross-FRC（0.674/0.676@30µm）与合成低频稳定性均小幅改善，**但点保真度崩溃**（ALL retention 0.60/0.48→~0.33，孤立点 erased% 4.7%/9.6%→~43%）——与建池初衷（修复 ACL-063 的小点抹除）方向相反。ACL-067 用对齐 batch/patch 的对照实验排除了训练超参混杂：**病根锁定在 v7 池的缺陷分布设计本身**，不是算法/训练配置问题。champion 选型冻结；下一步是消融 v7 defects 参数（密度/半径/深度），不建议直接用于对外产出。
 
 ---
 
 ## 变更记录
+
+### [ACL-067] 2026-07-08（owner 在线跟进）— 决定性对照实验：batch/patch 对齐历史配置后点保真度依然崩溃 —— **锁定为 v7 池缺陷分布问题，非训练超参问题**
+
+**问题诊断**: ACL-066 记录的 depb9v7 三轴复评存在一个未察觉的混杂变量——本会话从 changelog 文字描述重建 depb9v6 配方时，只核对了 DE-prox 相关旋钮，漏查了 `batch_size`/`patch_size_hr`。事后从历史 checkpoint（`solver_v21_depb9v6_30k`、`solver_v22_depb9v6_bin4_30k`）的 `torch.load(...)["config"]` 直接读出：历史轮次实际用 `batch_size=8, patch_size_hr=384`，而本次 v7 轮用的是 `batch_size=20`（自己探针选的"甜点"）、`patch_size_hr=256`（默认值，未显式设置）。也就是说 ACL-066 的对比同时改变了三件事（池子 + batch + patch size），不是干净的单变量实验——owner 直接追问"到底是数据集问题还是算法训练问题"，倒逼出这个疏漏。
+
+**实验**: 补跑一个对照臂 `solver_v24_depb9v7_9bin_ctrl_b8p384_30k`——v7 池 + depb9v6 9-bin 配方，`batch_size=8, patch_size_hr=384` 与历史逐字段对齐，仅池子（v6→v7）这一个变量在变。30k 步，exit 0。跑完立即用同一套点保真度探针（3562 点检出集，`probe_dot_retention.py --extra-arms`，additive 注册新臂 `depb9v7_ctrl`）+ cross-FRC leaderboard 复评。
+
+**实验记录**（TGV 对照 0.7017/23.03µm 精确复现，仪器可信；v6 历史臂重测漂移 <0.003，探针无漂移）：
+
+| 臂 | 池 | batch/patch | ALL retention | 孤立点 erased% | real cross-FRC@30µm |
+|---|---|---|---|---|---|
+| depb9v6（历史） | v6 | 8/384 | 0.598 | 4.66% | 0.661 |
+| depb9v7（ACL-066，混杂） | v7 | 20/256 | 0.331 | 43.48% | 0.674 |
+| **depb9v7_ctrl（本轮，对齐后）** | v7 | **8/384** | **0.337** | **39.75%** | **0.674** |
+
+**判读**: **对齐batch/patch后，点保真度几乎没有恢复**（isolated erased% 43.48%→39.75%，仅降3.7个百分点，相对v6的4.66%这个35个百分点的缺口几乎没有意义变化）；cross-FRC也完全没变（0.674→0.674）。**两条轴一致指向同一个结论：batch/patch的混杂是真实存在的方法学疏漏，但不是点保真度崩溃的成因。真正的病根是v7池本身的缺陷分布设计**（ACL-066 猜想的密度/半径/深度问题）。训练超参可以排除嫌疑；这不是"改算法/训练配置就能解决"的问题，得回到数据生成器。
+
+**回答 owner 的关键问题**："数据集上有问题，得重新生成数据集"——本轮实验就是为了回答这个问题设计的，答案是**数据集**。具体是缺陷族的哪个参数（密度 min_holes=20 vs v6 的 max_holes=6、半径 1-4px vs 4-13px、还是 `hole_depth_range`/`hole_edge_softness_px`/`hole_edge_fraction` 这几个未经 pilot 标定的占位值）导致的，仍需要消融实验才能定位，本轮只证明了"是数据不是训练"，没有进一步拆解数据侧的具体病因。
+
+**下一步（owner 待裁决，未展开）**: 在 v7 defects 配置上做一次小规模（24-48 景）消融——固定其它不变，把 `min_holes`/`hole_radius_px` 调回接近 v6 量级，或先关掉 `hole_edge_fraction`/放宽 `hole_depth_range`，用同一套点保真度探针快速判断哪个参数是主因，再决定是否要重新生成 5000 景主池。
+
+**涉及文件**: `algos/ep07_unet_sr/scripts/probe_dot_retention.py`（additive：`depb9v7_ctrl` 加入 `ARM_FILES`/`EXTRA_ARMS`，默认流程不变）；远端产物 `outputs/solver_v24_depb9v7_9bin_ctrl_b8p384_30k`（checkpoint）、`output/stageDE_v24ctrl_{offset_probe,corrected,leaderboard}/`、`output/dot_probe_v24ctrl/`（未 rsync 回本地）；远端脚本 `render_v24_ctrl_real_halves.py`（v23 同款脚本的改名副本，未提交，留在远端 scratch）。
+
+---
 
 ### [ACL-066] 2026-07-08（深夜/凌晨，owner 在线跟进）— v7 池 depb9v7 9-bin/bin4 三轴复评：real cross-FRC 与低频稳定性双双小幅改善，但**点保真度全面崩溃**（ALL retention 0.60/0.48 → ~0.33，孤立点 erased% 4.7%/9.6% → ~43%）——v7 池未能兑现"修复小暗点抹除"的建池初衷，反而更差
 

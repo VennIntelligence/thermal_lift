@@ -131,6 +131,14 @@ ARM_FILES = {
     "depb9v7": ("depb9v7_a_corrected.npy", "depb9v7_b_corrected.npy"),
     "depb9v7_bin4": ("depb9v7_bin4_a_corrected.npy",
                      "depb9v7_bin4_b_corrected.npy"),
+    # v24 control arm (2026-07-08 addendum): SAME v7 pool + depb9v6 9-bin recipe
+    # as depb9v7 above, but retrained with batch_size=8 / patch_size_hr=384 to
+    # exactly match the historical v6-pool checkpoints' saved config (the
+    # depb9v7 arm above used batch=20 / patch=256, a confound discovered after
+    # ACL-066).  Isolates the pool as the only variable vs. the v6-pool depb9v6.
+    # Same additive mechanism — consumed only by --extra-arms mode.
+    "depb9v7_ctrl": ("depb9v7_ctrl_a_corrected.npy",
+                     "depb9v7_ctrl_b_corrected.npy"),
 }
 MEASURE_ARMS = ["drizzle", "tgv", "v14", "v19", "de_pb9", "depb9v6", "meanDC"]
 NEURAL_ARMS = ["v14", "v19", "de_pb9", "depb9v6", "meanDC"]
@@ -139,7 +147,7 @@ BOARD_COLS = ["drizzle", "tgv", "v14", "v19", "de_pb9", "depb9v6", "meanDC"]
 # identical detection set (recomputing the v6 arms doubles as a sanity check
 # against the ACL-064 recorded numbers).  (v22 addendum was
 # ["depb9v6_bin4", "meandc_eta8", "meandc_eta4"].)
-EXTRA_ARMS = ["depb9v7", "depb9v7_bin4", "depb9v6", "depb9v6_bin4"]
+EXTRA_ARMS = ["depb9v7_ctrl", "depb9v7", "depb9v7_bin4", "depb9v6", "depb9v6_bin4"]
 
 
 # --------------------------------------------------------------------------
