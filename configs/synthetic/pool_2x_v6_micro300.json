@@ -1,0 +1,234 @@
+{
+  "_comment": "v6-recipe MICRO pool (300 scenes) for the overnight micro-training-probe calibration (v8 pool repair, 2026-07-09). VERBATIM copy of pool_2x_v6_cpu.json except num_scenes=300 and output_dir. Seed kept at 960960 so scenes replicate the first 300 scenes of the deleted v6 production pool. Purpose: endpoint arm A of the instrument-calibration A/B (v6 recipe vs v7 recipe at ~300 scenes / 8k steps) that must reproduce the direction of the known dot-retention gap (isolated erased% 4.66 vs ~40) before any ablation arm is trusted.",
+  "dataset": "ThermalChipPhantom_v6_cpu",
+  "engine": "TCForge",
+  "version": "0.6.0",
+  "scale": 2,
+  "lr_shape": [
+    480,
+    640
+  ],
+  "hr_shape": [
+    960,
+    1280
+  ],
+  "pixel_size_um": 20.0,
+  "spatial_resolution_um": 20.0,
+  "forward_mode": "physical_block_average",
+  "num_scenes": 300,
+  "seed": 960960,
+  "output_dir": "data/synthetic/pool_2x_v6_micro300",
+  "n_frames_per_scene": {
+    "dist": "randint",
+    "low": 24,
+    "high": 96
+  },
+  "geometry": {
+    "antialias": true,
+    "ssaa_factor": 4,
+    "ssaa_factor_fine": 6,
+    "inscribe_disc": true,
+    "motif_weights": {
+      "pga_grid": 0.28,
+      "die_bga": 0.24,
+      "multi_die": 0.18,
+      "trace_bus": 0.14,
+      "heat_spreader": 0.1,
+      "generic": 0.06
+    }
+  },
+  "defects": {
+    "enabled": true,
+    "severity_range": [
+      0.3,
+      1.0
+    ],
+    "hole_radius_px": [
+      4,
+      13
+    ],
+    "notch_radius_px": [
+      3,
+      10
+    ],
+    "crack_len_px": [
+      60,
+      260
+    ],
+    "crack_width_px": [
+      2,
+      4
+    ],
+    "max_holes": 6,
+    "max_notches": 6,
+    "max_cracks": 4
+  },
+  "temperature_model": "isothermal",
+  "temperature_isothermal": {
+    "level_min": 0.82,
+    "edge_sigma": 0.6
+  },
+  "physics_ranges": {
+    "psf_sigma_lr_px": [
+      0.15,
+      0.55
+    ],
+    "noise_sigma_c": {
+      "dist": "lognormal",
+      "mean": 0.0724,
+      "sigma_factor": 0.25
+    },
+    "T_bg_c": [
+      19.0,
+      23.0
+    ],
+    "_comment_delta_T": "v6 CPU redesign: \u0394T is a CONTINUOUS per-scene nuisance, NOT stepped by difficulty. delta_T_c_continuous = union min-max of the four legacy delta_T_c_by_difficulty ranges [0.3, 5.0]; when present, generate_training_pool samples \u0394T from it and IGNORES difficulty. delta_T_c_by_difficulty retained only for schema/legacy compatibility.",
+    "delta_T_c_continuous": [
+      0.3,
+      5.0
+    ],
+    "delta_T_c_by_difficulty": {
+      "easy": [
+        2.0,
+        5.0
+      ],
+      "medium": [
+        1.0,
+        3.0
+      ],
+      "hard": [
+        0.5,
+        2.0
+      ],
+      "stress": [
+        0.3,
+        0.8
+      ]
+    },
+    "low_freq_amplitude_c": [
+      0.0,
+      0.15
+    ],
+    "low_freq_sigma_px": 96.0,
+    "rotation_deg_center": {
+      "dist": "uniform",
+      "low": 0.0,
+      "high": 360.0
+    },
+    "rotation_jitter_deg": 0.0
+  },
+  "_comment_difficulty": "v6 CPU redesign: difficulty tiers are VESTIGIAL for this pool \u2014 CPU geometry uses a continuous `density` scalar (stored in geometry_metadata.density) and \u0394T uses delta_T_c_continuous, neither gated by difficulty. Collapsed to a single bucket so the (still-threaded) difficulty label is uniform metadata.",
+  "difficulty_distribution": {
+    "medium": 1000
+  },
+  "drift_distribution": {
+    "none": 300,
+    "scalar_offset": 250,
+    "lowfreq": 200,
+    "gain_offset": 100,
+    "temporal_trend": 150
+  },
+  "drift_parameters": {
+    "amplitude_c": [
+      0.0,
+      0.3
+    ],
+    "lowfreq_sigma_px": 96.0,
+    "gain_sigma": 0.01,
+    "offset_sigma_c": 0.1,
+    "temporal_spatial_sigma_px": [
+      0.0,
+      24.0
+    ]
+  },
+  "psf_randomization": {
+    "enabled": true,
+    "sigma_range": [
+      0.15,
+      0.55
+    ],
+    "elliptical_probability": 0.5,
+    "airy_probability": 0.15,
+    "angle_random": true
+  },
+  "shift_constellation": {
+    "mode": "random_phase",
+    "phase_steps_choices": [
+      2,
+      3,
+      4
+    ],
+    "coverage_quality_weights": {
+      "good": 0.5,
+      "medium": 0.3,
+      "poor": 0.2
+    },
+    "jitter_std_px": [
+      0.0,
+      0.08
+    ],
+    "include_real_like_fraction": 0.15
+  },
+  "noise_model": {
+    "model": "field_vignette_stripe",
+    "vignette_c": [
+      0.1,
+      0.16
+    ],
+    "stripe_c": [
+      0.02,
+      0.035
+    ],
+    "stripe_col_sigma": [
+      2.5,
+      5.0
+    ],
+    "grain_c": [
+      0.08,
+      0.12
+    ]
+  },
+  "detector_defects": {
+    "enabled": false,
+    "_note": "disabled: real frames (min 18.67C) show no dead-pixel spikes; was injecting unrealistic <0C cold pixels",
+    "defect_rate": [
+      0.0,
+      0.0005
+    ],
+    "mode": "offset",
+    "hot_delta_c": [
+      0.2,
+      0.8
+    ],
+    "cold_delta_c": [
+      -0.8,
+      -0.2
+    ]
+  },
+  "features": {
+    "drizzle_2x": true,
+    "phase_bin_drizzle": {
+      "enabled": true,
+      "n_bins": 4
+    },
+    "fused_1x_stats": true,
+    "drizzle_variants_k": 4
+  },
+  "storage": {
+    "format": "compact",
+    "obs_features_resolution": "1x",
+    "obs_features_dtype": "float16",
+    "compress_features": true,
+    "save_lr_burst": true,
+    "burst_dtype": "float16",
+    "compress_burst": false,
+    "save_hr_temperature": true
+  },
+  "obs_features_channels": [
+    "aligned_mean",
+    "aligned_median",
+    "coverage",
+    "variance",
+    "highpass_fused"
+  ]
+}
