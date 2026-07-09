@@ -20,11 +20,34 @@
 8. **基础设施**：`remote_inbox/` 只走 rsync/scp 增量，严禁 git（AGENTS.md 硬规则）。
 9. **冠军臂裁决（ACL-053 回填）**：η0.09+band 的 50k/batch8 冠军 0.647@30µm **未达标**，且较 20k/batch4 组合臂倒退 0.023；synth↑/real↓ 反相关再现。神经最佳纪录 = 20k 组合臂 **0.6705**（gap 0.031）。单数据集调参终止，方向转 **Stage 2b 合成基准**（TGV 首次上合成集，判决 H1 域差 vs H2 架构）。
 10. ⚠️（已解决，见 #11）**V7 池点保真度崩溃，确认是数据问题非训练问题（ACL-065/066/067，2026-07-08 夜）**：depb9v6 配方在 v7 池复训后 real cross-FRC 小幅改善（0.674/0.676@30µm）但孤立点 erased% 4.7%→~43%；batch/patch 对照实验排除训练超参，病根锁定 v7 缺陷分布设计。**v7 池已删除（2026-07-09，owner 令）。**
-11. **V8 池 = 当前生产训练池，点保真崩溃已修复（ACL-068/069/070，2026-07-09 整夜自治）**：`data/synthetic/pool_2x_v8_5k`（5000 景，seed 20260911）= v7 仅改两旋钮——密度 min/max_holes 20-50→**2-8**、深度下限 hole_depth_range 0.3→**0.55**。验证臂 `solver_v25_depb9v8_9bin_30k`：**isolated erased% 4.35%（v6 基线 4.66%，v7 病理 43%）**，ALL retention 0.547。机制发现：(a) "v7 点物理不可见"被 L1 审计证伪，病理角落=半径 1-2px×深度 0.3-0.5（ACL-068）；(b) 抹除先验需要池规模级数据多样性才形成——300 景 24k 步全程 0% 抹除，故 300 景廉价消融对此病理是盲的（ACL-069）；密度-vs-深度归因保持开放。**新池验收制度**：pilot 必过 tcforge gates + `scripts/audit_defect_detectability.py`（L1，已验证有效）+ 生产级验证训练；配置不得含未标定占位参数。悬置：v8 上的三轴复评（cross-FRC/低频稳定性是否保留 v7 的小幅改善）与 9-bin vs bin4 champion 选型。held-out 基准池 `pool_2x_v8_bench48`（seed 20260912）勿训。
+11. **V8 池 = 当前生产训练池，点保真崩溃已修复（ACL-068/069/070，2026-07-09 整夜自治）**：`data/synthetic/pool_2x_v8_5k`（5000 景，seed 20260911）= v7 仅改两旋钮——密度 min/max_holes 20-50→**2-8**、深度下限 hole_depth_range 0.3→**0.55**。验证臂 `solver_v25_depb9v8_9bin_30k`：**isolated erased% 4.35%（v6 基线 4.66%，v7 病理 43%）**，ALL retention 0.547。机制发现：(a) "v7 点物理不可见"被 L1 审计证伪，病理角落=半径 1-2px×深度 0.3-0.5（ACL-068）；(b) 抹除先验需要池规模级数据多样性才形成——300 景 24k 步全程 0% 抹除，故 300 景廉价消融对此病理是盲的（ACL-069）；密度-vs-深度归因保持开放。**新池验收制度**：pilot 必过 tcforge gates + `scripts/audit_defect_detectability.py`（L1，已验证有效）+ 生产级验证训练；配置不得含未标定占位参数。三轴选型已跑（ACL-071）：**无 v8 champion**——bin4 cutoff 22.80µm 首次超 TGV 但孤立点抹除 31%，9-bin 点保真最优（4.35%）但 FRC 退化 0.606；**champion 维持老 depb9v6（v6 池，0.661/4.66%）**。归因新证据支持"密度→FRC 增益、浅深度→点抹除"分解，v9 候选实验（v7 密度+v8 深度下限）待 owner 决策。held-out 基准池 `pool_2x_v8_bench48`（seed 20260912）勿训。
 
 ---
 
 ## 变更记录
+
+### [ACL-071] 2026-07-09（傍晚，固定化链自动执行）— v8 champion 三轴选型：**无全域赢家，FRC↔点保真权衡在 v8 上重现并放大**；bin4 cutoff 22.80µm 首次超 TGV 但孤立点抹除 31%；9-bin 点保真健康（4.35%）但 cross-FRC 退化到 0.606；**老 depb9v6（v6 池）仍是双轴最优神经臂**
+
+**执行**: owner 指示"固定化代码+后台自跑"。整链固化为 `~/thermal_lift/tmp/champ_chain.sh`（远端）：S0 md5 预检 → S1 tgv_oracle@v8bench48（CPU，与 bin4 训练并行）→ 等训练 → S2 渲染三臂 → S3 cross-FRC 排行榜 → S4-S6 Stage2b@v8bench48 → S7 v8 臂@v6bench48（考古发现 v7 轮 stage2b 实际跑在 v6 bench48 上，故 S7 使 v8 臂与全部历史同池直比）。全链无人值守完成，逐步落盘标志。`solver_v25_depb9v8_bin4_30k`（30k，b8/p384，4-bin ontf，与 v22 bin4 配方逐旗标一致）当日训毕。
+
+**仪器锚（三个全部精确复现，本轮数字可信）**: tgv_x_drz 0.7017@30µm/23.03µm；depb9v6_x_drz 0.6611/25.45（新渲半幅）；v6bench48 tgv__oracle band_FRC 0.76502/range_excursion 2.38760（逐位）。
+
+**三轴读数**（本地 `remote_inbox/20260717_v8_champion/`）:
+| 臂 | FRC@30µm | cutoff | isolated erased% | band_FRC@v6b | range_exc@v6b |
+|---|---|---|---|---|---|
+| depb9v8_9bin | 0.6057 | 26.12µm | 4.35% | 0.437 | 13.75 |
+| depb9v8_bin4 | 0.6676 | **22.80µm** | 31.06% | 0.787 | 8.40 |
+| depb9v6（历史，v6 池） | 0.6611 | 25.45µm | 4.66% | — | 2.70（ACL-062 era） |
+（v8bench48 同向：band_FRC 0.418/0.871/oracle 0.650；range_exc 12.1/43.5/oracle 2.10。）
+
+**判读**:
+1. **v6 时代的"bin4 用点保真换 FRC"权衡在 v8 上重现且放大**（v7 上是两臂一起崩没有权衡）：bin4 拿到史上最好神经 cutoff（22.80µm，首次超 TGV 23.03）和 0.668@30µm，代价 31% 孤立点抹除（v6 时代 bin4 是 9.6%）。
+2. **depb9v8_9bin 未能继承 v7 的 FRC 增益**（0.674→0.606，-0.068）也低于 v6 时代 9-bin（0.661）；但点保真是全场最优（4.35%）。
+3. **双轴纪律下无 v8 champion**：bin4 点保真门不过（31% 接近病理），9-bin FRC 明显退化。**老 depb9v6 checkpoint（0.661/4.66%）仍是双轴综合最优**，champion 维持冻结在它。
+4. 两臂 range_excursion（13.7/8.4）均显著高于历史同配方（2.70/4.35）——v8 稀疏缺陷池似乎恶化了低频稳定性；且 9-bin"低频差但点保真好"打破了 ACL-064 的"低频稳↔点活"相关性，机制待解。
+5. **归因信号（ACL-069 开放问题的新证据）**: v7（密 20-50，浅 0.3+）→ 9bin FRC 0.674/点崩 43%；v8（疏 2-8，深 0.55+）→ 9bin FRC 0.606/点活 4.35%。与"**密度是 FRC 增益来源，浅深度是点抹除来源**"的分解假说一致 → **v9 候选实验**：恢复 v7 密度（min/max 20-50）+ 保留 v8 深度下限（0.55），若假说成立应同时拿到 FRC≥0.67 与 erased%≤5%。成本 ~6h（生成+训练+三轴链都已固化）。磁盘可同时容纳 v8/v9 两池（650G 空闲），无需先删 v8。
+
+**涉及文件**: 远端 `outputs/solver_v25_depb9v8_bin4_30k/`、`output/{stageV25_v8sel_leaderboard,stage2b_bench_v8,stage2b_v8arms_on_v6bench,dot_probe_v8sel}/`、`tmp/champ_chain.sh`；本地 inbox `20260717_v8_champion/`。空间：v7ab 消融池×4 + v6_micro300 + 微型 step ckpt 已删（owner 令，650G 空闲）。
 
 ### [ACL-070] 2026-07-09（清晨，整夜自治收官）— **v8 池修复终裁：成立**。孤立点 erased% 43%→4.35%（略好于 v6 基线 4.66%），ALL retention 0.331→0.547；v8 =v7 仅动密度（min/max_holes 20-50→2-8）+ 深度下限（0.3→0.55）两个旋钮
 
