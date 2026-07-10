@@ -26,6 +26,18 @@
 
 ## 变更记录
 
+### [ACL-073] 2026-07-10（下午，等待 Track A/B 期间）— OOD content 轴生成器缺口补齐：4 个 out-of-grammar motif 族（organic_blobs / text_serial / concentric_rings / voronoi_cells）落地，content 轴第二批池配置就绪
+
+**背景**: 首轮 OOD 套件（seeds 20260920-28，跑于 oodchain）的 content 轴因生成器代码缺口（`research_log/ood_generator_support_audit_draft.md` 任务1 A1：新 motif 族需要新代码分支）退而用了 4 档 config 可达阶梯（texroles/xlmerge/legacymix/tracebus），设计稿 A1 的 4 个新几何语法族被挡在外（handoff 20260710 §4 开放项 3）。本条补上代码缺口。
+
+**实现**（计划 `research_log/ood_content_motif_families_plan.md`，fork agent 于隔离 worktree 实现，主循环独立验收后合并，commit b3363cd + merge）:
+- `tcforge/src/tcforge/geometry.py`: `CPU_SCENE_FAMILIES` 注册 4 新族；`_compose_cpu_scene` 入口新增 motif_weights 未知键校验（此前未知键**静默落到 generic**——现 raise ValueError）；4 个 bbox 局部光栅化分支。全部特征守频带诚实下限（宽 ≥ FLOOR 28µm、周期 ≥ pitch_floor 32µm；椭圆环按短轴度量执行 FLOOR/ratio 更严；Voronoi 通道垂直宽度下界 = channel_w ≥ FLOOR；7 段字形净空硬约束 h≥3t+2F、w≥2t+F）。
+- **字节级兼容已验证**: family 派发前零新增 rng 抽样、原 6 族分支一字未动、共享 clutter 段的门控是纯键名判断（零 RNG）；golden 测试 `test_scene_mask_legacy_and_v6_paths_match_golden` 通过 = 现有池逐字节不变。
+- **偏离计划**（详 `research_log/ood_content_motif_families_impl_notes.md`）: (1) 密度上调（首版 occupancy 0.3-0.5% 会让 48 景带限 FRC 噪声主导 → blobs ~2-3%、text ~1-2%、rings ~8-13%、voronoi ~38-42%）；(2) 共享 CPU clutter（passives/vias/edge-IO）对 4 新族**关闭**——分布内零件内容会稀释 content 轴语法距离。
+- 测试 116/116 绿（主循环亲跑；113 现有 + 3 新增：生成+确定性+元数据、12 seeds×4 族 floor 元数据审计、未知族名 raise）。预览目测通过（`tmp/motif_previews_20260710/`，含预览脚本）：环系无莫尔、Voronoi 通道下限成立（宽窄不一=双曲展宽固有几何）、斑块平滑带孔、7 段字形清晰（raised/engraved 两模式）；text 预览中一处内接圆边界裁剪楔形碎片 = pipeline 既有行为（现有族同样被裁），非新代码缺陷。
+
+**池配置**（4 个，未生成——排在 oodchain 之后）: `pool_2x_ood_content2_{organicblobs,textserial,rings,voronoi}.json`，seeds 20260930-33（已 grep 确认与全部历史 seed 不相交），逐字拷贝 legacymix 模板仅改 5 个预期键（程序化断言）。EVAL-ONLY，冻结 checkpoint 纯推理（预注册规则 1），ID 锚沿用 v8_bench48 已有 stage2b 行。
+
 ### [ACL-072] 2026-07-10（清晨，v9 链自动收官）— 归因矩阵第三角落定：**浅深度=点抹除元凶（实锤），密度对点保真无害甚至有益**；depb9v9_9bin 点保真史上最优（erased 1.55%/retention 0.609）但 FRC 0.625 未收复 v7 的 0.674；**bin4 配方在 v9 上低频灾难性发散（range_exc ~10³）出局**
 
 **执行**: 固化链 `tmp/v9_chain.sh` 全自动完成（含夜间一次 ~15min Tailscale 掉线，机器未重启、链条自愈无损）：pilot L1 闸通过 → v8_5k 删除（owner 令：不留两个 236G 池）→ v9 5000 景生成（seed 20260911 与 v8 逐景配对，唯一差异 min/max_holes 2-8→20-50）→ solver_v26_depb9v9_{9bin,bin4}_30k 串行训毕 → 三轴评测。仪器锚三重复现（tgv 0.7017/23.03；depb9v6 0.6611；0.5984/4.66%）。
