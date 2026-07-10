@@ -26,7 +26,24 @@
 
 ## 变更记录
 
-### [ACL-073] 2026-07-10（下午，等待 Track A/B 期间）— OOD content 轴生成器缺口补齐：4 个 out-of-grammar motif 族（organic_blobs / text_serial / concentric_rings / voronoi_cells）落地，content 轴第二批池配置就绪
+### [ACL-074] 2026-07-10（晚，abchain 自动收官）— Track A/B 双判决：**range_exc 低频劣化 + v7 的 FRC 优势都是配方因子，seed 洗清**；3K 池臂点保真史上最优（isolated erased 0.00%/retention 0.798）且真实 FRC 打平 5K——**池规格降 3K 不获批（合成基准不平），但 depb9v9_3k 成为 champion 候选新帕累托点**
+
+**执行**: 固化链 `tmp/ab_chain.sh`（tmux abchain）全自动完成：Track A gen pool_2x_v9s2_5k（v9 配方 × v7 的 seed 20260902）→ 训 solver_v27_depb9v9s2_9bin_30k → 删池；Track B gen pool_2x_v9_3k（v9 配方、同 seed 20260911、3000 景）→ 训 solver_v27_depb9v9_3k_9bin_30k → 删池；渲染 + leaderboard + stage2b 双基准。TGV 控制锚逐位复现（0.7017/23.03µm，第 9 次）；probe sanity 臂 depb9v6 逐位复现（0.5984/4.66%）——两台仪器都可信。probe 阶段在 Mac 跑（渲染 base64-over-ssh 拉回 `remote_inbox/20260710_expab/`）。
+
+**读数**（真实 cross-FRC = corrected vs drizzle；stage2b @n=96 = v8bench/v6bench；点保真 = ALL retention / isolated erased%）:
+| 臂 | FRC@30µm | cutoff | band_mean_25_40 | range_exc | retention | erased% |
+|---|---|---|---|---|---|---|
+| depb9v9s2（A：seed 换 v7 的） | 0.6225 | 25.82µm | 0.385/0.417 | **13.64/15.55** | 0.684 | 1.55 |
+| depb9v9_3k（B：3000 景） | 0.6245 | 26.12µm | 0.332/0.385 | 14.91/12.52 | **0.798（史上最优）** | **0.00（史上最优）** |
+| 参照 depb9v9_9bin（5k） | 0.6252 | 25.82µm | 0.450/0.455 | 13.02/12.08 | 0.609 | 1.55 |
+| 参照 depb9v6 / tgv | 0.661 / 0.7017 | 25.45 / 23.03µm | — / 0.650/0.765 | 2.70 era / 2.10/2.39 | 0.598 | 4.66 |
+
+**判读**:
+1. **Track A（seed 归因）双关闭**: (a) range_exc@96 = 13.6/15.6，没有掉回 v7 时代的 ~2 → **v8/v9 代低频劣化是配方（深度下限 0.55 / 缺陷分布）因子，seed/内容洗清**；(b) FRC@30µm = 0.6225 ≉ 0.674 → **v7 的 FRC 优势也不是 seed 混杂，是 v7 配方本身**（浅密小点族的高频纹理贡献）——ACL-072 判读 2 开放项关闭：FRC 与点保真的张力在数据配置层就存在（同一浅点配置既送 FRC 又毁点）。附带：同配方同规模换 seed 在合成基准上差 band ~0.065（0.385 vs 0.450）→ seed 对合成基准有中等内容效应，但解释不了上述两项。
+2. **Track B（3K 对照）三轴不平 → 降规格不获批，但结构有趣**: 真实 FRC 打平（Δ0.0007），合成 band 明显差（−0.10~0.12），点保真反而**大幅更好**（0.00%/0.798 vs 1.55%/0.609）。机制与 ACL-069 一致并成为其第二数据点：**抹除先验强度随池规模/多样性增长**——3K 先验更弱 → 抹除更少 + 合成带内匹配更差。池规模本身就是 FRC↔点保真张力轴上的一个旋钮。
+3. **champion 备选格局更新（owner 拍板材料）**: depb9v9_3k 在真实域两轴（FRC 打平、点保真占优）**支配** depb9v9_9bin，仅合成基准 band 落后；帕累托前沿现为 depb9v6（FRC 0.661 绑定）vs depb9v9_3k（点保真 0.00%/0.798 绑定）vs tgv（0.7017）。checkpoint solver_v27_depb9v9_3k_9bin_30k 在远端保留。
+
+**开放**: range_exc 劣化已定位到配方层但机制未明（深度下限 0.55 vs 缺陷密度/分布的哪一半，需 depth-floor 单变量小消融）；OOD 退化曲线（oodchain，明早）出来后与 champion 问题一起交 owner。— OOD content 轴生成器缺口补齐：4 个 out-of-grammar motif 族（organic_blobs / text_serial / concentric_rings / voronoi_cells）落地，content 轴第二批池配置就绪
 
 **背景**: 首轮 OOD 套件（seeds 20260920-28，跑于 oodchain）的 content 轴因生成器代码缺口（`research_log/ood_generator_support_audit_draft.md` 任务1 A1：新 motif 族需要新代码分支）退而用了 4 档 config 可达阶梯（texroles/xlmerge/legacymix/tracebus），设计稿 A1 的 4 个新几何语法族被挡在外（handoff 20260710 §4 开放项 3）。本条补上代码缺口。
 
