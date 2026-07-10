@@ -905,6 +905,13 @@ CPU_SCENE_FAMILIES: tuple[str, ...] = (
     "trace_bus",
     "heat_spreader",
     "generic",
+    # OOD content-axis families (research_log/ood_content_motif_families_plan.md):
+    # deliberately NON-manufactured geometry grammars for out-of-grammar evaluation
+    # pools. Never referenced by training-pool configs.
+    "organic_blobs",
+    "text_serial",
+    "concentric_rings",
+    "voronoi_cells",
 )
 
 
@@ -970,6 +977,14 @@ def _compose_cpu_scene(
     draw-canvas) mask, the primitive metadata list, the chosen scene family and the
     sampled ``density`` (stored in scene metadata).
     """
+
+    # Fail loudly on unknown family names (they would otherwise silently fall
+    # through to the trailing "generic" else-branch). Pure key check, zero RNG.
+    unknown = sorted(str(k) for k in motif_weights if str(k) not in CPU_SCENE_FAMILIES)
+    if unknown:
+        raise ValueError(
+            f"unknown motif_weights families {unknown}; "
+            f"valid families: {list(CPU_SCENE_FAMILIES)}")
 
     mask = np.zeros(draw_shape, dtype=np.uint8)
     subtract = np.zeros(draw_shape, dtype=np.uint8)
@@ -1433,6 +1448,210 @@ def _compose_cpu_scene(
             "pitch_um": fpitch, "direction": "vertical" if vertical else "horizontal",
         })
 
+    # ── OOD content-axis family helpers (plan §2) ────────────────────────────
+    # Direct bbox-local rasterisation on the draw grid (same index<->um convention
+    # as make_ellipse_pad: pixel i sits at i*pitch, no half-pixel offset). These
+    # helpers draw NOTHING unless one of the four new families is dispatched, so
+    # existing pools stay byte-identical.
+    draw_pitch = canvas_w_um / float(draw_shape[1])   # um per draw-grid px
+
+    def _bbox_grid(x_lo: float, x_hi: float, y_lo: float, y_hi: float):
+        """Clipped draw-grid window covering [x_lo,x_hi]x[y_lo,y_hi] um. Returns
+        (row slice, col slice, x um row-vector, y um col-vector) or None if empty."""
+        x0 = max(0, int(np.floor(x_lo / draw_pitch)) - 1)
+        x1 = min(draw_shape[1], int(np.ceil(x_hi / draw_pitch)) + 2)
+        y0 = max(0, int(np.floor(y_lo / draw_pitch)) - 1)
+        y1 = min(draw_shape[0], int(np.ceil(y_hi / draw_pitch)) + 2)
+        if x0 >= x1 or y0 >= y1:
+            return None
+        xs = (np.arange(x0, x1, dtype=np.float32) * np.float32(draw_pitch))[None, :]
+        ys = (np.arange(y0, y1, dtype=np.float32) * np.float32(draw_pitch))[:, None]
+        return slice(y0, y1), slice(x0, x1), xs, ys
+
+    def _add_organic_blob(bx: float, by: float) -> None:
+        # Smooth harmonic-perturbed closed outline. Orders start at 2 (order 1 is
+        # mostly a translation). Neck guard: boundary radius >= r0*(1-amp_total)
+        # >= 1.5*FLOOR everywhere, so no local feature dips under the 28um floor.
+        r0 = float(rng.uniform(110.0, 420.0))
+        n_h = int(rng.integers(3, 8))
+        amp_total = float(rng.uniform(0.10, 0.35))
+        amp_total = min(amp_total, max(0.0, 1.0 - 1.5 * FLOOR / r0))
+        raw = rng.uniform(0.35, 1.0, size=n_h)
+        amps = (raw / float(raw.sum()) * amp_total).astype(np.float64)
+        phases = rng.uniform(0.0, 2.0 * np.pi, size=n_h)
+        orders = np.arange(2, 2 + n_h, dtype=np.float64)
+        r_hi = r0 * (1.0 + amp_total)
+        grid = _bbox_grid(bx - r_hi, bx + r_hi, by - r_hi, by + r_hi)
+        if grid is None:
+            return
+        ysl, xsl, xs, ys = grid
+        dx = xs - np.float32(bx)
+        dy = ys - np.float32(by)
+        rr = np.hypot(dx, dy)
+        th = np.arctan2(dy, dx).astype(np.float32)
+        bound = np.full(rr.shape, r0, dtype=np.float32)
+        for k, a, ph in zip(orders, amps, phases):
+            bound += np.float32(r0 * a) * np.cos(np.float32(k) * th + np.float32(ph))
+        mask[ysl, xsl] |= (rr <= bound).astype(np.uint8)
+        r_min = r0 * (1.0 - amp_total)
+        hole_r = 0.0
+        if rng.random() < 0.25 and r_min >= 2.2 * FLOOR:
+            # interior hole: radius >= FLOOR (diameter >= 56um), ring wall >= FLOOR
+            hole_r = float(rng.uniform(FLOOR, min(r_min - FLOOR, 0.6 * r_min)))
+            _sub(make_circle_pad(bx, by, 2.0 * hole_r, **common))
+        primitives.append({
+            "type": "organic_blob", "cx_um": bx, "cy_um": by, "r_base_um": r0,
+            "n_harmonics": n_h, "amp_total": round(amp_total, 4),
+            "hole_r_um": round(hole_r, 2),
+        })
+
+    def _add_text_row(tx: float, ty: float) -> None:
+        # One row of 7-segment glyphs (random non-empty segment subsets => alien
+        # serial-number look). Stroke >= FLOOR; enforced glyph proportions keep
+        # every inter-stroke clearance >= FLOOR; char pitch >= glyph_w + FLOOR.
+        t = float(rng.uniform(FLOOR, 1.6 * FLOOR))
+        h_g = float(rng.uniform(max(180.0, 3.0 * t + 2.0 * FLOOR), 400.0))
+        w_g = max(float(rng.uniform(0.50, 0.62)) * h_g, 2.0 * t + FLOOR)
+        cpitch = w_g + max(float(rng.uniform(1.0, 1.8)) * FLOOR, FLOOR)
+        horiz = rng.random() < 0.5
+        span = canvas_w_um if horiz else canvas_h_um
+        n = _dcount(4, 10)
+        n = max(2, min(n, int((0.72 * span - w_g) / cpitch) + 1))
+        ext = (n - 1) * cpitch + w_g
+        if horiz:
+            tx = float(np.clip(tx, ext / 2.0 + 0.06 * canvas_w_um,
+                               canvas_w_um - ext / 2.0 - 0.06 * canvas_w_um))
+        else:
+            ty = float(np.clip(ty, ext / 2.0 + 0.06 * canvas_h_um,
+                               canvas_h_um - ext / 2.0 - 0.06 * canvas_h_um))
+        engraved = rng.random() < 0.5
+        put = _sub if engraved else _add
+        if engraved:
+            # engraved mode: strokes are cool channels (>= FLOOR wide) carved out
+            # of a hot plate; plate margin keeps the outer rim >= 1.5*FLOOR.
+            margin = float(rng.uniform(1.5, 2.5)) * FLOOR
+            pw = (ext if horiz else h_g) + 2.0 * margin
+            ph = (h_g if horiz else ext) + 2.0 * margin
+            _add(make_rectangle(tx, ty, pw, ph, **common))
+        # segment centres/sizes relative to a glyph centre (x right, y down):
+        # A/G/D horizontal bars, F/B upper verticals, E/C lower verticals.
+        segs = (
+            (0.0, -(h_g - t) / 2.0, w_g, t),            # A
+            (+(w_g - t) / 2.0, -h_g / 4.0, t, h_g / 2.0),  # B
+            (+(w_g - t) / 2.0, +h_g / 4.0, t, h_g / 2.0),  # C
+            (0.0, +(h_g - t) / 2.0, w_g, t),            # D
+            (-(w_g - t) / 2.0, +h_g / 4.0, t, h_g / 2.0),  # E
+            (-(w_g - t) / 2.0, -h_g / 4.0, t, h_g / 2.0),  # F
+            (0.0, 0.0, w_g, t),                          # G
+        )
+        for i in range(n):
+            off = (i - (n - 1) / 2.0) * cpitch
+            gx = tx + off if horiz else tx
+            gy = ty if horiz else ty + off
+            on = rng.random(7) < 0.62
+            if int(on.sum()) < 2:
+                on[0] = on[3] = True                     # force A+D: never empty
+            for j, (sx, sy, sw, sh) in enumerate(segs):
+                if on[j]:
+                    put(make_rectangle(gx + sx, gy + sy, sw, sh, **common))
+        primitives.append({
+            "type": "text_serial_row", "cx_um": tx, "cy_um": ty, "n_chars": n,
+            "glyph_h_um": round(h_g, 2), "glyph_w_um": round(w_g, 2),
+            "stroke_um": round(t, 2), "pitch_um": round(cpitch, 2),
+            "direction": "horizontal" if horiz else "vertical",
+            "mode": "engraved" if engraved else "raised",
+        })
+
+    def _add_ring_system(rx: float, ry: float, r_max: float) -> None:
+        # Concentric (optionally elliptical) annuli. The honesty floor is enforced
+        # along the NARROW (minor) axis: an elliptical band of nominal width w has
+        # metric width w*ratio along the minor axis, so both ring width and gap
+        # use flo = FLOOR/ratio as their floor. Radial period >= pitch_floor.
+        ratio = float(rng.uniform(0.7, 1.0))
+        ang = float(rng.uniform(0.0, 180.0))
+        flo = FLOOR / ratio
+        w = flo * float(rng.uniform(1.0, 2.0))
+        p = max(pitch_floor, (w + flo) * float(rng.uniform(1.0, 1.5)))
+        p = max(p, w + flo)
+        r_start = float(rng.uniform(1.5, 3.0)) * FLOOR
+        n_rings = int(np.clip((r_max - r_start - w) // p + 1, 1, 40))
+        grid = _bbox_grid(rx - r_max - w, rx + r_max + w, ry - r_max - w, ry + r_max + w)
+        if grid is None:
+            return
+        ysl, xsl, xs, ys = grid
+        dx = xs - np.float32(rx)
+        dy = ys - np.float32(ry)
+        th_r = np.radians(ang)
+        cos_t, sin_t = np.float32(np.cos(th_r)), np.float32(np.sin(th_r))
+        xr = dx * cos_t + dy * sin_t
+        yr = -dx * sin_t + dy * cos_t
+        rr = np.hypot(xr, yr / np.float32(ratio))
+        band = np.zeros(rr.shape, dtype=bool)
+        for k in range(n_rings):
+            r_in = r_start + k * p
+            band |= (rr >= r_in) & (rr <= r_in + w)
+        central = False
+        if rng.random() < 0.5:
+            r_disc = r_start - flo * float(rng.uniform(1.0, 1.3))
+            if r_disc >= FLOOR:
+                band |= rr <= r_disc
+                central = True
+        mask[ysl, xsl] |= band.astype(np.uint8)
+        primitives.append({
+            "type": "ring_system", "cx_um": rx, "cy_um": ry, "n_rings": n_rings,
+            "ring_w_um": round(w, 2), "period_um": round(p, 2),
+            "r_start_um": round(r_start, 2), "r_max_um": round(r_max, 2),
+            "ratio": round(ratio, 3), "angle_deg": round(ang, 1),
+            "central_disc": central,
+        })
+
+    def _add_voronoi_field(vw: float, vh: float) -> None:
+        # Voronoi tessellation: hot cells separated by cool channels along the
+        # cell bisectors. The (d2-d1) <= channel_w band has perpendicular width
+        # >= channel_w everywhere (it widens away from seed midpoints), and seed
+        # separation >= 5*FLOOR keeps every cell inradius comfortably over the
+        # floor. d1/d2 are maintained incrementally in row blocks (never K full
+        # distance maps).
+        rx0, rx1 = cx - vw / 2.0, cx + vw / 2.0
+        ry0, ry1 = cy - vh / 2.0, cy + vh / 2.0
+        min_sep = 5.0 * FLOOR
+        target = _dcount(6, 16)
+        margin = min_sep / 2.0
+        seeds: list[tuple[float, float]] = []
+        tries = 0
+        while len(seeds) < target and tries < 2000:
+            tries += 1
+            px_ = float(rng.uniform(rx0 + margin, rx1 - margin))
+            py_ = float(rng.uniform(ry0 + margin, ry1 - margin))
+            if all(np.hypot(px_ - sx, py_ - sy) >= min_sep for sx, sy in seeds):
+                seeds.append((px_, py_))
+        if len(seeds) < 2:
+            return
+        channel_w = float(rng.uniform(FLOOR, 1.6 * FLOOR))
+        x0 = max(0, int(np.floor(rx0 / draw_pitch)))
+        x1 = min(draw_shape[1], int(np.ceil(rx1 / draw_pitch)) + 1)
+        y0 = max(0, int(np.floor(ry0 / draw_pitch)))
+        y1 = min(draw_shape[0], int(np.ceil(ry1 / draw_pitch)) + 1)
+        xs = (np.arange(x0, x1, dtype=np.float32) * np.float32(draw_pitch))[None, :]
+        for by0 in range(y0, y1, 512):
+            by1 = min(by0 + 512, y1)
+            ys = (np.arange(by0, by1, dtype=np.float32) * np.float32(draw_pitch))[:, None]
+            d1 = np.full((by1 - by0, x1 - x0), np.inf, dtype=np.float32)
+            d2 = np.full_like(d1, np.inf)
+            for sx, sy in seeds:
+                nd = np.hypot(xs - np.float32(sx), ys - np.float32(sy))
+                closer = nd < d1
+                d2 = np.where(closer, d1, np.minimum(d2, nd))
+                d1 = np.where(closer, nd, d1)
+            cells = (d2 - d1) > channel_w
+            mask[by0:by1, x0:x1] |= cells.astype(np.uint8)
+        primitives.append({
+            "type": "voronoi_cells", "cx_um": cx, "cy_um": cy,
+            "region_w_um": round(vw, 2), "region_h_um": round(vh, 2),
+            "n_seeds": len(seeds), "channel_w_um": round(channel_w, 2),
+            "min_sep_um": round(min_sep, 2),
+        })
+
     family = _pick_weighted(rng, motif_weights)
 
     # Part FOOTPRINT is held constant-large (die/body ~50-72% of canvas) INDEPENDENT of
@@ -1513,6 +1732,37 @@ def _compose_cpu_scene(
             _add_die(sx, sy, canvas_w_um * float(rng.uniform(0.12, 0.22)),
                      canvas_h_um * float(rng.uniform(0.10, 0.20)))
 
+    # ── OOD content-axis families (plan §2) — EVAL-ONLY grammars ─────────────
+    elif family == "organic_blobs":
+        for _ in range(_dcount(8, 22)):  # blob count scales with density
+            bx, by = _rpos(0.12, 0.12)
+            _add_organic_blob(bx, by)
+
+    elif family == "text_serial":
+        for _ in range(_dcount(2, 5)):  # row count scales with density
+            tx, ty = _rpos(0.15, 0.15)
+            _add_text_row(tx, ty)
+
+    elif family == "concentric_rings":
+        span_um = min(canvas_w_um, canvas_h_um)
+        r1 = span_um * float(rng.uniform(0.22, 0.35))
+        rx1_, ry1_ = (cx + canvas_w_um * float(rng.uniform(-0.12, 0.12)),
+                      cy + canvas_h_um * float(rng.uniform(-0.12, 0.12)))
+        _add_ring_system(rx1_, ry1_, r1)
+        if rng.random() < _lerp(0.15, 0.45):
+            # optional second, smaller system — rejection-placed so the two
+            # bounding circles stay >= 2*FLOOR apart (no moire sliver overlap)
+            r2 = r1 * float(rng.uniform(0.35, 0.6))
+            for _ in range(8):
+                rx2_, ry2_ = _rpos(0.10, 0.10)
+                if np.hypot(rx2_ - rx1_, ry2_ - ry1_) >= r1 + r2 + 2.0 * FLOOR:
+                    _add_ring_system(rx2_, ry2_, r2)
+                    break
+
+    elif family == "voronoi_cells":
+        _add_voronoi_field(canvas_w_um * float(rng.uniform(0.60, 0.75)),
+                           canvas_h_um * float(rng.uniform(0.60, 0.75)))
+
     else:  # "generic" — minority diversity: plain blocks + L traces + passives
         for _ in range(_dcount(2, 4)):
             bx, by = _rpos(0.08, 0.08)
@@ -1532,31 +1782,37 @@ def _compose_cpu_scene(
             primitives.append({"type": "trace_l", "x1_um": x1, "y1_um": y1,
                                "x2_um": x2, "y2_um": y2, "w_um": tw})
 
-    # ── Shared part clutter (all families) — passives, vias, edge I/O ────────
+    # ── Shared part clutter (CPU-part families) — passives, vias, edge I/O ───
     # Counts scale with density; every element stays >= 28um / pitch >= 32um.
-    for _ in range(_dcount(0, 3)):
-        qx, qy = _rpos(0.06, 0.06)
-        _add_passive(qx, qy)
-    for _ in range(_dcount(0, 4)):
-        vx, vy = _rpos(0.05, 0.05)
-        d = max(line * float(rng.uniform(1.2, 3.0)), FLOOR)
-        _add(make_circle_pad(vx, vy, d, **common))
-        primitives.append({"type": "via", "cx_um": vx, "cy_um": vy, "diameter_um": d})
-    if rng.random() < _lerp(0.3, 0.7):
-        edge = int(rng.integers(0, 4))
-        n = int(rng.choice([8, 10, 12, 16, 20]))
-        sp = max(float(rng.uniform(p_lo, p_hi)) * 0.9, pitch_floor)  # pin pitch >= 32um
-        pw = max(line * float(rng.uniform(0.9, 1.6)), FLOOR)         # pin width >= 28um
-        pl = max(minor * float(rng.uniform(1.0, 2.2)), FLOOR)
-        if edge == 0:
-            _add(make_pin_array(n, sp, pw, pl, cx, 0.05 * canvas_h_um, "horizontal", **common))
-        elif edge == 1:
-            _add(make_pin_array(n, sp, pw, pl, cx, 0.95 * canvas_h_um, "horizontal", **common))
-        elif edge == 2:
-            _add(make_pin_array(n, sp, pw, pl, 0.05 * canvas_w_um, cy, "vertical", **common))
-        else:
-            _add(make_pin_array(n, sp, pw, pl, 0.95 * canvas_w_um, cy, "vertical", **common))
-        primitives.append({"type": "edge_io", "edge": int(edge), "n_pins": n})
+    # The four OOD content grammars stay PURE (no CPU-part clutter): mixing
+    # in-distribution part content would attenuate the content-axis distance the
+    # OOD pools exist to measure. Family-name check only — zero RNG — so the
+    # original six families draw an unchanged RNG stream (golden-pinned).
+    if family not in ("organic_blobs", "text_serial", "concentric_rings",
+                      "voronoi_cells"):
+        for _ in range(_dcount(0, 3)):
+            qx, qy = _rpos(0.06, 0.06)
+            _add_passive(qx, qy)
+        for _ in range(_dcount(0, 4)):
+            vx, vy = _rpos(0.05, 0.05)
+            d = max(line * float(rng.uniform(1.2, 3.0)), FLOOR)
+            _add(make_circle_pad(vx, vy, d, **common))
+            primitives.append({"type": "via", "cx_um": vx, "cy_um": vy, "diameter_um": d})
+        if rng.random() < _lerp(0.3, 0.7):
+            edge = int(rng.integers(0, 4))
+            n = int(rng.choice([8, 10, 12, 16, 20]))
+            sp = max(float(rng.uniform(p_lo, p_hi)) * 0.9, pitch_floor)  # pin pitch >= 32um
+            pw = max(line * float(rng.uniform(0.9, 1.6)), FLOOR)         # pin width >= 28um
+            pl = max(minor * float(rng.uniform(1.0, 2.2)), FLOOR)
+            if edge == 0:
+                _add(make_pin_array(n, sp, pw, pl, cx, 0.05 * canvas_h_um, "horizontal", **common))
+            elif edge == 1:
+                _add(make_pin_array(n, sp, pw, pl, cx, 0.95 * canvas_h_um, "horizontal", **common))
+            elif edge == 2:
+                _add(make_pin_array(n, sp, pw, pl, 0.05 * canvas_w_um, cy, "vertical", **common))
+            else:
+                _add(make_pin_array(n, sp, pw, pl, 0.95 * canvas_w_um, cy, "vertical", **common))
+            primitives.append({"type": "edge_io", "edge": int(edge), "n_pins": n})
 
     mask = mask & ~subtract
     return mask, primitives, family, density
