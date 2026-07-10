@@ -365,6 +365,69 @@ def test_scene_composer_default_none_is_inert() -> None:
     assert json.dumps(base_meta, sort_keys=True) == json.dumps(explicit_meta, sort_keys=True)
 
 
+_OOD_CONTENT_FAMILIES = {  # family -> its primitive type marker
+    "organic_blobs": "organic_blob",
+    "text_serial": "text_serial_row",
+    "concentric_rings": "ring_system",
+    "voronoi_cells": "voronoi_cells",
+}
+
+
+def test_ood_content_families_generate_and_are_deterministic() -> None:
+    """OOD content-axis grammars (ood_content_motif_families_plan.md §3): each of the
+    four new families produces a non-empty mask with correctly-tagged metadata, is
+    seed-deterministic (mask bytes + metadata JSON), and stays clutter-pure (no
+    CPU-part passive/via/edge_io primitives mixed into the OOD grammar)."""
+    for fam, marker in _OOD_CONTENT_FAMILIES.items():
+        weights = {fam: 1.0}
+        a_mask, a_meta = geometry.build_scene_mask_with_metadata(
+            "medium", 777001, motif_weights=weights, **_GOLDEN_GEOM_KW)
+        b_mask, b_meta = geometry.build_scene_mask_with_metadata(
+            "medium", 777001, motif_weights=weights, **_GOLDEN_GEOM_KW)
+        assert a_mask.tobytes() == b_mask.tobytes(), fam
+        assert json.dumps(a_meta, sort_keys=True) == json.dumps(b_meta, sort_keys=True)
+        assert a_meta["scene_family"] == fam
+        assert float(a_mask.sum()) > 0.0, fam
+        prim_types = {p["type"] for p in a_meta["primitives"]}
+        assert marker in prim_types, (fam, prim_types)
+        assert not prim_types & {"passive", "via", "edge_io"}, (fam, prim_types)
+
+
+def test_ood_content_families_respect_feature_floor_metadata() -> None:
+    """Recorded stroke/channel/ring widths must sit on/above the 28um honesty floor
+    (metric width along the NARROW axis for elliptical rings: ring_w_um * ratio)."""
+    FLOOR = 28.0
+    for seed in range(880001, 880013):
+        for fam in _OOD_CONTENT_FAMILIES:
+            _, meta = geometry.build_scene_mask_with_metadata(
+                "medium", seed, motif_weights={fam: 1.0}, **_GOLDEN_GEOM_KW)
+            for p in meta["primitives"]:
+                if p["type"] == "text_serial_row":
+                    assert p["stroke_um"] >= FLOOR - 1e-6
+                    assert p["pitch_um"] - p["glyph_w_um"] >= FLOOR - 1e-6
+                elif p["type"] == "ring_system":
+                    assert p["ring_w_um"] * p["ratio"] >= FLOOR - 1e-6
+                    assert (p["period_um"] - p["ring_w_um"]) * p["ratio"] >= FLOOR - 1e-6
+                elif p["type"] == "voronoi_cells":
+                    assert p["channel_w_um"] >= FLOOR - 1e-6
+                elif p["type"] == "organic_blob":
+                    r_min = p["r_base_um"] * (1.0 - p["amp_total"])
+                    assert r_min >= 1.5 * FLOOR - 0.1
+
+
+def test_unknown_motif_family_raises() -> None:
+    """Unknown motif_weights keys must fail loudly instead of silently rendering the
+    generic fallback family."""
+    try:
+        geometry.build_scene_mask_with_metadata(
+            "medium", 1, motif_weights={"pga_grid": 0.5, "warp_field": 0.5},
+            **_GOLDEN_GEOM_KW)
+    except ValueError as err:
+        assert "warp_field" in str(err)
+    else:
+        raise AssertionError("unknown family name did not raise")
+
+
 def test_inscribe_disc_default_false_unchanged() -> None:
     kwargs = dict(
         difficulty="hard", seed=2024, rotation_deg_center=33.0, rotation_jitter_deg=0.0,
