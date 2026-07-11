@@ -26,13 +26,13 @@ def load_data():
     metadata = metadata[metadata["is_sr_usable"] & metadata["is_main_session"]].iloc[:248]
     return raw_frames, shifts, metadata
 
-def get_splits(metadata):
+def get_splits(metadata, seed=42):
     indices = np.arange(len(metadata))
     phase_bins = np.zeros(len(metadata), dtype=int)  # dummy, stratified_split just uses it to group
     # Actually run_m2_frc uses `command_phase_bins(metadata, scale=2)`
     from run_m2_frc import command_phase_bins
     phase_bins = command_phase_bins(metadata, scale=2, theta_deg=47.6, pixel_size_um=20.0)
-    a_idx, b_idx, _ = stratified_split(phase_bins, scale=2, seed=42)
+    a_idx, b_idx, _ = stratified_split(phase_bins, scale=2, seed=seed)
     return a_idx, b_idx
 
 def run_v11(frames, shifts, device="cpu"):
@@ -99,16 +99,29 @@ def run_map_tv(frames, shifts):
     return hr
 
 def main():
+    # Multisplit support (ms_chain, 2026-07-11): --seed/--methods/--outdir added for
+    # the champion multi-split re-verification; all defaults keep the historical
+    # stage0c/0h behavior byte-identical (seed 42, all three methods, same outdir).
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("--seed", type=int, default=42, help="stratified split seed")
+    ap.add_argument("--methods", default="v11,tgv,maptv", help="comma list of v11,tgv,maptv")
+    ap.add_argument("--outdir", default=str(PROJECT_ROOT / "output/stage0c_frc_recons"))
+    args = ap.parse_args()
+
     print("Loading data...")
     raw_frames, shifts, metadata = load_data()
-    a_idx, b_idx = get_splits(metadata)
+    a_idx, b_idx = get_splits(metadata, seed=args.seed)
 
-    out_dir = PROJECT_ROOT / "output/stage0c_frc_recons"
+    out_dir = Path(args.outdir)
     out_dir.mkdir(parents=True, exist_ok=True)
 
-    for name, func in [("v11", lambda f, s: run_v11(f, s, "cpu")),
-                       ("tgv", run_tgv),
-                       ("maptv", run_map_tv)]:
+    runners = {"v11": lambda f, s: run_v11(f, s, "cpu"),
+               "tgv": run_tgv,
+               "maptv": run_map_tv}
+    failed = []
+    for name in [m.strip() for m in args.methods.split(",") if m.strip()]:
+        func = runners[name]
         print(f"Running {name}...")
         try:
             a_img = func(raw_frames[a_idx], shifts[a_idx])
@@ -117,6 +130,10 @@ def main():
             np.save(out_dir / f"{name}_b.npy", b_img)
         except Exception as e:
             print(f"Error for {name}: {e}")
+            failed.append(name)
+    if failed:
+        # fail loud so chain runners' `|| fail` actually fires (was silent exit 0)
+        raise SystemExit(f"reconstruct_halves FAILED for: {failed}")
 
 if __name__ == "__main__":
     main()
