@@ -26,6 +26,14 @@
 
 ## 变更记录
 
+### [ACL-075] 2026-07-11（收尾分析 #1，零训练本地）— **DC 残差"自我怀疑仪表"成立：被抹除的点在 held-out 帧数据一致性残差中可检出（AUC 0.68-0.84），且点保真越好的臂检出越强（单调）**——抹除不在前向算子零空间内，硬 DC 把"先验覆盖数据"压进了可观测面
+
+**方法**（`algos/ep07_unet_sr/scripts/analyze_dc_residual_confidence.py`，结论文档 `research_log/dc_residual_confidence_analysis.md`，产物 `output/dc_residual_confidence/`）: native 网格重建（centered 渲染经精确逆变换还原）→ σ=0.5 占位算子（= 各臂推理期 DC 同一算子）forward → **仅用该半份 DC 子集之外的 112 held-out 帧**算 |y−A(x̂)|（防自拟合）→ 同 shifts drizzle splat 到探针坐标系 → 逐点窗口统计 vs per_dot 类别，Mann-Whitney AUC。对齐验证 9/12；残差图边缘有 σ 失配系统痕迹（算子装配正确）。
+
+**读数**（win_max；erased-vs-kept / erased-vs-null）: depb9v6 **0.682**/0.784（n=378）；depb9v9s2 **0.766**/0.853（n=206）；depb9v9_3k **0.838**/0.916（n=139）。中位 |resid| erased≈0.19-0.22 vs kept≈0.12 vs null≈0.11。bs_mean 最弱（信号是点状局部峰非窗口均值，符合物理预期）。
+
+**判读**: (1) 预期的"零空间失明"负结果**被推翻**——浅小点经 A 降采样后保留可测能量（与 ACL-068 L1 审计闭环）；DC 残差可作"低置信区域"标注层（非硬判据）。(2) 方向偏置加强结论：erased 点偏小偏浅本应留更弱残差，观测反而更强 → 非尺寸混杂。(3) **AUC 随臂点保真单调上升**（0.68→0.77→0.84）：好臂只抹先验最强处、与数据冲突最外露——物理约束求解器的可审计性卖点（C1/C3 一小节 + future work 接 ACL-024 后验采样伏笔）。**诚实边界**: σ 未标定（AUC 是占位算子下界）；类别来自探针非人工 GT；单一真实 session。
+
 ### [ACL-074] 2026-07-10（晚，abchain 自动收官）— Track A/B 双判决：**range_exc 低频劣化 + v7 的 FRC 优势都是配方因子，seed 洗清**；3K 池臂点保真史上最优（isolated erased 0.00%/retention 0.798）且真实 FRC 打平 5K——**池规格降 3K 不获批（合成基准不平），但 depb9v9_3k 成为 champion 候选新帕累托点**
 
 **执行**: 固化链 `tmp/ab_chain.sh`（tmux abchain）全自动完成：Track A gen pool_2x_v9s2_5k（v9 配方 × v7 的 seed 20260902）→ 训 solver_v27_depb9v9s2_9bin_30k → 删池；Track B gen pool_2x_v9_3k（v9 配方、同 seed 20260911、3000 景）→ 训 solver_v27_depb9v9_3k_9bin_30k → 删池；渲染 + leaderboard + stage2b 双基准。TGV 控制锚逐位复现（0.7017/23.03µm，第 9 次）；probe sanity 臂 depb9v6 逐位复现（0.5984/4.66%）——两台仪器都可信。probe 阶段在 Mac 跑（渲染 base64-over-ssh 拉回 `remote_inbox/20260710_expab/`）。
