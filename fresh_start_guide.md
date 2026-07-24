@@ -1,5 +1,7 @@
 # Thermal Lift Fresh Start Guide
 
+> **⚠️ 历史文档（2026-07-24 收尾标注）**: 本文档反映项目早期（EP01–EP06 时代）的认知基线，其中的「下一步路线」已全部执行完毕或被取代。当前项目最终结论以 `research_log/algorithm_changelog.md`（ACL-001–080）和 `docs/publication_figures/GALLERY.md` 为准；导航入口见根目录 `README.md` 和 `research_log/README.md`。本文档保留作为早期事实与边界的历史参照。
+
 > 本文档是当前项目的入口基线。它只保留继续推进所需的事实、边界和下一步路线；旧的失败路线、旧 handoff 和生成 notebook 已从项目上下文中移除。
 
 ## 1. 项目目标
