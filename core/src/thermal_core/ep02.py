@@ -407,7 +407,11 @@ def plot_small_step_diagnostics(output_dir: Path, output_path: Path) -> tuple[pl
     width = 0.34
     for offset, delta, color in [(-width / 2, 2.0, METHOD_COLOR_LIST[2]), (width / 2, 4.0, METHOD_COLOR_LIST[4])]:
         values = [
-            float(y_summary.query("method_label == @method and delta_um == @delta")["median_projection_ratio"].iloc[0])
+            float(
+                y_summary[
+                    (y_summary["method_label"] == method) & (y_summary["delta_um"] == delta)
+                ]["median_projection_ratio"].iloc[0]
+            )
             for method in methods
         ]
         bars = ax_y.bar(xpos + offset, values, width=width, color=color, alpha=0.75, label=f"Y {delta:.0f} um")

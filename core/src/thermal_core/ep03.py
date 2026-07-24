@@ -697,7 +697,7 @@ def plot_sampling_resolution_diagram(
     ax.text(
         10.0,
         3.55,
-        "20 um/pixel",
+        f"{detector_pitch_um:g} um/pixel",
         ha="center",
         va="bottom",
         fontsize=annotation_fontsize,
@@ -716,7 +716,7 @@ def plot_sampling_resolution_diagram(
     ax.text(
         spatial_resolution_um / 2.0,
         2.52,
-        "20 um calibrated resolution",
+        f"{spatial_resolution_um:g} um calibrated resolution",
         ha="center",
         va="bottom",
         fontsize=annotation_fontsize,
@@ -728,7 +728,7 @@ def plot_sampling_resolution_diagram(
     ax.text(
         5.0,
         1.55,
-        "5 um/sample = 2x grid",
+        f"{target_grid_um:g} um/sample = 2x grid",
         ha="center",
         va="bottom",
         fontsize=annotation_fontsize,
@@ -740,7 +740,7 @@ def plot_sampling_resolution_diagram(
     ax.text(
         5.0,
         0.55,
-        "2.5 um/sample = 4x grid",
+        f"{detector_pitch_um / 4.0:g} um/sample = 4x grid",
         ha="center",
         va="bottom",
         fontsize=annotation_fontsize,
