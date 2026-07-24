@@ -42,3 +42,9 @@ The model outputs two channels of size `(2, H_hr, W_hr)`:
 ## Status
 
 - TCForge-integrated pipeline figures (00-06) + 4x loss atlas figures (08-16) ready.
+
+## 最终结论
+
+- 教学图集交付完成：8 通道 drizzle-informed 输入规格（ch0–2 为 4x drizzle 特征、ch3–7 为 1x 观测特征上采样）+ ThermalSR4xLoss 六项分解（LF/HF/Edge/Forward Consistency/NLL/HF Detail）全部成图。（出处: 本 README Status / Input & Output Specification 节）
+- 其服务的 EP12 4x 分支最终未获采纳：EP07 2x x2up vs EP12 4x 四臂 gate 判负，且 EP15 M2 FRC 实测不支持 10–14 µm 可恢复信息，4x 仅保留"更细呈现网格上的学习型正则化"解释。（出处: `research_log/episodes/ep12_4x_benchmark/README.md` gate 判决；`ep15_info_limit/README.md` M2）
+- 本图集降级为历史教学材料；2x 主线后续的 loss/架构演化（boundary 权重重设计、unrolled solver、DC/η 校准）见 changelog ACL-024 之后的 solver 时代条目。（出处: `research_log/algorithm_changelog.md` ACL-024/026/027）
