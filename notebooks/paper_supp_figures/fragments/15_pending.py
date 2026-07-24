@@ -6,7 +6,7 @@
 # | S-F5 | 各变体 step 序列视觉演化选帧（每个变体 early/canonical/30K/60K） | V9C/V10 落地后统一选帧 | `algos/ep07_unet_sr/outputs/*/eval_real/` |
 # | S-F6 | 负结果档案组图（v8.1b 条纹 crop、EP12 4x 对比、AVI 排除审计） | 选图 + 组版（素材已齐） | EP11/EP12/EP01 输出 |
 # | S-T1 | T1 扩展表 | 统一口径 harness（GPU 窗口） | — |
-# | S-T3/S-T4 | 合成参数表 / 融合 λ 全表 | ✅ 已成表于 `docs/paper/supp/` C.1、D.7 | markdown 表，无需图 |
+# | S-T3/S-T4 | 合成参数表 / 融合 λ 全表 | ✅ 曾成表于 `docs/paper/supp/` C.1、D.7（该目录 2026-07-24 已删除，git 历史可找回） | markdown 表，无需图 |
 #
 # **可选重绘**（价值确认、优先级低）：
 #

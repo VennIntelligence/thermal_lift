@@ -22,7 +22,9 @@
 # ```
 #
 # F3/F4/F7 由各自实验管线产出（见对应小节的重建命令）。
-# 图表状态与依赖的权威登记：`docs/paper/09_figures_tables_assets.md`。
+# 图表状态与依赖的权威登记原为 `docs/paper/09_figures_tables_assets.md`
+# （2026-07-24 已随 docs/paper/ 删除，可从 git 历史找回）；
+# 现行权威图集见 `docs/publication_figures/`（README 索引 + GALLERY 叙事）。
 
 # %%
 from pathlib import Path

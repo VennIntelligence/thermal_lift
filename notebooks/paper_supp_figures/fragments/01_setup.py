@@ -2,9 +2,10 @@
 # # 补充材料图表总览（S-F 系列）
 #
 # **本 notebook 的角色**：supplementary technical appendix 的图表策展报告，
-# 与 `docs/paper/supp/A–E_*.md` 草稿配套——每张 supp 图展示当前稿、给出权威
+# 原与 `docs/paper/supp/A–E_*.md` 草稿配套（该草稿树 2026-07-24 已删除，
+# git 历史可找回）——每张 supp 图展示当前稿、给出权威
 # 资产路径、重建命令与教程式解读。生产脚本在 `scripts/paper_figures/` 与各
-# algo tracked 脚本中。
+# algo tracked 脚本中。现行权威图集见 `docs/publication_figures/`。
 #
 # **运行环境**：仓库根 UV 环境。
 #

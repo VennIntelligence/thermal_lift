@@ -8,8 +8,9 @@
 # | T1 主定量表 | 全方法 × 全列单口径数字 | 统一 harness 重跑（GPU 窗口） | 同上 |
 # | T2 消融矩阵 | {1x, hybrid} × {none, band, full, legal} | V9C 60K（今晚）+ V10 | supp C.3 表 + harness |
 #
-# 状态权威登记：`docs/paper/09_figures_tables_assets.md`；
-# 写作交接：`docs/paper/10_writing_handover.md`。
+# 状态权威登记原为 `docs/paper/09_figures_tables_assets.md`、写作交接原为
+# `docs/paper/10_writing_handover.md`（2026-07-24 已随 docs/paper/ 删除，
+# git 历史可找回）；现行权威图集见 `docs/publication_figures/`。
 
 # %%
 print("F0/F5/T1/T2 等统一 harness 与 V9C/V10 落地，见上表依赖。")
