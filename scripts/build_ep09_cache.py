@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Validate EP09 PSF calibration artifacts and write cache manifest."""
+"""Validate EP09 PSF calibration artifacts and write cache manifest.
+
+用法: uv run python scripts/build_ep09_cache.py [--force]
+输入: output/ep09_psf_calibration/ 已有标定产物（calibration_summary.json、sigma_*.json、
+      route_sigma_summary.csv 等；缺失时报错并提示 algo 侧重建命令）
+输出: 同目录 cache_manifest.json（只校验 + 写 manifest，不重算）
+关联: EP09
+"""
 
 from __future__ import annotations
 

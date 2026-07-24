@@ -5,6 +5,17 @@ Columns are alignment methods.  Rows are:
 2. TXT edge persistence;
 3. BMP rendered-data-crop mean overlay;
 4. BMP rendered-data-crop edge persistence.
+
+用法（项目根目录）::
+
+    uv run python scripts/run_ep05_overlay_4x4_check.py [--edge-percentile 93.0]
+
+输入依赖: output/ep01_data_processing/frame_audit.csv、EP05 contour-refined 对齐 CSV
+    （默认由 configs/alignment/paths.json 解析，--alignment-csv 可覆盖）、
+    configs/stage_calibration.json、data/data_raw/infrared_avi/（TXT + BMP）
+输出: output/ep05_overlay_alignment/（--output-dir 可覆盖）4x4 叠加对比图
+
+关联: EP05
 """
 
 from __future__ import annotations

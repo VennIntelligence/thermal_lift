@@ -1,4 +1,11 @@
-"""Generate TCForge-based training demo bundle for EP13 Loss Atlas."""
+"""Generate TCForge-based training demo bundle for EP13 Loss Atlas.
+
+库模块，无 CLI 入口：由 scripts/build_ep13_cache.py 导入并调用
+build_tcforge_training_demo() / save_training_demo_bundle()。
+输入: configs/synthetic/training_pool_2x.json + tcforge/src 合成引擎
+输出: 调用方指定目录下的 2x 训练 demo bundle（NPZ + 元数据）
+关联: EP13
+"""
 
 from __future__ import annotations
 

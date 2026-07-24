@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Validate EP06 SR outputs and build 4x ROI cache figure."""
+"""Validate EP06 SR outputs and build 4x ROI cache figure.
+
+用法: uv run python scripts/build_ep06_cache.py [--force] [--skip-4x]
+输入: output/ep06_sr_poc/ 已有 SR 产物（缺失时报错并提示重建命令）
+输出: output/ep06_sr_poc/cache_manifest.json；
+      output/ep06_sr_poc_4x/comparison_center_raw_temperature.png（--skip-4x 时跳过）
+关联: EP06
+"""
 
 from __future__ import annotations
 

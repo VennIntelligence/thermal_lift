@@ -11,6 +11,13 @@ Data sources (regenerate with algos/ep15_info_limit/scripts/run_m2_frc.py):
 
 Run from the repository root:
     uv run python scripts/paper_figures/fig02_frc.py
+
+输出: output/paper_figures/fig02_frc.{png,pdf} 与 figS01_frc_archive.{png,pdf}
+
+历史定位: scripts/paper_figures/ 是 2026-06 时代的旧论文图脚本；现行权威图集见
+docs/publication_figures/（每图一个脚本、自带规范）。
+
+关联: EP15
 """
 
 from __future__ import annotations

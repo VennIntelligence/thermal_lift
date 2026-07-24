@@ -5,6 +5,16 @@ Questions:
 1. Is Y=14 a significant noise outlier in the Y-coordinate measurements?
 2. Does removing Y=14 improve the 4/2 projection ratio or RMS?
 3. What does the gradient_ncc (contour-only) method show vs raw_ncc?
+
+用法（必须在项目根目录运行，路径为相对路径，无 CLI 参数）::
+
+    uv run python scripts/y14_outlier_analysis.py
+
+输入依赖: output/ep02_displacement_calibration/y_coordinate_method_measurements.csv
+    （由 scripts/recompute_ep02_displacement_tables.py 生成）
+输出: 仅 stdout 打印统计结果，不写文件
+
+关联: EP02
 """
 
 import numpy as np

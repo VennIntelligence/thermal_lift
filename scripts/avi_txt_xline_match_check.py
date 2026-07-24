@@ -12,6 +12,12 @@ For `x.avi`, N is treated as 0 um.
 
 Usage:
     uv run python scripts/avi_txt_xline_match_check.py
+
+输入: data/data_raw/infrared_avi/（x*.avi + TXT 帧）、output/ep01_data_processing/frame_audit.csv
+输出: output/ep02_displacement_calibration/ 下 avi_txt_xline_match_summary.csv、
+      avi_txt_xline_pair_measurements.csv、avi_txt_xline_contour_paths.csv、
+      avi_txt_xline_axis_match.png、avi_txt_xline_projection_monotonicity.png
+关联: EP02
 """
 
 from __future__ import annotations

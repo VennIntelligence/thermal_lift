@@ -4,6 +4,20 @@
 The script only reads compact EP06 CSV/JSON summaries. It deliberately avoids
 loading reconstruction ``.npy`` arrays so it can be rerun while long sweeps are
 still producing image products in parallel.
+
+用法（项目根目录）::
+
+    uv run python scripts/summarize_ep06_alignment_sweep.py \
+        [--sweep-root output/ep06_sr_poc_data_driven_align_sweep] \
+        [--baseline-dir output/ep06_sr_poc] [--output-dir DIR]
+
+输入依赖: sweep-root 下各实验子目录的 evaluation_summary.csv、
+    map_tv_lambda_selection.csv、*_synthetic_validation.json，
+    以及 baseline-dir 的 evaluation_summary.csv
+输出: <sweep-root>/summary/（--output-dir 可覆盖）sweep_*.csv、
+    sweep_summary.json 与汇总图表
+
+关联: EP06
 """
 
 from __future__ import annotations

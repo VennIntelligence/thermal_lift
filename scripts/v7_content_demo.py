@@ -47,6 +47,8 @@ Everything here is a LOOK prototype: wiring into tcforge with config keys,
 RNG discipline and golden pinning happens after owner sign-off.
 Band-honesty floor: FLOOR = 28um = 2.8 HR px (HR pitch 10um), pitch >= 32um.
 
+Usage (repo root, no CLI args): uv run python scripts/v7_content_demo.py
+Inputs: tcforge/src 渲染管线（apply_defects + render_isothermal_field），无外部数据
 Output: research_log/assets/v7_demo/  (tiles + 2 contact sheets)
 """
 from __future__ import annotations

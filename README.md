@@ -44,7 +44,7 @@
 | `algos/` | 12 个完全隔离的算法子项目，各自独立 venv（索引见下节） | ✅ 代码（`.venv`/`outputs` ❌） |
 | `tcforge/` | 程序化合成训练池生成引擎（独立 UV 包，见 [`tcforge/README.md`](tcforge/README.md)） | ✅ |
 | `notebooks/` | 17 个分析 notebook，`fragments/` 构建制（`.ipynb` 是构建产物） | ✅ fragments（`.ipynb` ❌） |
-| `scripts/` | 约 61 个构建/工具脚本（`build_notebook.py`、`build_all_notebooks.py`、`build_all_caches.py` 等） | ✅ |
+| `scripts/` | 73 个构建/工具脚本，7 类分类索引见 [`scripts/README.md`](scripts/README.md) | ✅ |
 | `configs/` | 全局物理常数 + alignment + synthetic 训练池配置（v8/v9 等） | ✅ |
 | `research_log/` | `algorithm_changelog.md`（ACL-001–080）+ `episodes/` 各 Episode 进度与决策 | ✅ |
 | `paper/` | `reports/` 正式分析报告 + aaai/zh_conf/slides 论文骨架（见 `paper/README.md`） | ✅ |

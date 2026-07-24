@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Build EP13 Loss Atlas: TCForge training demo + loss figures."""
+"""Build EP13 Loss Atlas: TCForge training demo + loss figures.
+
+用法: uv run python scripts/build_ep13_cache.py [--output-dir DIR] [--force]
+输入: configs/synthetic/training_pool_2x.json + tcforge/src（经 build_ep13_tcforge_demo.py
+      生成 2x 训练 demo bundle）
+输出: output/ep13_loss_atlas/（demo bundle NPZ + loss 图组 + loss_breakdown.json）
+关联: EP13
+"""
 
 from __future__ import annotations
 

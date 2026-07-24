@@ -2,6 +2,18 @@
 
 The goal is visual and metric sanity checking: stack the same frame batch with
 different shifts and see which assumption keeps contours sharp.
+
+用法（项目根目录）::
+
+    uv run python scripts/run_ep05_overlay_alignment_check.py \
+        [--crop-size 360] [--edge-percentile 93.0]
+
+输入依赖: output/ep01_data_processing/frame_audit.csv、EP05 contour-refined 对齐 CSV
+    （默认由 configs/alignment/paths.json 解析，--alignment-csv 可覆盖）、
+    data/data_raw/infrared_avi/、configs/stage_calibration.json
+输出: output/ep05_overlay_alignment/（--output-dir 可覆盖）叠加诊断图与指标
+
+关联: EP05
 """
 
 from __future__ import annotations

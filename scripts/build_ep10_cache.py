@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Build EP10 three-algorithm comparison notebook figure cache."""
+"""Build EP10 three-algorithm comparison notebook figure cache.
+
+用法: uv run python scripts/build_ep10_cache.py [--force]
+输入: output/ep10_drizzle、ep10_drizzle_4x、ep10_map_tv_sweep、ep10_tgv_sr 各算法产物
+输出: output/ep10_method_comparison/（对比图 PNG + cache_manifest.json）
+关联: EP10
+"""
 
 from __future__ import annotations
 

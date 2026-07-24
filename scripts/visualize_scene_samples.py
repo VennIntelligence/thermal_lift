@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Quick scene sample generator — 6 scenes, mask + blurred LR preview."""
+"""Quick scene sample generator — 6 scenes, mask + blurred LR preview.
+
+用 tcforge 按 4 个难度档随机生成 6 个合成场景，输出 HR mask 与模糊降采样 LR 预览，
+用于快速目检 TCForge 场景生成器的多样性。
+
+用法（项目根目录，无 CLI 参数）::
+
+    uv run python scripts/visualize_scene_samples.py
+
+输入依赖: tcforge/src（geometry + physics 合成，无外部数据）
+输出: output/ep07/scene_samples/ 下 s{i}_mask_*.png、s{i}_lr_*.png 与 scene_grid.png
+
+关联: EP07
+"""
 import sys
 from pathlib import Path
 import numpy as np

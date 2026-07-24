@@ -1,4 +1,22 @@
 #!/usr/bin/env python3
+"""对 v11 / TGV / MAP-TV 三种方法做 split-half 半集重建（供 FRC 分析）。
+
+按 EP15 M2 的 phase-stratified split 把 248 帧 clean 主 session 分成 A/B 两半，
+对每种方法分别重建两半并保存，用于 split-half FRC 与多 seed 复核（ms_chain）。
+
+用法（项目根目录；需含 torch 的环境，如 algos/ep07_unet_sr/.venv）::
+
+    uv run python scripts/reconstruct_halves.py \
+        [--seed 42] [--methods v11,tgv,maptv] [--outdir output/stage0c_frc_recons]
+
+输入依赖: unet_sr real-eval 缓存（248 帧, contour_refined）、
+    output/ep01_data_processing/frame_audit.csv、
+    algos/ep07_unet_sr/outputs/solver_v11_k2_p384_nogn_halo96_50k/solver_step_040000.pt、
+    algos/ep10_tgv_sr 与 algos/ep10_map_tv_sweep 的重建实现
+输出: <outdir>/{v11,tgv,maptv}_{a,b}.npy（默认 output/stage0c_frc_recons/）
+
+关联: EP07 / EP10 / EP15
+"""
 import sys
 import numpy as np
 import pandas as pd

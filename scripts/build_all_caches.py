@@ -1,5 +1,18 @@
 #!/usr/bin/env python3
-"""Build EP01–EP10 notebook caches in dependency order."""
+"""Build EP01–EP10 notebook caches in dependency order.
+
+按依赖顺序依次调用 scripts/build_ep01_cache.py ... build_ep10_cache.py。
+Git 迁移到新机器、或数据 / core 逻辑变更后先运行本脚本，再跑 build_all_notebooks.py。
+
+用法:
+    uv run python scripts/build_all_caches.py                   # 全部构建
+    uv run python scripts/build_all_caches.py --only ep02,ep03  # 只构建部分
+    uv run python scripts/build_all_caches.py --force           # 强制重建
+    （--skip-missing: 跳过尚不存在的 builder 脚本）
+
+输入: data/data_raw/ 原始数据及各 EP 上游产物（由各 builder 自行检查）
+输出: output/ep01_* ... output/ep10_* 各缓存目录（CSV/PNG + cache_manifest.json）
+"""
 
 from __future__ import annotations
 

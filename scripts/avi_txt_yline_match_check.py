@@ -13,6 +13,13 @@ The goal is diagnostic, not SR reconstruction:
 
 Usage:
     uv run python scripts/avi_txt_yline_match_check.py
+
+参数: --data-dir / --output-dir / --frame-audit 覆盖默认路径；
+      --main-session-only（默认开启）只使用主 session 帧
+输入: data/data_raw/infrared_avi/（y*.avi + TXT 帧）、output/ep01_data_processing/frame_audit.csv
+输出: output/ep02_displacement_calibration/ 下 avi_txt_yline_match_summary.csv、
+      avi_txt_yline_pair_measurements.csv、avi_txt_yline_contour_paths.csv 及 3 张 PNG 诊断图
+关联: EP02
 """
 
 from __future__ import annotations

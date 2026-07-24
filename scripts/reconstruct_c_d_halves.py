@@ -1,4 +1,20 @@
 #!/usr/bin/env python3
+"""对 V13 消融的 C/D 两个 solver checkpoint 做 split-half 半集重建（供 FRC 分析）。
+
+按 EP15 M2 的 phase-stratified split 把 248 帧 clean 主 session 分成 A/B 两半，
+分别用 C_nodr（无 drizzle 对照）与 D_dr01（drizzle 0.1）checkpoint 重建。
+
+用法（项目根目录，无 CLI 参数；需含 torch 的环境，如 algos/ep07_unet_sr/.venv）::
+
+    uv run python scripts/reconstruct_c_d_halves.py
+
+输入依赖: unet_sr real-eval 缓存（248 帧, contour_refined）、
+    output/ep01_data_processing/frame_audit.csv、
+    algos/ep07_unet_sr/outputs/solver_v13_v6_{nodr_ctrl,dr01}/solver_final.pt
+输出: output/stage0c_frc_recons/{C_nodr,D_dr01}_{a,b}.npy
+
+关联: EP07 / EP15
+"""
 import sys
 import numpy as np
 import pandas as pd

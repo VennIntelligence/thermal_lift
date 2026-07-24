@@ -1,11 +1,26 @@
-from thermal_core.alignment_paths import default_contour_alignment_csv
 #!/usr/bin/env python3
-"""Reverse-engineer true stage coordinates of repeat frames using drift-decomposed contour shifts."""
+"""Reverse-engineer true stage coordinates of repeat frames using drift-decomposed contour shifts.
+
+用 R=0 帧拟合线性热漂移模型，再从 R=2 补采帧的实测 contour 对齐位移中扣除漂移，
+反推其真实电动台坐标（诊断 R=2 帧的名义坐标是否可信）。
+
+用法（项目根目录，无 CLI 参数）::
+
+    uv run python scripts/solve_true_coordinates.py
+
+输入依赖: EP05 contour-refined 对齐 CSV（由 configs/alignment/paths.json 解析）、
+    configs/stage_calibration.json
+输出: 仅 stdout 打印（漂移模型系数 + R=2 帧真实坐标表），不写文件
+
+关联: EP05
+"""
 
 import csv
 import json
 import math
 from pathlib import Path
+
+from thermal_core.alignment_paths import default_contour_alignment_csv
 
 def project_root() -> Path:
     root = Path.cwd()

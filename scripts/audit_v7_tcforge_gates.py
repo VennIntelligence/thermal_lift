@@ -15,6 +15,10 @@ overall bar is 7/8.
 
 Usage:
   uv run python scripts/audit_v7_tcforge_gates.py [--n-mid 40 --n-high 40 --n-xl 8 --n-v6 24]
+  （另有 --seed0 起始种子，默认 2020001）
+
+输入: tcforge/src（panel_cluster_v7 composer + realism）与 scripts/audit_v7_demo_gates.py 的门控函数
+输出: 仅终端 PASS/FAIL 表 + JSON 行，不写文件；exit 0 = 通过（>=7/8 门控）
 """
 from __future__ import annotations
 

@@ -17,6 +17,13 @@ Data sources (regenerate with algos/ep07_unet_sr/scripts/v9_review/run_pareto_sw
 
 Run from the repository root:
     uv run python scripts/paper_figures/figS10_v9a_strip.py
+
+输出: output/paper_figures/figS10_v9a_strip.{png,pdf}
+
+历史定位: scripts/paper_figures/ 是 2026-06 时代的旧论文图脚本；现行权威图集见
+docs/publication_figures/（每图一个脚本、自带规范）。
+
+关联: EP07 / EP10
 """
 
 from __future__ import annotations

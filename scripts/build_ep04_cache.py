@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Build EP04 CSV/PNG cache from segment validation (run when data or EP04 logic changes)."""
+"""Build EP04 CSV/PNG cache from segment validation (run when data or EP04 logic changes).
+
+用法: uv run python scripts/build_ep04_cache.py [--force] [--force-segment-inputs] [--n-jobs N]
+输入: output/ep01_data_processing/ 与 output/ep03_theoretical_limits/ 缓存、原始帧
+输出: output/ep04_global_validation/（outer/inner 结果 CSV、PNG + cache_manifest.json）
+关联: EP04
+"""
 
 from __future__ import annotations
 

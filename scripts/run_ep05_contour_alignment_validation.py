@@ -8,6 +8,19 @@ image evidence:
 3. held-out edge points validate whether contour alignment improves.
 
 No stage angle, command direction, or nominal displacement magnitude is used.
+
+用法（项目根目录）::
+
+    uv run python scripts/run_ep05_contour_alignment_validation.py \
+        [--roi-size 360] [--search-radius 18] [--edge-percentile 93.0] \
+        [--refine-radius-px 1.0] [--refine-step-px 0.25] [--n-jobs N] \
+        [--limit-frames N] [--skip-figures]
+
+输入依赖: output/ep01_data_processing/frame_audit.csv、data/data_raw/infrared_avi/
+    （--frame-audit-csv / --data-dir 可覆盖）
+输出: output/ep05_contour_alignment/（--output-dir 可覆盖）逐帧对齐结果 CSV 与验证图表
+
+关联: EP05
 """
 
 from __future__ import annotations

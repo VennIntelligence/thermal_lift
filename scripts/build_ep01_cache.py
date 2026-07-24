@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Build EP01 CSV/PNG cache from raw TXT/BMP (run when data or EP01 logic changes)."""
+"""Build EP01 CSV/PNG cache from raw TXT/BMP (run when data or EP01 logic changes).
+
+用法: uv run python scripts/build_ep01_cache.py [--force]
+输入: data/data_raw/infrared_avi/ 原始 TXT/BMP 帧（经 thermal_core.ep01_cache 重算）
+输出: output/ep01_data_processing/（frame_audit.csv 等 CSV/PNG + cache_manifest.json）
+关联: EP01
+"""
 
 from __future__ import annotations
 

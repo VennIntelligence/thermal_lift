@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Build EP07 demo figures and table cache for notebook fragments."""
+"""Build EP07 demo figures and table cache for notebook fragments.
+
+用法: uv run python scripts/build_ep07_cache.py [--force]
+输入: tcforge/src 合成引擎（不可用时跳过 demo 生成并在 manifest 记录 demo_skipped）
+输出: output/ep07_thermal_chip_phantom/（demo_dataset/ + 图表 + cache_manifest.json）
+关联: EP07
+"""
 
 from __future__ import annotations
 

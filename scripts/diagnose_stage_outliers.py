@@ -1,6 +1,11 @@
-from thermal_core.alignment_paths import default_contour_alignment_csv
 #!/usr/bin/env python3
-"""Diagnose stage prior (old_stage_model) outliers using only standard library."""
+"""Diagnose stage prior (old_stage_model) outliers using only standard library.
+
+用法: uv run python scripts/diagnose_stage_outliers.py（无参数）
+输入: EP05 contour alignment CSV（default_contour_alignment_csv()）、configs/stage_calibration.json
+输出: 仅终端报告（stage prior 残差统计 + Top-20 离群帧），不写文件
+关联: EP05
+"""
 
 import csv
 import json

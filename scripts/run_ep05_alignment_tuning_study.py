@@ -11,6 +11,19 @@ into one reproducible run:
 
 Stage commands are not used as alignment truth.  Filename affine is only a
 coordinate-label baseline fitted from the tuned data-driven shifts.
+
+用法（项目根目录）::
+
+    uv run python scripts/run_ep05_alignment_tuning_study.py \
+        [--mode quick|full] [--quick-limit 96] [--n-jobs N] \
+        [--edge-percentiles 91 93 95] [--refine-radii-px 0.5 1.0] \
+        [--refine-steps-px 0.125 0.25] [--skip-figures]
+
+输入依赖: output/ep01_data_processing/frame_audit.csv、data/data_raw/infrared_avi/
+    （--frame-audit-csv / --data-dir 可覆盖）
+输出: output/ep05_alignment_tuning_study/（--output-dir 可覆盖）CSV/JSON 汇总与图表
+
+关联: EP05
 """
 
 from __future__ import annotations

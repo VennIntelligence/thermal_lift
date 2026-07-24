@@ -1,5 +1,17 @@
 #!/usr/bin/env python3
-"""Generate Figure F1: system geometry, calibration chain, and grid scales."""
+"""Generate Figure F1: system geometry, calibration chain, and grid scales.
+
+用法（项目根目录，无 CLI 参数）::
+
+    uv run python scripts/paper_figures/fig01_system_calibration.py
+
+输入依赖: configs/stage_calibration.json、configs/noise_floor.json，
+    可选 output/ep15_info_limit/m3_sigma/sigma_summary.json（缺失时用默认 σ 区间）
+输出: output/paper_figures/fig01_system_calibration.{png,pdf,json}
+
+历史定位: scripts/paper_figures/ 是 2026-06 时代的旧论文图脚本；现行权威图集见
+docs/publication_figures/（每图一个脚本、自带规范）。
+"""
 
 from __future__ import annotations
 

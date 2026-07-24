@@ -9,6 +9,12 @@ alignment-truth source and not a replacement for the configured calibration:
 
 Usage:
     uv run python scripts/avi_theta_estimation.py
+
+输入: output/ep02_displacement_calibration/avi_direction_summary.csv 与
+      avi_registration_pairs.csv（需先运行 scripts/avi_y_direction_check.py 生成）
+输出: 同目录下 avi_theta_estimates.csv、avi_theta_summary.csv、
+      avi_theta_bracket_plot.png、avi_theta_forest_plot.png、avi_theta_result.json
+关联: EP02
 """
 
 from __future__ import annotations

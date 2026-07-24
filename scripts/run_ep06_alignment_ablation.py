@@ -6,6 +6,20 @@ shift source. It reports split-half stability, gradient/artifact proxies,
 difference to the default contour-refined reconstruction, and phase-bin
 coverage. The default scope is the central 360x360 LR ROI used by the EP05
 alignment checks; pass ``--roi-size-lr 0`` for full-frame evaluation.
+
+用法（项目根目录）::
+
+    uv run python scripts/run_ep06_alignment_ablation.py \
+        [--scale 2] [--roi-size-lr 360] [--weight-mode quality|uniform] \
+        [--n-splits 3] [--workers N] [--seed 606] [--save-npy]
+
+输入依赖: data/data_raw/infrared_avi/、output/ep01_data_processing/frame_audit.csv、
+    EP05 contour-refined 对齐 CSV（默认由 configs/alignment/paths.json 解析）、
+    output/ep05_alignment_sr_capacity/alignment_method_holdout_scores.csv、
+    algos/ep06_sr_poc 的 SAA 实现（脚本自行注入 sys.path）
+输出: output/ep06_alignment_ablation/（--output-dir 可覆盖）消融指标 CSV/JSON 与图表
+
+关联: EP06
 """
 
 from __future__ import annotations

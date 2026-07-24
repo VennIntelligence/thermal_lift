@@ -16,6 +16,9 @@ Outputs:
     output/ep02_displacement_calibration/avi_direction_comparison.png
     output/ep02_displacement_calibration/avi_cumulative_motion_paths.png
     output/ep02_displacement_calibration/avi_y0um_displacement_timeseries.png
+
+输入: data/data_raw/infrared_avi/ 下 16 个连续扫描 AVI（渲染视频，仅作方向诊断，非 SR 输入）
+关联: EP02
 """
 
 from __future__ import annotations

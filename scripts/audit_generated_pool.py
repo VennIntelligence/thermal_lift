@@ -12,6 +12,10 @@ For K sampled scenes it verifies the data is SELF-CONSISTENT and HONEST:
 Run on the remote box that holds the pool:
     python scripts/audit_generated_pool.py --pool data/synthetic/pool_2x_v3_5k --k 32
 Exit 0 = pool looks good; nonzero = investigate before committing to the long run.
+
+本地运行: uv run python scripts/audit_generated_pool.py --pool data/synthetic/pool_2x_v3_5k --k 32
+输入: --pool 指定的合成场景池目录（scene_*/，由 generate_training_pool.py 生成）
+输出: 终端逐场景表格 + PASS/INVESTIGATE 结论（exit 0/1/2）；--out 指定路径时另写 JSON 汇总
 """
 from __future__ import annotations
 

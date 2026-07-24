@@ -9,6 +9,17 @@ mixed together in earlier episodes:
 * EP04 contour-normal phase coverage.
 
 It does not use any single reference frame as a universal truth source.
+
+用法（项目根目录）::
+
+    uv run python scripts/run_ep05_displacement_reassessment.py \
+        [--roi-size 320] [--n-jobs N] [--methods highpass gradient] [--skip-figures]
+
+输入依赖: output/ep01_data_processing/frame_audit.csv、data/data_raw/infrared_avi/、
+    configs/stage_calibration.json（--frame-audit-csv / --data-dir / --stage-config 可覆盖）
+输出: output/ep05_sr_reassessment/（--output-dir 可覆盖）位移评估 CSV 与图表
+
+关联: EP05
 """
 
 from __future__ import annotations

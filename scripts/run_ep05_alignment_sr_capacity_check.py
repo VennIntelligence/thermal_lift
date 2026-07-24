@@ -12,6 +12,18 @@ as ``run_ep05_contour_alignment_validation.py``.  Filename affine shifts are
 learned only as a global X/Y-label-to-shift model; data-driven shifts are the
 per-frame NCC initialisation and the Chamfer-refined shifts already validated in
 EP05.
+
+用法（项目根目录）::
+
+    uv run python scripts/run_ep05_alignment_sr_capacity_check.py \
+        [--roi-size 360] [--edge-percentile 93.0] [--max-edge-points 8000]
+
+输入依赖: output/ep01_data_processing/frame_audit.csv、EP05 contour-refined 对齐 CSV
+    （默认由 configs/alignment/paths.json 解析，--alignment-csv 可覆盖）、
+    data/data_raw/infrared_avi/、configs/stage_calibration.json
+输出: output/ep05_alignment_sr_capacity/（--output-dir 可覆盖）对比 CSV/JSON 与图表
+
+关联: EP05
 """
 
 from __future__ import annotations

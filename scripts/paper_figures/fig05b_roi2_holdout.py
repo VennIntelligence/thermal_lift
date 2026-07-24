@@ -22,6 +22,11 @@ resolution, temperature metrology, or GT fidelity.
 
 Run from the repository root:
     uv run python scripts/paper_figures/fig05b_roi2_holdout.py
+
+历史定位: scripts/paper_figures/ 是 2026-06 时代的旧论文图脚本；现行权威图集见
+docs/publication_figures/（每图一个脚本、自带规范）。
+
+关联: EP11
 """
 
 from __future__ import annotations

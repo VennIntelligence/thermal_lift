@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # 一键编译 Beamer Slide 脚本
+#
+# 用法: bash scripts/build_slides.sh（无参数）
+# 输入: paper/slides/main.tex 及其引用的素材
+# 输出: paper/slides/main.pdf（pdflatex 两轮编译，更新页码/大纲/目录）
+# 依赖: 本机需安装 pdflatex；编译失败时打印 main.log 末尾 20 行
 
 # 获取脚本所在目录的绝对路径，确保从任何地方调用都能正确工作
 SCRIPT_DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" && pwd )"

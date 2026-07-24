@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Build EP08 Stage 3 notebook figure cache (run when stage3 metrics change)."""
+"""Build EP08 Stage 3 notebook figure cache (run when stage3 metrics change).
+
+用法: uv run python scripts/build_ep08_cache.py [--force]
+输入: output/ep08_inr_sr/stage3/*/metrics.json（由 EP08 算法训练/评测运行生成）
+输出: output/ep08_inr_sr/ 下 stage3_progressive_metrics.png、stage3_visual_comparison.png、
+      stage3_aspect_ablation.png + cache_manifest.json
+关联: EP08
+"""
 
 from __future__ import annotations
 

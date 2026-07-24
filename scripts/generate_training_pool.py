@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Generate a compact TCForge synthetic training pool."""
+"""Generate a compact TCForge synthetic training pool.
+
+用法: uv run python scripts/generate_training_pool.py --config configs/synthetic/training_pool_4x.json \\
+          --workers 8 [--num-scenes N] [--output-dir DIR] [--seed S] \\
+          [--lr-shape ROWS,COLS] [--burst-workers N]
+      （--pool-size 只接受预设 1000/2000；任意场景数用 --num-scenes，两者勿混用；
+        --config 默认 configs/synthetic/training_pool_4x.json）
+输入: configs/synthetic/*.json 池配置 + tcforge/src 合成引擎
+输出: config 的 output_dir（如 data/synthetic/training_pool_4x/）下逐场景目录 + manifest.csv
+"""
 
 from __future__ import annotations
 

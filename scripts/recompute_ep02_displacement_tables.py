@@ -4,6 +4,17 @@ The X-step scale fit is kept as a visibility-response diagnostic only. It must
 not be interpreted as a replacement detector pitch or as alignment truth. BMP
 millimeter axes remain the detector-pitch reference, and stage coordinates stay
 as reconstruction priors.
+
+用法（项目根目录，无 CLI 参数）::
+
+    uv run python scripts/recompute_ep02_displacement_tables.py
+
+输入依赖: data/data_raw/infrared_avi/ 原始 TXT 帧、
+    output/ep01_data_processing/frame_audit.csv、configs/stage_calibration.json
+输出: output/ep02_displacement_calibration/ 下的诊断 CSV 表
+    （time_adjacent_* / y_coordinate_* / coordinate_pair_time_gap_audit.csv 等）
+
+关联: EP02
 """
 
 from __future__ import annotations

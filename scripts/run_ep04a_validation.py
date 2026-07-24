@@ -1,4 +1,20 @@
-"""Run EP04-A data-driven multi-frame ESF global validation."""
+"""Run EP04-A data-driven multi-frame ESF global validation.
+
+用法（项目根目录）::
+
+    uv run python scripts/run_ep04a_validation.py \
+        [--n-jobs N] [--min-snr 8.0] [--min-delta-t 0.5] [--max-split-half 0.06] \
+        [--limit-segments N] [--limit-scanlines N] [--outer-only] \
+        [--force-segment-inputs] [--skip-figures]
+
+输入依赖: output/ep03_theoretical_limits/{contour_segments,inner_contour_segments}.csv、
+    output/ep01_data_processing/frame_audit.csv、data/data_raw/infrared_avi/
+    （均可用 --segments-csv / --inner-segments-csv / --frame-audit-csv / --data-dir 覆盖）
+输出: output/ep04_global_validation/（--output-dir 可覆盖）验证 CSV/JSON 与图表，
+    含 EP06 gate 推荐输出
+
+关联: EP04
+"""
 
 from __future__ import annotations
 

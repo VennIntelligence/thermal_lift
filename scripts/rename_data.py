@@ -13,6 +13,10 @@ rename_data.py — 原始热像数据文件重命名工具
     python scripts/rename_data.py --execute    # 实际执行重命名
     python scripts/rename_data.py --report     # 输出 CSV 映射表
     python scripts/rename_data.py --execute --report  # 执行 + 输出 CSV
+
+输入依赖: data/data_raw/infrared_avi/（--data-dir 可覆盖）、
+    configs/coordinate_set.json（合法坐标集合）
+输出: 就地重命名数据文件；--report 时写 reports/rename_mapping.csv
 """
 
 import argparse

@@ -2,6 +2,17 @@
 
 This is a visual sanity check for apparent motion.  It keeps only detected
 edge pixels from each frame; all non-edge pixels are rendered against white.
+
+用法（项目根目录）::
+
+    uv run python scripts/run_ep05_edge_line_overlay.py [--alpha-per-frame 0.055]
+
+输入依赖: output/ep01_data_processing/frame_audit.csv、EP05 contour-refined 对齐 CSV
+    （默认由 configs/alignment/paths.json 解析，--alignment-csv 可覆盖）、
+    configs/stage_calibration.json、data/data_raw/infrared_avi/（TXT + BMP）
+输出: output/ep05_overlay_alignment/（--output-dir 可覆盖）edge-line 叠加图
+
+关联: EP05
 """
 
 from __future__ import annotations

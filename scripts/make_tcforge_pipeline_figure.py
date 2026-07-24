@@ -15,6 +15,9 @@ re-assembled into the hand-drawn main figure.
 
 Run:
     uv run python scripts/make_tcforge_pipeline_figure.py
+
+输入: 无外部数据，仅 tcforge/src 合成引擎 + core/src 学术绘图样式
+输出: paper/figures/fig_tcforge_pipeline.png / .pdf / .svg
 """
 
 from __future__ import annotations

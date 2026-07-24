@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Build EP02 CSV/PNG cache from raw frames and EP01 audit (run when data or EP02 logic changes)."""
+"""Build EP02 CSV/PNG cache from raw frames and EP01 audit (run when data or EP02 logic changes).
+
+用法: uv run python scripts/build_ep02_cache.py [--force]
+输入: data/data_raw/infrared_avi/ 原始帧、output/ep01_data_processing/frame_audit.csv、
+      configs/stage_calibration.json（theta/pitch）；AVI 数据存在时自动附带 AVI theta 产物
+输出: output/ep02_displacement_calibration/（CSV/PNG + cache_manifest.json）
+关联: EP02
+"""
 
 from __future__ import annotations
 

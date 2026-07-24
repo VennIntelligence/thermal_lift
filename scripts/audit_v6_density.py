@@ -29,6 +29,9 @@ Usage:
 
   # after all chunks landed in the CSV
   uv run python scripts/audit_v6_density.py --finalize
+
+输入: data/synthetic/pool_2x_v6_5k（POOL_DIR 常量；每场景 hr_mask_4x.png + metadata.json）
+输出: output/v6_density_audit/per_scene.csv（逐场景追加）、summary.json（--finalize 时生成）
 """
 import argparse
 import csv

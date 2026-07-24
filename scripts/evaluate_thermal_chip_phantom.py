@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
-"""Write a lightweight synthetic ThermalChipPhantom evaluation summary."""
+"""Write a lightweight synthetic ThermalChipPhantom evaluation summary.
+
+用法: uv run python scripts/evaluate_thermal_chip_phantom.py
+      [--dataset-root DIR] [--output-dir DIR] [--highpass-check-frames 16]
+输入: data/synthetic/thermal_chip_phantom/（manifest.csv + 各场景目录；
+      tcforge 可导入时附加其自带评测结果）
+输出: output/thermal_chip_phantom/evaluation_summary.csv 与 evaluation_summary.json
+"""
 
 from __future__ import annotations
 

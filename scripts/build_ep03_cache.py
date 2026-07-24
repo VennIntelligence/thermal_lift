@@ -1,5 +1,11 @@
 #!/usr/bin/env python3
-"""Build EP03 CSV/PNG cache from configs, EP01 audit, and reference frame."""
+"""Build EP03 CSV/PNG cache from configs, EP01 audit, and reference frame.
+
+用法: uv run python scripts/build_ep03_cache.py [--force]
+输入: configs/ 物理参数、output/ep01_data_processing/frame_audit.csv、参考帧 TXT
+输出: output/ep03_theoretical_limits/（CSV/PNG + cache_manifest.json）
+关联: EP03
+"""
 
 from __future__ import annotations
 

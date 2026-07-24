@@ -26,6 +26,11 @@ stack measures identically at 20um and 50um calibrations, agreement <0.2um):
 
 These numbers parameterize the v7 `quad_meander` real-structure motif
 (scripts/v7_content_demo.py; todos/dataset.md §2.2).
+
+用法: uv run python scripts/measure_optical_reference.py（无参数；剖面定义在 SPECS 常量）
+输入: data/optical/ 三张带标尺的光学显微图（0021.jpg.jpg / 21.jpg.jpg / 2.jpg.jpg）
+输出: 终端打印各剖面 run-length 测量（um）；
+      research_log/assets/optical_measurement/line_*.png 剖面位置标注图
 """
 from pathlib import Path
 

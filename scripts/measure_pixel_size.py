@@ -6,6 +6,12 @@ This script measures the mm-per-pixel scale from the BMP axis ticks, then
 cross-checks it with the Otsu outer contour detected in both representations.
 The result is a detector sampling pitch measurement; it must not be confused
 with the calibrated 20 um spatial resolution.
+
+用法: uv run python scripts/measure_pixel_size.py
+      [--bmp data/data_raw/infrared_avi/10_16_0.bmp] [--txt .../10_16_0.txt] [--output-dir DIR]
+输入: 成对的 BMP 渲染图与 TXT 温度矩阵（默认 10_16_0）
+输出: output/ep03_theoretical_limits/pixel_size_measurement.png 与 pixel_size_measurement.json
+关联: EP03
 """
 
 from __future__ import annotations

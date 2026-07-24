@@ -1,4 +1,19 @@
 #!/usr/bin/env python3
+"""生成论文 F1 观测管线示意图：shift → PSF blur → box average → decimate → noise。
+
+用 TCForge 合成温度场逐级施加（刻意夸大的）前向退化算子，
+展示微扫描观测模型 y = D B H S x + n 的每一步视觉效果。
+
+用法（项目根目录，无 CLI 参数）::
+
+    uv run python scripts/paper_figures/fig01_observation_pipeline.py
+
+输入依赖: tcforge/src 合成场景（seed 42），无外部数据
+输出: output/paper_figures/fig01_observation_pipeline.{png,pdf,svg}
+
+历史定位: scripts/paper_figures/ 是 2026-06 时代的旧论文图脚本；现行权威图集见
+docs/publication_figures/（每图一个脚本、自带规范）。
+"""
 import os
 import sys
 from pathlib import Path

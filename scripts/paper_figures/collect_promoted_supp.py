@@ -10,6 +10,9 @@ its episode pipeline (see docs/paper/09_figures_tables_assets.md).
 
 Run from the repository root (after the episode pipelines / notebooks):
     uv run python scripts/paper_figures/collect_promoted_supp.py
+
+历史定位: scripts/paper_figures/ 是 2026-06 时代的旧论文图脚本；现行权威图集见
+docs/publication_figures/（每图一个脚本、自带规范）。
 """
 
 from __future__ import annotations

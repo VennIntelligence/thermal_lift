@@ -1,5 +1,14 @@
 #!/usr/bin/env python3
-"""Diagnose filename-affine outliers and robust refit impact for EP05."""
+"""Diagnose filename-affine outliers and robust refit impact for EP05.
+
+用法: uv run python scripts/diagnose_affine_outliers.py
+      [--alignment-csv CSV] [--frame-audit-csv CSV] [--output-dir DIR]
+      [--outlier-threshold 3.0] [--top 20]
+输入: EP05 contour alignment CSV（默认 thermal_core.alignment_paths.default_contour_alignment_csv()）、
+      output/ep01_data_processing/frame_audit.csv（仅存在性检查）
+输出: output/ep05_overlay_alignment/affine_outlier_diagnosis.csv + 终端统计与 Top-N 离群报告
+关联: EP05
+"""
 
 from __future__ import annotations
 

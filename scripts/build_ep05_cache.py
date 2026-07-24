@@ -1,5 +1,13 @@
 #!/usr/bin/env python3
-"""Validate EP05 output directories and write cache manifests for notebook display."""
+"""Validate EP05 output directories and write cache manifests for notebook display.
+
+用法: uv run python scripts/build_ep05_cache.py [--force]
+输入: 已存在的 EP05 产物目录（由 run_ep05_* 系列脚本生成）：output/ep05_sr_reassessment、
+      ep05_alignment_sr_capacity、ep05_contour_alignment、ep05_overlay_alignment、
+      ep05_alignment_tuning_study
+输出: 上述目录内的 cache_manifest.json（本脚本只校验 + 写 manifest，不重算）
+关联: EP05
+"""
 
 from __future__ import annotations
 
