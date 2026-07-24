@@ -26,6 +26,141 @@
 
 ## 变更记录
 
+### [ACL-080] 2026-07-13（owner 追问驱动：v5_hybrid 目视"最干净"→ 最新指标复评）— **"最锐≠最优"实锤**：ACL-029 时代 solver_v5_sharp 用当前 corrected cross-FRC 复评 = **0.6256**，低于冠军 depb9v6（0.6611）0.036、与 v9 代同簇、远逊 TGV（0.7017）——其目视锐度大半是 ACL-029 背景 waffle/幻觉，独立 drizzle 的跨方法 FRC 不采信
+
+**缘起**: owner 目视 fig12 认为 v5_hybrid（`solver_v5_sharp`，fig12 上排那个 checkpoint）"效果最好、最干净"，追问它在我们最新指标上如何。v5_hybrid 属 ACL-029 时代，**从未用当前口径（corrected cross-FRC vs drizzle / 点保真 / OOD）测过**——当年只有合成 PSNR/boundary_f1（已证与真实质量反相关，见 changelog v5 era 记录）。
+
+**执行**: checkpoint 仍在（`outputs/solver_v5_sharp/solver_final.pt`，29.8MB，20k）。用其**自身 config**（unroll_steps=4、phase_bin_channels=4、prox 带 SE+GroupNorm——旧默认，v11 世代才改 noSE+noGN）经当前 `infer_solver_from_burst_full_halo` 在 seed-42 真实半幅重建，**state_dict 0 缺失 0 多余**（首次误用 noSE/noGN 默认丢了 58 个 SE/GN 张量、被 strict 检查逮住修正）。输出 22.3-26.4℃（与冠军同域）。对齐到冠军网格测得 v5 残差偏移 **(dy,dx)≈(-0.28,-0.60) HR px**（非冠军 raw→corrected 的 0.03px！phase_bins=4 vs 9 导致 v5 有真实 ~0.6px 栅格约定差异，未补正会按 ACL-047/049 压低 cross-FRC ~0.4——补正必须做）。用 `run_real_split_frc_v2.py` 同 leaderboard 计算，**锚逐位复现（depb9v6 0.6611 / tgv 0.7017）**→数字可信。
+
+**读数**（corrected cross-FRC@30µm vs drizzle，seed42）:
+| 臂 | FRC@30µm | cutoff |
+|---|---|---|
+| tgv（古典） | 0.7017 | 25.45µm |
+| depb9v6（冠军） | 0.6611 | 25.75µm |
+| **v5_hybrid（复评）** | **0.6256** | 25.67µm |
+| 参照 depb9v9_3k / 9bin | 0.6245 / 0.6252 | — |
+
+**判读**:
+1. **"最锐≠最优"得到定量实锤**：v5 目视最锐（fig98 中心蛇形线圈最清晰）却 cross-FRC 最低档之一（0.626），比冠军低 0.036、与 v9 代打平、远逊 TGV。**目视锐度大半来自 ACL-029 记录的 ~2px 背景 waffle/絮状幻觉**——self split-half FRC 会奖励这种可复现幻觉（fig08/ACL-047），但对独立 drizzle 的 corrected cross-FRC 不采信。这是全项目诚实评测方法论最干净的一个反例演示（fig98 落地）。
+2. **冠军 v6 的"少一点表观锐度"是划算的交换**：+0.036 真实可迁移结构 + 干净背景（无 waffle）+ OOD 稳健（ACL-076/078）+ 可审计（ACL-075）+ 点保真够用——都在 v5 之上。
+3. **方法学副产品**：旧世代 checkpoint 可在当前管线复评，只要按其自身 config 装配（尤其 SE/GN 这类后来被移除的模块）；strict load 检查是防"静默跑错架构"的关键闸（首次差点用错）。
+
+**涉及文件**: `remote_inbox/20260710_expab/v5sharp_{a,b}.npy`（重建）、`output/dot_probe_expab/v5sharp_{a,b}_corrected.npy`（对齐冠军网格）、`docs/publication_figures/scripts/fig98_v5_vs_champion_optical.py` + figure、GALLERY Fig 98。远端脚本：/tmp/recon_v5_halves.py、/tmp/align_v5.py（scratch）。
+
+### [ACL-079] 2026-07-13（ood_3k_chain 补测，owner 批准，闭合 ACL-077 盲区）— depb9v9_3k 的 OOD 稳健性测定：**3k 是所有神经臂里域外最差的**——对 tgv_oracle 全输 0/13、低于 9bin 13/13、退化幅度约 9bin 的 2 倍。**点保真冠军的桂冠以最陡的域外崩溃为代价**；3k 在点保真轴仍帕累托最优（未被支配），但新增"OOD 最差"标签 → 任何含稳健性权重的决策上 3k 被 depb9v6 支配
+
+**执行**: `tmp/ood_3k_chain.sh`（tmux session0 window ood3k）对 13 个已生成 OOD 池（9 stage2b_ood + 4 stage2b_ood2）**只渲染 depb9v9_3k 一个神经臂**（`recon-neural --skip-existing`，复用现有池数据 + TGV 基线，**不重算 TGV**）→ 重跑 gate（枚举 recons/ 下全部臂，纳入 3k）→ 重跑 metrics（从 gate.json **覆盖式重建** stage2b_long.csv）→ 重聚合两表为 5 臂。**自洽校验通过**：v6/9bin/tgv__oracle/tgv__portable 四臂重建后数值与 ACL-076/078 **逐位一致**（覆盖重建未污染既有臂，管线得证、ACL-076/078 数字确认）。~1h20m（08:13→09:32，GPU 空闲无争抢，~5min/池渲染）。产物：`stage2b_ood/ood_degradation_summary.csv` + `stage2b_ood2/ood2_degradation_summary.csv`（现含 5 臂，拉回 `remote_inbox/20260712_oodC/` 与 `remote_inbox/20260713_content2ms/`）。
+
+**读数**（frc_band_mean_25_40 mean；13 池；3k−oracle / 3k−9bin 为关键差）:
+
+| 轴/池 | v6 | **3k** | 9bin | tgv_orac | tgv_port | 3k−orac | 3k−9bin |
+|---|---|---|---|---|---|---|---|
+| content_texroles | 0.815 | 0.345 | 0.478 | 0.647 | 0.778 | −0.301 | −0.133 |
+| content_xlmerge | 0.842 | 0.386 | 0.509 | 0.705 | 0.781 | −0.319 | −0.123 |
+| content_legacymix | 0.716 | 0.333 | 0.416 | 0.608 | 0.666 | −0.275 | −0.083 |
+| content_tracebus | 0.774 | 0.258 | 0.367 | 0.629 | 0.724 | −0.370 | −0.109 |
+| content2_organicblobs | 0.720 | 0.227 | 0.395 | 0.479 | 0.742 | −0.252 | −0.168 |
+| content2_textserial | 0.659 | 0.164 | 0.295 | 0.456 | 0.671 | −0.292 | −0.131 |
+| content2_rings | 0.818 | 0.355 | 0.492 | 0.673 | 0.738 | −0.318 | −0.137 |
+| content2_voronoi | 0.843 | 0.298 | 0.421 | 0.643 | 0.843 | −0.345 | −0.123 |
+| noise_amp_x2 | 0.613 | 0.235 | 0.396 | 0.396 | 0.562 | −0.161 | −0.162 |
+| noise_amp_x4 | 0.277 | 0.171 | 0.307 | 0.204 | 0.290 | −0.033 | −0.136 |
+| noise_stripe_x4 | 0.828 | 0.268 | 0.384 | 0.647 | 0.774 | −0.380 | −0.117 |
+| noise_oneoverf_x4 | 0.714 | 0.281 | 0.468 | 0.504 | 0.672 | −0.224 | −0.188 |
+| noise_hotpixel | 0.846 | 0.341 | 0.542 | 0.648 | 0.786 | −0.307 | −0.201 |
+
+**判读**:
+1. **3k 是决定性的最差 OOD 泛化臂**：对 tgv_oracle **0/13 胜**（均值 **−0.275**）、对更强的 tgv_portable 也 0/13、**低于 9bin 全部 13/13 池**（−0.08~−0.20）。对照 9bin−oracle 均值仅 −0.136——**3k 域外退化幅度约 9bin 的 2 倍**。
+2. **点保真↔OOD 稳健性沿 v9 池规模轴反相关（机制闭环）**：ACL-074 已证 3k 池（3000 景，更小）→ 抹除先验最弱 → 点保真史上最优（0.00%/0.798）；本条补上另一半——**同一个"小池弱先验"也是过度特化、可迁移性最差的根源**。池规模不只是 FRC↔点保真张力的旋钮（ACL-074），也是点保真↔OOD 稳健性张力的旋钮，且两者同向：把池调小买到的极致点保真，代价是最脆的域外行为。
+3. amp_x4（全场共同软肋）是唯一近打平（−0.033）——地板效应，三方法都塌到 0.17-0.31，不构成 3k 的例外优点。
+4. **自洽校验**：四个既有臂重建后逐位复现 ACL-076/078 → recon-neural skip-existing + gate 全臂枚举 + metrics 覆盖重建的补臂管线正确，无重复/无污染。
+
+**champion 帕累托最终定稿（三轴全测，交 owner）**: 稳健性轴补齐后前沿收敛为两点实用选择——
+- **depb9v6**：真实 FRC 0.661（跨切分稳，ACL-077）+ **神经臂中唯一 OOD 稳健**（对 oracle 全胜 ACL-076/078）+ 可审计（ACL-075）+ 点保真中庸（4.66%/0.598）——**均衡神经冠军**。
+- **tgv**：真实 FRC 0.702（最高）+ OOD 参照系本身，但无点保真/可审计概念——**纯分辨率选择**。
+- **depb9v9_3k**：点保真轴上仍**帕累托最优且不可替代**（0.00%/0.798，无臂能及），但 OOD 稳健性**实测最差**（本条）→ 仅在"部署严格 in-distribution + 点保真压倒一切 + 域外几乎不发生"的窄角落里有意义；任何给稳健性非零权重的决策上被 depb9v6 支配。
+- **depb9v9_9bin**：被 3k 弱支配（ACL-077），已退出前沿。
+
+**开放**（收尾前）: tgv_oracle 系统性弱于 portable（全 13 池，ACL-078 开放项）仍未复核，不影响本判决（3k 对两个 TGV 变体都 0/13）。
+
+**涉及文件**: `tmp/ood_3k_chain.sh`（远端）、`algos/ep07_unet_sr/output/stage2b_ood{,2}/ood*_degradation_summary.csv`（5 臂）、`remote_inbox/20260712_oodC/` + `remote_inbox/20260713_content2ms/`
+
+### [ACL-078] 2026-07-13（content2_chain 自动收官，任务 #7 收割其一）— OOD content 轴第二批（4 个**语法外** motif 族）复现 ACL-076：**depb9v6 对 tgv_oracle 锚零 sign-flip 再次全胜；depb9v9_9bin 4/4 落后**——但对**更强的 tgv_portable 基线**，v6 的 OOD 胜势强度依赖内容：round-1 仍 8/9 胜，语法外 content2 上 v6 ≈ portable（打平）
+
+**执行**: `tmp/content2_chain.sh`（tmux session0 window content2）对 4 个 out-of-grammar 池（organic_blobs / text_serial / concentric_rings / voronoi_cells，ACL-073 落地的语法外族，seeds 20260930-33，eval-only）跑完生成/经典(tgv oracle+portable, N=96)/神经(depb9v6, depb9v9_9bin)/gate/metrics；S5 聚合**同 ACL-076 的 `axis` pandas 保留字 bug** 崩（脚本从 ood_chain.sh 复制，同缺陷），同法 patch（`axis`→`ood_axis`，纯命名不改口径）+ 重挂 tmux window 0:3 直达聚合成功。产物 `algos/ep07_unet_sr/output/stage2b_ood2/ood2_degradation_{long,summary}.csv`（拉回 `remote_inbox/20260713_content2ms/`）。
+
+**读数**（frc_band_mean_25_40 mean；v6 / v9_9bin / tgv_oracle / tgv_portable）:
+
+| level | 池（语法外） | v6 | v9_9bin | tgv_orac | tgv_port | v6−orac | v9−orac | v6−port |
+|---|---|---|---|---|---|---|---|---|
+| 1 | organic_blobs | 0.720 | 0.395 | 0.479 | 0.742 | **+0.241** | −0.084 | −0.022 |
+| 2 | text_serial | 0.659 | 0.296 | 0.456 | 0.671 | **+0.203** | −0.161 | −0.012 |
+| 3 | concentric_rings | 0.818 | 0.492 | 0.673 | 0.738 | **+0.145** | −0.181 | **+0.080** |
+| 4 | voronoi_cells | 0.843 | 0.421 | 0.643 | 0.843 | **+0.200** | −0.222 | 0.000 |
+
+**判读**:
+1. **对 oracle 锚定，ACL-076 结论在语法外内容上完整复现**：depb9v6 零 sign-flip（+0.145~+0.241，幅度甚至比 round-1 更大），depb9v9_9bin 4/4 负（−0.084~−0.222）。点保真冠军候选臂在完全语法外的真实内容上系统跑输经典——不是训练 motif 词汇的记忆效应（这 4 族训练时从未见过），进一步支持 ACL-076 判读 2「9bin 的 FRC 增益部分来自对训练池统计的记忆而非可迁移物理先验」。
+2. **回填 ACL-076 的诚实修正——胜势强度依赖基线选择**：`tgv_oracle < tgv_portable` 在全 13 池（9 round-1 + 4 content2）**系统成立**（oracle 条件语义需复核，见开放项）；因此对更强的 portable 基线重算：**round-1 v6 仍胜 8/9**（仅 amp_x4 −0.013），但 **content2 语法外内容上 v6 ≈ portable（rings +0.080 胜、voronoi 打平、organic/text 各 −0.02/−0.01 负，净 1胜1平2负）**。即：depb9v6 的域外优势对"合成噪声轴 + 语法内 content"稳固，对"完全语法外的陌生几何"缩水到与最强经典打平——这是比 ACL-076 一句"v6 全胜"更准确的边界。判决仍按 handoff §2 指定的 oracle 锚（v6 零 sign-flip），portable 对照作为诚实上界一并记录。
+3. **content2 上 v9_9bin 的塌陷比 round-1 更深**（−0.08~−0.22，voronoi 达 −0.222）：语法外陌生几何把先验过拟合的代价放到最大，与判读 1 同向。
+
+**开放**: `tgv_oracle` 为何系统性弱于 `tgv_portable`（全 13 池）——oracle 条件在 `run_stage2b_synth_benchmark.py` 里的 PSF/参数语义需复核；不影响本判决（用 oracle 锚 + portable 对照双记录），但列为收尾前需澄清的一项。
+
+**涉及文件**: `tmp/content2_chain.sh`（远端 axis→ood_axis patch）、`algos/ep07_unet_sr/output/stage2b_ood2/`、`remote_inbox/20260713_content2ms/`
+
+### [ACL-077] 2026-07-13（ms_chain 自动收官，任务 #7 收割其二）— **champion 排名跨 3 切分一致性验证通过（07-07 头条 ≥2 附加切分规则）：真实 cross-FRC@30µm 排序 tgv > depb9v6 > v9代 在 seed 42/123/456 全部成立**——champion leaderboard 非单切分伪影；3k ≥ 9bin 在 FRC 上也跨切分成立
+
+**执行**: `tmp/ms_chain.sh`（tmux session0 window mschain）预注册流程全自动完成：R1 seed42 锚**逐位复现**（v9s2 0.6225 / 3k 0.6245 / 9bin 0.6252 / v6 0.6611 / tgv 0.7017，与 ACL-074 一致，未触发 /tmp/ms_ANCHOR_FAILED）；R2 在 phase-stratified seeds 123/456 重做 3 候选臂 + TGV 的 corrected cross-FRC vs drizzle（drizzle refs 与 TGV halves 均按 seed 重算，`reconstruct_halves.py --seed` highpass 域同源）。产物 `output/stage2p5_multisplit_v2/{ms_verdict.csv, lb_seed*}`（拉回 `remote_inbox/20260713_content2ms/ms_verdict.csv`）。
+
+**读数**（frc_at_30um，corrected cross-FRC vs drizzle）:
+
+| seed | tgv | depb9v6 | depb9v9_3k | depb9v9_9bin | tgv−v6 | v6−最佳v9 | 3k−9bin |
+|---|---|---|---|---|---|---|---|
+| 42 | 0.7017 | 0.6611 | 0.6245 | 0.6252 | +0.0406 | +0.0359 | −0.0007（并列） |
+| 123 | 0.7172 | 0.6721 | 0.6558 | 0.6429 | +0.0451 | +0.0163 | +0.0129 |
+| 456 | 0.7088 | 0.6668 | 0.6425 | 0.6271 | +0.0420 | +0.0243 | +0.0154 |
+
+**判读**:
+1. **头条排序 tgv > v6 > v9代 三切分全一致 → 07-07 头条规则满足，champion leaderboard 稳**：ACL-053/074 用来做 champion 裁决的排序不是 seed42 的单切分运气。tgv 对 v6 领先 **+0.041~+0.045 高度稳定**；v6 对最佳 v9 臂领先 +0.016~+0.036，seed42 的 0.036 在别的切分收窄到 0.016 但**从不翻转**——v6 在真实 cross-FRC 上稳压 v9 代。
+2. **经典（TGV）在真实域仍领先所有神经臂**，跨切分稳固（与 ACL-049/053 一致，非配准伪影）；这是论文诚实定位的核心事实——物理约束神经求解器在此单 session 真实数据上**未超越**精调经典基线的 FRC，价值在别处（点保真可控性、OOD 稳健性、可审计性）。
+3. **3k ≥ 9bin 在 FRC 上跨切分成立**（seed42 并列、123/456 3k 领先 0.013~0.015）：叠加 ACL-074 的点保真（3k 0.00%/0.798 vs 9bin 1.55%/0.609），**depb9v9_3k 在真实域两轴弱支配 depb9v9_9bin**，9bin 作为独立候选可从帕累托前沿剔除。
+4. 绝对 FRC 在 seed 123/456 较 42 整体抬升 ~0.01~0.03（切分内容差异），但排序不变 → 排名对切分稳健、绝对值有 ~0.02~0.03 切分方差（论文报值应带此 band）。
+
+**champion 帕累托最终格局（交 owner 拍板，综合 ACL-074/076/077/078）**: 三点前沿收敛为 **depb9v6**（真实 FRC 0.661、跨切分稳、OOD 对 oracle 全胜/对 portable round-1 胜 content2 平、点保真中庸 4.66%/0.598）× **depb9v9_3k**（真实 FRC 打平 v9 代内最好且弱支配 9bin、点保真史上最优 0.00%/0.798、**OOD 未测=盲区**）× **tgv**（真实 FRC 0.702 最高、OOD 参照系本身、无点保真概念）；depb9v9_9bin 被 3k 弱支配、退出前沿。**建议 owner 决策前补 depb9v9_3k 的 OOD 子集验证**（复用现有 9+4 池，仅需新跑 3k 神经渲染，TGV 无需重算——见与 owner 的 TGV speed 讨论），否则 3k 的鲁棒性维度是未知项。
+
+**涉及文件**: `tmp/ms_chain.sh`、`scripts/reconstruct_halves.py`（ACL-074 已 patch 的多切分支持）、`output/stage2p5_multisplit_v2/`、`remote_inbox/20260713_content2ms/ms_verdict.csv`
+
+### [ACL-076] 2026-07-12（oodchain 自动收官，任务 #3 收割）— Track C OOD 退化曲线判决：**depb9v6 在全部 9 个 OOD 池（content×4 + noise×5 极端轴）上零 sign-flip 完胜 tgv_oracle；depb9v9_9bin（点保真冠军候选）OOD 大面积倒输 tgv_oracle**——champion 帕累托新增鲁棒性维度，v9_9bin 有先验过拟合训练池统计的风险信号
+
+**执行**: `tmp/ood_chain.sh`（tmux session0 window oodchain）S1-S6 对 9 个 OOD 池（4 content 极端 + 5 noise 极端）全部完成生成/经典重建(tgv oracle+portable)/神经重建(depb9v6, depb9v9_9bin)/gate/metrics；S7 聚合脚本因列名 `axis` 与 pandas `GroupBy.agg(list)` 内部 `getattr(obj,"axis",0)` 探测冲突而 `IndexError` 崩溃（`groupby(["axis",...])[cols].agg(["mean","std"])`——pandas 把索引层名 "axis" 当成了废弃的 axis 形参探测目标，触发内部 `self["axis"]` 二次选择报错）；FAILED 标志导致 tmux 窗口退出。**修复**：脚本内列名/分组键 `axis`→`ood_axis`（`tmp/ood_chain.sh` 已就地打了这个 patch，不改变任何数值口径，纯命名规避 pandas 内部保留字冲突），清 FAILED 标志，用 `tmux new-window -t 0:5`（-t 0 单独用会与 window 0 撞导致 "index 0 in use" 静默失败，需显式给空闲 index）重挂 oodchain，S1-S6 全部 flag-skip 直达 S7，聚合一次成功。产物：`algos/ep07_unet_sr/output/stage2b_ood/ood_degradation_{long,summary}.csv`（已拉回 `remote_inbox/20260712_oodC/`）。
+
+**判据（按 handoff §2）**: sign flip of (neural − tgv_oracle) across axis levels；legacymix 作为 arm-differential 诊断点。
+
+**读数**（frc_band_mean_25_40，mean；4 臂：depb9v6 / depb9v9_9bin / tgv__oracle / tgv__portable）:
+
+| 轴 | level | 池 | v6 | v9_9bin | tgv_oracle | v6−oracle | v9_9bin−oracle |
+|---|---|---|---|---|---|---|---|
+| content | 1 | texroles | 0.815 | 0.478 | 0.647 | **+0.169** | −0.169 |
+| content | 2 | xlmerge | 0.842 | 0.509 | 0.705 | **+0.137** | −0.196 |
+| content | 3 | legacymix | 0.716 | 0.416 | 0.608 | **+0.108** | −0.192 |
+| content | 4 | tracebus | 0.774 | 0.367 | 0.629 | **+0.145** | −0.262 |
+| noise | 1 | amp_x2 | 0.613 | 0.396 | 0.396 | **+0.217** | +0.001（打平） |
+| noise | 2 | amp_x4 | 0.277 | 0.307 | 0.204 | **+0.072** | **+0.103** |
+| noise | 3 | stripe_x4 | 0.828 | 0.384 | 0.647 | **+0.181** | −0.263 |
+| noise | 4 | oneoverf_x4 | 0.714 | 0.468 | 0.504 | **+0.210** | −0.036 |
+| noise | 5 | hotpixel | 0.846 | 0.542 | 0.648 | **+0.197** | −0.106 |
+
+**判读**:
+1. **depb9v6 零 sign-flip**：9/9 个 OOD 极端池上 depb9v6 − tgv_oracle 全为正（+0.07~+0.22），content 轴和 noise 轴都完胜、且优势幅度不随 OOD 强度明显收窄（noise_amp_x4 是全场最难的池，三个方法都塌陷到 0.20-0.28，但 v6 仍以 +0.072 领先）。**FRC 冠军臂的域外鲁棒性得到独立验证**，不是 ID 基准过拟合的假象。
+2. **depb9v9_9bin 6/9 sign-flip 为负**：content 轴全灭（4/4 负，−0.17~−0.26，且幅度随 texroles→xlmerge→tracebus 走势与 v6 相近但基线塌了一截，不是某个特定 motif 的锅——见判读 3）；noise 轴 3/5 负，仅 amp_x2（打平）与 amp_x4（唯一净胜出的池）例外。**点保真度最优的臂在域外真实数据上系统性跑输经典基线**——与 ACL-072/074 建立的"9bin 配方在 ID 基准上 FRC 与点保真双高"形成鲜明反差，提示该配方的 FRC 增益可能部分来自对训练池统计（浅密小点分布）的记忆而非可迁移的物理先验。
+3. **legacymix 诊断点未显示特异性**：v6−v9_9bin 在 4 个 content 池上的差值分别为 0.337/0.333/0.300/0.407——legacymix（最接近旧 v6 时代 motif 分布）的差值 0.300 反而是 4 者中最小，不是最大。说明 v9_9bin 的域外劣化是**跨 content 轴均匀的系统性衰减**，不是"因为 legacymix 像训练分布所以差距小"这种简单的分布距离效应——衰减机制更可能在 noise-conditioning / 先验强度层面，不在 motif 词汇层面。
+4. **noise_amp_x4 是全场共同软肋**：三个方法（v6/v9_9bin/tgv_oracle）在此池全部跌破 0.31，v9_9bin 甚至略胜 v6——极端全随机噪声放大下神经先验红利被冲淡，经典与神经差距收窄到噪声地板附近，这是唯一一个"没人赢"的池，不构成 champion 判据的反例，只是给出方法有效区间的边界。
+
+**champion 帕累托更新（交 owner 拍板的材料，ACL-072/074 基础上叠加鲁棒性轴）**: depb9v6（FRC 0.661、OOD 全胜、点保真中庸 4.66%/0.598）vs depb9v9_3k（FRC 打平 0.6245、点保真史上最优 0.00%/0.798、**OOD 鲁棒性未测**——3k 池未跑 oodchain，是本次判决的盲区）vs depb9v9_9bin（FRC 0.625、点保真 1.55%/0.609、**OOD 6/9 落后经典**——新增的减分项）vs tgv_oracle（0.702，OOD 定义上是参照系本身）。**建议**：若 owner 倾向 v9_3k 作为点保真冠军候选，应先补一次 v9_3k 的 OOD 子集验证（哪怕只跑 content_legacymix + noise_amp_x4 两个代表池），否则鲁棒性维度对该候选是未知项而非已知优点。
+
+**开放**: v9_9bin OOD 劣化的机制（先验强度 vs 别的什么）未做消融；3k 池 OOD 覆盖是新开的验收缺口。
+
+**涉及文件**: `tmp/ood_chain.sh`（远端，axis→ood_axis 命名 patch）、`algos/ep07_unet_sr/output/stage2b_ood/ood_degradation_{long,summary}.csv`、`remote_inbox/20260712_oodC/`
+
 ### [ACL-075] 2026-07-11（收尾分析 #1，零训练本地）— **DC 残差"自我怀疑仪表"成立：被抹除的点在 held-out 帧数据一致性残差中可检出（AUC 0.68-0.84），且点保真越好的臂检出越强（单调）**——抹除不在前向算子零空间内，硬 DC 把"先验覆盖数据"压进了可观测面
 
 **方法**（`algos/ep07_unet_sr/scripts/analyze_dc_residual_confidence.py`，结论文档 `research_log/dc_residual_confidence_analysis.md`，产物 `output/dc_residual_confidence/`）: native 网格重建（centered 渲染经精确逆变换还原）→ σ=0.5 占位算子（= 各臂推理期 DC 同一算子）forward → **仅用该半份 DC 子集之外的 112 held-out 帧**算 |y−A(x̂)|（防自拟合）→ 同 shifts drizzle splat 到探针坐标系 → 逐点窗口统计 vs per_dot 类别，Mann-Whitney AUC。对齐验证 9/12；残差图边缘有 σ 失配系统痕迹（算子装配正确）。
