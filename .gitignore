@@ -28,7 +28,8 @@ algos/*/outputs/
 *.zip
 
 # Root-level reports are legacy/generated scratch. Formal reports live in paper/reports/.
-reports/
+# (Anchored to root: an unanchored "reports/" would also ignore new files under paper/reports/.)
+/reports/
 
 # Remote agent handoff inbox is local-only; promote durable findings into tracked logs/reports.
 remote_inbox/
