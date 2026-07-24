@@ -1,9 +1,11 @@
 """Remote-rendered on the 5090 (run from ~/thermal_lift with `uv run python`).
 
 Fig 96 -- Reconstructions are visually invariant to the split seed
-(ACL-077 companion). Rows = arms, columns = phase-stratified split seeds
-42/123/456. TEMPERATURE-MAP variant (owner request 2026-07-13, replaces
-the earlier high-pass version).
+(ACL-077 companion). Landscape 3x4: rows = phase-stratified split seeds
+42/123/456, columns = arms (Drizzle, TGV, Ours v6 pool, Ours v9 3k).
+TEMPERATURE-MAP variant (owner request 2026-07-13, replaces the earlier
+high-pass version). No suptitle -- the title text lives in the GALLERY.md
+caption per the project convention.
 
 DOMAIN NOTE (why this figure is built the way it is): the neural arms
 (depb9v6, depb9v9_3k) reconstruct in ABSOLUTE temperature (~22-26 C,
@@ -86,19 +88,20 @@ for (arm, seed) in raw:
 allv = np.concatenate([panel[k].ravel() for k in panel])
 vmin, vmax = np.percentile(allv, [1.0, 99.0])
 
-fig, axes = plt.subplots(len(ARMS), len(SEEDS), figsize=(4.6, 5.9))
+# landscape 3x4: rows = seeds, columns = arms
+fig, axes = plt.subplots(len(SEEDS), len(ARMS), figsize=(6.7, 4.8))
 im = None
-for i, arm in enumerate(ARMS):
-    for j, seed in enumerate(SEEDS):
+for i, seed in enumerate(SEEDS):
+    for j, arm in enumerate(ARMS):
         ax = axes[i, j]
         im = ax.imshow(panel[arm, seed], cmap="inferno", vmin=vmin, vmax=vmax,
                        interpolation="nearest")
         ax.set_xticks([]), ax.set_yticks([])
         for sp in ax.spines.values():
             sp.set_color("#888888"), sp.set_linewidth(0.4)
-    axes[i, 0].set_ylabel(arm, fontsize=7.5)
-for j, seed in enumerate(SEEDS):
-    axes[0, j].set_title(f"split seed {seed}", fontsize=8)
+    axes[i, 0].set_ylabel(f"split seed {seed}", fontsize=7.5)
+for j, arm in enumerate(ARMS):
+    axes[0, j].set_title(arm, fontsize=8)
 
 # scale bar: 30 px = 300 um (white on the thermal map)
 axes[-1, 0].plot([4, 34], [122, 122], color="white", lw=1.8,
@@ -106,26 +109,22 @@ axes[-1, 0].plot([4, 34], [122, 122], color="white", lw=1.8,
 axes[-1, 0].annotate("300 $\\mu$m", (19, 116), ha="center", va="bottom",
                      fontsize=6, color="white")
 
-fig.suptitle("Same data, three different splits: reconstructions do not "
-             "move\n(temperature, a-halves; frame sets differ per seed)",
-             x=0.04, y=0.995, ha="left", fontsize=8.5)
-
-fig.subplots_adjust(left=0.085, right=0.86, top=0.9, bottom=0.055,
-                    wspace=0.05, hspace=0.07)
+fig.subplots_adjust(left=0.075, right=0.865, top=0.94, bottom=0.115,
+                    wspace=0.05, hspace=0.05)
 
 # shared Celsius colorbar
-cax = fig.add_axes([0.88, 0.055, 0.025, 0.845])
+cax = fig.add_axes([0.885, 0.115, 0.02, 0.825])
 cb = fig.colorbar(im, cax=cax)
 cb.set_label("temperature (°C)", fontsize=7)
 cb.ax.tick_params(labelsize=6)
 
 # honesty footnote about the shared background for classical arms
-fig.text(0.04, 0.012,
+fig.text(0.075, 0.012,
          "Absolute level is a shared scene background (low-pass of the "
          "aligned reconstruction); panels differ only in recovered mid-band "
          "structure.\nTGV/Drizzle reconstruct in the background-subtracted "
          "domain — the common background is added back for display.",
-         fontsize=5.2, color="#444444", va="bottom")
+         fontsize=5.6, color="#444444", va="bottom")
 
 for ext in ("png", "pdf"):
     fig.savefig(f"/tmp/fig96_split_visual_consistency.{ext}",

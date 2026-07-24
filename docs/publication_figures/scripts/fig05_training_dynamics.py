@@ -36,7 +36,9 @@ PANELS = [
     ("loss/total", "(f) Training loss", "Total loss", True),
 ]
 
-fig, axes = plt.subplots(2, 3, figsize=(W_DOUBLE, 4.6))
+# Landscape panels (~4:3 wide) in a 2x3 grid: sparse scalar curves read
+# better lying down than in near-square boxes.
+fig, axes = plt.subplots(2, 3, figsize=(W_DOUBLE, 3.8))
 
 for ax, (tag, title, ylab, logy) in zip(axes.flat, PANELS):
     for label, df, color, marker in RUNS:

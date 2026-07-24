@@ -36,10 +36,9 @@ from __future__ import annotations
 from pathlib import Path
 
 import matplotlib.image as mpimg
-import matplotlib.pyplot as plt
 import numpy as np
 
-from pubfig_style import W_DOUBLE, save_fig, setup_academic_style
+from pubfig_style import save_fig, setup_academic_style, strip_montage
 
 SRC_DIR = (
     Path(__file__).resolve().parent.parent.parent.parent
@@ -104,34 +103,28 @@ def main() -> None:
         (UNET_STEPS, UNET_TMPL),
     ]
 
-    # Cropped panels are ~870x650 px (width/height ~1.34); size the figure so
-    # rows sit flush against the image content instead of leaving dead space.
-    panel_aspect = 870 / 650
-    panel_w = W_DOUBLE / 4
-    panel_h = panel_w / panel_aspect
-    fig_h = 2 * panel_h + 0.55  # + headroom for the two title rows / labels
+    panels = []
+    col_titles = []
+    for steps, tmpl in rows:
+        panels.append(
+            [_crop_to_axes(mpimg.imread(SRC_DIR / tmpl.format(step=step)))
+             for step in steps]
+        )
+        col_titles.append([_step_label(s) for s in steps])
 
-    fig, axes = plt.subplots(
-        2, 4, figsize=(W_DOUBLE, fig_h), constrained_layout=True
+    # Shared checkpoint-strip template (pubfig_style.strip_montage): identical
+    # row-label / step-title styling with fig28. Unlike fig28, the sources
+    # here are pre-rendered RGB exports auto-scaled per panel at generation
+    # time, so no honest shared deg-C colorbar exists; the display convention
+    # is disclosed in a small in-figure footnote instead.
+    fig, _ = strip_montage(
+        panels,
+        col_titles=col_titles,
+        row_labels=ROW_LABELS,
+        panel_aspect=panels[0][0].shape[1] / panels[0][0].shape[0],
+        note="Display: pre-rendered inferno temperature maps, auto-scaled per "
+             "panel at export; absolute $^\\circ$C scale is not shared across panels.",
     )
-    fig.get_layout_engine().set(
-        hspace=0.02, wspace=0.02, h_pad=0.01, w_pad=0.01
-    )
-
-    for row_idx, (steps, tmpl) in enumerate(rows):
-        for col_idx, step in enumerate(steps):
-            ax = axes[row_idx, col_idx]
-            img_path = SRC_DIR / tmpl.format(step=step)
-            img = mpimg.imread(img_path)
-            img = _crop_to_axes(img)
-            ax.imshow(img)
-            ax.set_xticks([])
-            ax.set_yticks([])
-            for spine in ax.spines.values():
-                spine.set_visible(False)
-            ax.set_title(_step_label(step), fontsize=9)
-            if col_idx == 0:
-                ax.set_ylabel(ROW_LABELS[row_idx], fontsize=9)
 
     save_fig(fig, "fig12_checkpoint_evolution_strip")
 

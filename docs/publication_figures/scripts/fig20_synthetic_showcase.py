@@ -119,7 +119,30 @@ def _add_scalebar(ax, um_per_px: float, bar_um: float, label: str,
 with open(POOL_DIR / "index.json") as f:
     index = {r["i"]: r for r in json.load(f)}
 
-fig, axes = plt.subplots(2, 4, figsize=(W_DOUBLE, 4.0))
+# Manual grid geometry (no constrained layout): the panel boxes are sized so
+# the square interior-crop images fill them exactly after each per-panel
+# colorbar steals its slice, and the figure height is derived from the
+# content -- this removes the large inter-panel whitespace the auto layout
+# produced at a fixed 4.0 in height. The figure title moved to the caption.
+N_COLS = 4
+CB_FRACTION, CB_PAD = 0.046, 0.03
+_ws, _hs = 0.35, 0.22          # grid gaps: colorbar + ticks + label / row-2 titles
+_left, _right = 0.005, 0.966   # right margin: last colorbar's tick labels
+_top_in, _bot_in = 0.42, 0.03  # inches: row-1 titles / bottom edge
+_ax_w = W_DOUBLE * (_right - _left) / (N_COLS + (N_COLS - 1) * _ws)
+_ax_h = _ax_w * (1.0 - CB_FRACTION - CB_PAD)  # square image fills the box
+_fig_h = _ax_h * (2 + _hs) + _top_in + _bot_in
+
+fig, axes = plt.subplots(
+    2, N_COLS, figsize=(W_DOUBLE, _fig_h),
+    gridspec_kw=dict(left=_left, right=_right, top=1.0 - _top_in / _fig_h,
+                     bottom=_bot_in / _fig_h, wspace=_ws, hspace=_hs),
+)
+# Freeze the manual geometry: downgrade the rcParams-provided constrained-
+# layout engine to the do-nothing placeholder (a bare None engine would be
+# resurrected to constrained layout by savefig's rcParams round-trip, which
+# then divides by zero on the colorbar sub-gridspecs).
+fig.set_layout_engine("none")
 
 # ── Row 1: HR temperature gallery, 4 diverse scenes ────────────────────
 for c, i in enumerate(TOP_SCENES):
@@ -137,7 +160,7 @@ for c, i in enumerate(TOP_SCENES):
         f"panels={rec['n_panels']}",
         fontsize=7.3,
     )
-    cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cb = fig.colorbar(im, ax=ax, fraction=CB_FRACTION, pad=CB_PAD)
     cb.set_label("T [$^\\circ$C]", fontsize=7)
     cb.ax.tick_params(labelsize=6.5)
     if c == 0:
@@ -164,19 +187,15 @@ for c, (title, img, cmap, (lo, hi), cblabel, pitch) in enumerate(panels):
     im = ax.imshow(img, cmap=cmap, vmin=lo, vmax=hi, interpolation="nearest")
     ax.set_xticks([]); ax.set_yticks([])
     ax.set_title(title, fontsize=7.3)
-    cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+    cb = fig.colorbar(im, ax=ax, fraction=CB_FRACTION, pad=CB_PAD)
     cb.set_label(cblabel, fontsize=7)
     cb.ax.tick_params(labelsize=6.5)
     if c in (0, 2):
         bar_um = 2000.0
         _add_scalebar(ax, pitch, bar_um, "2 mm", color="white" if c == 0 else "black")
 
-# Details (seed, defect counts) live in the caption/docstring, not the title.
-fig.suptitle(
-    f"TCForge synthetic training scenes (top) and decomposition of scene "
-    f"{DECOMP_SCENE:03d} (bottom)",
-    fontsize=11, y=1.03,
-)
-
+# No in-figure suptitle: the figure title ("TCForge synthetic training
+# scenes (top) and decomposition of scene 004 (bottom)") plus details
+# (seed, defect counts) belong to the caption, not the artwork.
 paths = save_fig(fig, "fig20_synthetic_showcase")
 print("\n".join(str(p) for p in paths))

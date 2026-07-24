@@ -83,36 +83,28 @@ def _crop_to_axes(img: np.ndarray) -> np.ndarray:
 def main() -> None:
     setup_academic_style()
 
-    panel_aspect = 870 / 650
-    panel_w = W_DOUBLE / 3
-    panel_h = panel_w / panel_aspect
-    fig_h = panel_h + 0.9  # headroom for titles + bottom caption
+    imgs = [_crop_to_axes(mpimg.imread(p)) for p, _ in PANELS]
+    # width ratios follow each crop's native aspect so all three panels share
+    # one common height and fill the strip without residual whitespace
+    aspects = [im.shape[1] / im.shape[0] for im in imgs]
 
-    fig, axes = plt.subplots(1, 3, figsize=(W_DOUBLE, fig_h),
-                             constrained_layout=True)
-    fig.get_layout_engine().set(wspace=0.02, w_pad=0.02)
+    gap_in, lr_in, top_in, bot_in = 0.035, 0.01, 0.36, 0.02
+    h_ax = (W_DOUBLE - 2 * lr_in - 2 * gap_in) / sum(aspects)
+    fig_h = h_ax + top_in + bot_in
+    avg_w = (W_DOUBLE - 2 * lr_in - 2 * gap_in) / 3
 
-    for ax, (png_path, title) in zip(axes, PANELS):
-        img = _crop_to_axes(mpimg.imread(png_path))
+    fig, axes = plt.subplots(1, 3, figsize=(W_DOUBLE, fig_h), layout="none",
+                             gridspec_kw={"width_ratios": aspects})
+    fig.subplots_adjust(left=lr_in / W_DOUBLE, right=1 - lr_in / W_DOUBLE,
+                        top=1 - top_in / fig_h, bottom=bot_in / fig_h,
+                        wspace=gap_in / avg_w)
+
+    for ax, img, (_, title) in zip(axes, imgs, PANELS):
         ax.imshow(img)
         ax.set_xticks([]), ax.set_yticks([])
         for spine in ax.spines.values():
             spine.set_visible(False)
         ax.set_title(title, fontsize=9)
-
-    fig.suptitle("Unrolled solver: primitive ancestor → champion "
-                 "(same real-session center detail, 3× zoom)",
-                 fontsize=10)
-
-    fig.text(0.5, -0.02,
-             "Cumulative project progress across training pool "
-             "(v4→v5-sharp→v6), loss/metric redesign (ACL-027) and "
-             "grid-convention fix (ACL-049), and matured halo=96 inference "
-             "(v21) — not a controlled ablation.\nEach panel is a "
-             "pre-rendered temperature map with its own auto-scale "
-             "(fig12 convention); absolute levels are not comparable across "
-             "panels. Comparison is of structure/sharpness.",
-             ha="center", va="top", fontsize=6.5, color="#444444")
 
     save_fig(fig, "fig97_solver_generational_evolution")
 

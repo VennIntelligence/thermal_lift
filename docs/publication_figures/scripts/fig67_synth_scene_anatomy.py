@@ -20,9 +20,11 @@ structural range (metadata printed above each row):
   scene_022 -- high tier, dT=2.94 degC (largest thermal swing)
   scene_048 -- high tier, occ=0.33 (densest layout in the pool)
 
-Temperature columns share ONE colorbar (global min/max across all three
-scenes' T; percentiles are background-dominated and clip whole scenes);
-coverage column has its own 0-1 colorbar. Scale bar on the
+All temperature panels (T and lr) share ONE colorbar (global min/max across
+all three scenes' T; percentiles are background-dominated and clip whole
+scenes), drawn bottom-left at one column width. The coverage column carries
+no second colorbar; its 0-1 mapping is stated in a one-line text note
+spanning the remaining two columns of the bottom strip. Scale bar on the
 top-left panel: 30 HR px = 300 um (HR grid 10 um/px; detector pitch 20 um,
 SCALE=2x -- see repo memory note on the 20 um pixel-pitch recalibration).
 
@@ -76,16 +78,39 @@ def main() -> None:
     vmin = min(s["T"].min() for s in scenes)
     vmax = max(s["T"].max() for s in scenes)
 
+    # Manual grid geometry (no constrained layout): panel boxes carry the
+    # raster aspect (960x1280 -> 3:4) so every image fills its box exactly,
+    # and the figure height is derived from the content instead of guessed.
+    aspect = scenes[0]["T"].shape[0] / scenes[0]["T"].shape[1]
+    n_rows = n_cols = 3
+    ws, hs = 0.04, 0.13            # grid gaps, fraction of panel width/height
+    left, right = 0.004, 0.996
+    top_in, bot_in = 0.40, 0.44    # inches: col titles + row meta / colorbar strip
+    ax_w = W_DOUBLE * (right - left) / (n_cols + (n_cols - 1) * ws)
+    ax_h = ax_w * aspect
+    grid_h = ax_h * (n_rows + (n_rows - 1) * hs)
+    fig_h = grid_h + top_in + bot_in
+
     fig, axes = plt.subplots(
-        3, 3, figsize=(W_DOUBLE, W_DOUBLE * 0.80), sharex=False, sharey=False
+        n_rows, n_cols, figsize=(W_DOUBLE, fig_h),
+        sharex=False, sharey=False,
+        gridspec_kw=dict(
+            left=left, right=right, top=1.0 - top_in / fig_h,
+            bottom=bot_in / fig_h, wspace=ws, hspace=hs,
+        ),
     )
+    # Freeze the manual geometry: downgrading the rcParams-provided
+    # constrained-layout engine to the do-nothing placeholder (a bare None
+    # engine would be resurrected to constrained layout by savefig's
+    # rcParams round-trip, re-laying the grid out in the saved PDF).
+    fig.set_layout_engine("none")
 
     col_titles = ["HR truth $T$", "LR observation", "Coverage map"]
-    im_T = im_cov = None
+    im_T = None
     for r, s in enumerate(scenes):
         im_T = axes[r, 0].imshow(s["T"], cmap="inferno", vmin=vmin, vmax=vmax)
         axes[r, 1].imshow(s["lr"], cmap="inferno", vmin=vmin, vmax=vmax)
-        im_cov = axes[r, 2].imshow(s["cov"], cmap="viridis", vmin=0.0, vmax=1.0)
+        axes[r, 2].imshow(s["cov"], cmap="viridis", vmin=0.0, vmax=1.0)
         for c in range(3):
             axes[r, c].set_xticks([])
             axes[r, c].set_yticks([])
@@ -100,12 +125,12 @@ def main() -> None:
             f"$\\theta$={s['angle']:.0f}°,  occ={s['occ']:.2f}"
         )
         axes[r, 0].text(
-            0.0, 1.04, meta, transform=axes[r, 0].transAxes,
+            0.0, 1.03, meta, transform=axes[r, 0].transAxes,
             ha="left", va="bottom", fontsize=7, clip_on=False,
         )
 
     for c, t in enumerate(col_titles):
-        axes[0, c].set_title(t, pad=16)
+        axes[0, c].set_title(t, pad=13)
 
     # Scale bar on the top-left panel: 30 HR px = 300 um.
     ax0 = axes[0, 0]
@@ -116,19 +141,24 @@ def main() -> None:
     ax0.text(x0 + SCALEBAR_PX + 0.015 * W, y0, "300 µm", color="white",
              ha="left", va="center", fontsize=7)
 
-    # One shared colorbar per column type: temperature (cols 1-2), coverage.
-    cb_T = fig.colorbar(
-        im_T, ax=[axes[r, c] for r in range(3) for c in (0, 1)],
-        location="bottom", shrink=0.55, aspect=35, pad=0.02,
+    # ONE colorbar only (temperature, shared by all T/lr panels), bottom-left
+    # at one column width; the coverage 0-1 mapping is a text note spanning
+    # the remaining two columns instead of a second stacked colorbar.
+    col_w = (right - left) / (n_cols + (n_cols - 1) * ws)  # figure fraction
+    cax = fig.add_axes(
+        [left + 0.02 * col_w, 0.28 / fig_h, 0.96 * col_w, 0.10 / fig_h]
     )
+    cb_T = fig.colorbar(im_T, cax=cax, orientation="horizontal")
     cb_T.set_label("Temperature [°C]", fontsize=8)
     cb_T.ax.tick_params(labelsize=7)
-    cb_cov = fig.colorbar(
-        im_cov, ax=[axes[r, 2] for r in range(3)],
-        location="bottom", shrink=0.85, aspect=18, pad=0.02,
+
+    note_x0 = left + col_w * (1.0 + ws)  # left edge of the middle column
+    fig.text(
+        (note_x0 + right) / 2.0, 0.29 / fig_h,
+        "HR truth $T$ and LR observation share the temperature scale (left).\n"
+        "Coverage map: viridis, 0 = background $\\rightarrow$ 1 = panel interior.",
+        ha="center", va="center", fontsize=7,
     )
-    cb_cov.set_label("Coverage [0–1]", fontsize=8)
-    cb_cov.ax.tick_params(labelsize=7)
 
     paths = save_fig(fig, "fig67_synth_scene_anatomy")
     for p in paths:

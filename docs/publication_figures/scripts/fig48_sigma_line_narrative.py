@@ -85,7 +85,6 @@ GATE_SNR = 5.0
 BLUE = METHOD_PALETTE["primary"]
 GREEN = METHOD_PALETTE["secondary"]
 RED = METHOD_PALETTE["accent_1"]
-ORANGE = METHOD_PALETTE["accent_3"]
 
 
 def write_csv() -> None:
@@ -138,7 +137,9 @@ def panel_a(ax: plt.Axes) -> None:
     ax.text(2.30, 0.90, "spread $\\approx$ 1.01 px\n$\\rightarrow$ FAIL",
             color=RED, fontsize=7, ha="right", va="center")
     ax.set_xticks(xs)
-    ax.set_xticklabels([f"{t}\n{n}" for t, n, _ in ROUTES], fontsize=7)
+    # break route names over two lines so neighbouring tick labels stay apart
+    ax.set_xticklabels([f"{t}\n{n.replace(' ', chr(10))}" for t, n, _ in ROUTES],
+                       fontsize=7)
     ax.set_xlim(-0.5, 2.55)
     ax.set_ylim(0, 1.38)
     ax.set_ylabel(r"$\hat{\sigma}$ [LR px]")
@@ -161,7 +162,7 @@ def panel_b(ax: plt.Axes) -> None:
         ax.plot(v, y, marker=m, ms=6, color=GREEN, ls="none")
         ax.annotate(f"{v:.1f}%", (v, y), xytext=(6, 5),
                     textcoords="offset points", fontsize=7)
-    ax.text(0.97, 0.06, "PASS\n(ACL-058)", transform=ax.transAxes,
+    ax.text(0.71, 0.06, "PASS\n(ACL-058)", transform=ax.transAxes,
             fontsize=8, color=GREEN, ha="right", va="bottom", fontweight="bold")
     ax.set_yticks(ys)
     ax.set_yticklabels(labels, fontsize=7)
@@ -169,7 +170,7 @@ def panel_b(ax: plt.Axes) -> None:
     ax.set_xlim(0, 20)
     ax.set_xlabel(r"median $|\hat{\sigma}/\sigma_{\rm true}-1|$ [%]")
     ax.set_title("(b) E3 kernel: synthetic bench")
-    ax.legend(loc="upper right", fontsize=7)
+    ax.legend(loc="upper left", fontsize=7)
 
 
 def panel_c(ax: plt.Axes) -> None:
@@ -185,13 +186,13 @@ def panel_c(ax: plt.Axes) -> None:
     snrs = [e[2] for e in REAL_EDGES]
     ax.plot(snrs, r2s, marker="x", ms=6, mew=1.4, color=RED, ls="none",
             label="detected edge (fail)")
-    ax.text(0.03, 0.80,
-            "gate: $r^2 \\geq 0.90$ &\namp SNR $\\geq 5.0$",
-            transform=ax.transAxes, fontsize=7, va="top", color="#222222")
-    ax.annotate("$\\sigma$ point-calibration rejected\n$\\rightarrow$ robust band "
+    ax.text(0.34, 0.875, "gate: $r^2 \\geq 0.90$ & amp SNR $\\geq 5.0$",
+            transform=ax.transAxes, fontsize=6.5, va="top", ha="left",
+            color="#222222")
+    ax.annotate("$\\sigma$ point-calibration rejected\n$\\rightarrow$ robust band\n"
                 "$\\sigma \\in [0.1, 0.4]$ px",
-                xy=(0.97, 0.30), xycoords="axes fraction", ha="right",
-                fontsize=7.5, color=ORANGE, fontweight="bold")
+                xy=(0.985, 0.32), xycoords="axes fraction", ha="right", va="center",
+                fontsize=7, color="black", fontweight="bold")
     ax.set_xlim(0, 16)
     ax.set_ylim(0, 1.02)
     ax.set_xlabel("edge amplitude SNR")
@@ -203,8 +204,12 @@ def panel_c(ax: plt.Axes) -> None:
 def main() -> None:
     setup_academic_style()
     write_csv()
-    fig, axes = plt.subplots(1, 3, figsize=(W_DOUBLE, 2.9),
-                             gridspec_kw=dict(width_ratios=[1.1, 1.0, 1.1]))
+    # 1x3 row of equal square panels; width_ratios only absorb the differing
+    # y-decoration widths so the visible boxes stay equal and evenly spaced.
+    fig, axes = plt.subplots(1, 3, figsize=(W_DOUBLE, 2.6),
+                             gridspec_kw=dict(width_ratios=[1.0, 1.06, 1.08]))
+    for ax in axes:
+        ax.set_box_aspect(1.0)
     panel_a(axes[0])
     panel_b(axes[1])
     panel_c(axes[2])

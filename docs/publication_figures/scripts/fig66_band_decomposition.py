@@ -51,8 +51,8 @@ def bandpass(img, lo_um, hi_um):
 
 COLS = [
     ("Temperature", None),
-    ("25--40 $\\mu$m band\n(acceptance band)", (25.0, 40.0)),
-    ("20--25 $\\mu$m band\n(below claims)", (20.0, 25.0)),
+    ("25\u201340 $\\mu$m band\n(acceptance band)", (25.0, 40.0)),
+    ("20\u201325 $\\mu$m band\n(below claims)", (20.0, 25.0)),
 ]
 
 panels = {}
@@ -68,8 +68,10 @@ for k in range(3):
     vals = np.concatenate([panels[n, k].ravel() for n, _ in ARMS])
     VLIM.append(np.percentile(np.abs(vals), 99.0))
 
-fig, axes = plt.subplots(len(ARMS), 3, figsize=(W_DOUBLE * 0.52, 5.35))
-fig.set_layout_engine("none")
+# layout="none" at creation time: set_layout_engine("none") after the fact
+# leaves a placeholder engine that silently blocks subplots_adjust.
+fig, axes = plt.subplots(len(ARMS), 3, figsize=(W_DOUBLE * 0.52, 5.08),
+                         layout="none")
 
 for i, (name, _) in enumerate(ARMS):
     for k in range(3):
@@ -84,27 +86,25 @@ for i, (name, _) in enumerate(ARMS):
         if k > 0:
             ax.annotate(f"rms {np.std(panels[name, k]):.3f}",
                         (0.97, 0.03), xycoords="axes fraction", ha="right",
-                        va="bottom", fontsize=6,
+                        va="bottom", fontsize=5.2,
                         color="#222222",
                         bbox=dict(fc="white", ec="none", pad=0.15,
                                   alpha=0.8))
-    axes[i, 0].set_ylabel(name, fontsize=8)
+    axes[i, 0].set_ylabel(name, fontsize=7)
 
 for k, (title, _) in enumerate(COLS):
-    axes[0, k].set_title(title, fontsize=7.5)
+    axes[0, k].set_title(title, fontsize=6.5, pad=3)
 
 # scale bar
-axes[-1, 0].plot([4, 34], [138, 138], color="#222222", lw=1.8,
+axes[-1, 0].plot([4, 34], [136, 136], color="#222222", lw=1.8,
                  solid_capstyle="butt", clip_on=False)
-axes[-1, 0].annotate("300 $\\mu$m", (40, 139), ha="left", va="center",
-                     fontsize=6.5, color="#222222", annotation_clip=False)
+axes[-1, 0].annotate("300 $\\mu$m", (40, 137), ha="left", va="center",
+                     fontsize=5.8, color="#222222", annotation_clip=False)
 axes[-1, 0].set_xlim(-0.5, S - 0.5)
 axes[-1, 0].set_ylim(S - 0.5, -0.5)
 
-fig.suptitle("Band energy by arm: acceptance band vs below-claims band",
-             x=0.03, y=0.99, ha="left", fontsize=9)
-fig.subplots_adjust(left=0.085, right=0.985, top=0.885, bottom=0.045,
-                    wspace=0.05, hspace=0.06)
+fig.subplots_adjust(left=0.07, right=0.995, top=0.945, bottom=0.035,
+                    wspace=0.02, hspace=0.02)
 
 paths = save_fig(fig, "fig66_band_decomposition")
 print("\n".join(str(p) for p in paths))

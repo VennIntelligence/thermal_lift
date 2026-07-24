@@ -20,12 +20,16 @@ phase-stratified split). ACL context: split-half controls (fig31/32).
 Run:  uv run python docs/publication_figures/scripts/fig63_splithalf_flat_band.py
 """
 
+import matplotlib as mpl
 import matplotlib.pyplot as plt
 import numpy as np
 
-from pubfig_style import REPO_ROOT, W_DOUBLE, save_fig, setup_academic_style
+from pubfig_style import REPO_ROOT, save_fig, setup_academic_style
 
 setup_academic_style()
+# Manual-layout script: keep the constrained engine off, otherwise the
+# tight-bbox save restores it and silently re-lays out the 2nd (pdf) save.
+mpl.rcParams["figure.constrained_layout.use"] = False
 
 SRC = REPO_ROOT / "remote_inbox/20260710_expab"
 ARMS = [
@@ -57,8 +61,16 @@ for name, pat in ARMS:
 
 vmax = 2.5 * np.median([np.std(c) for c in crops.values()])
 
-fig, axes = plt.subplots(2, len(ARMS), figsize=(W_DOUBLE * 0.78, 3.05))
-fig.set_layout_engine("none")
+# Geometry derived from a fixed square panel edge so every grid cell is
+# exactly square: no dead space around the equal-aspect imshow panels.
+P = 1.22                      # square panel edge [in]
+GAP = 0.05                    # inter-panel gap [in]
+LEFT, RIGHT = 0.18, 0.03      # room for "half A/B" ylabels / edge pad [in]
+TOP, BOTTOM = 0.38, 0.44      # room for 2-line titles / scale bar + caption [in]
+FIG_W = LEFT + len(ARMS) * P + (len(ARMS) - 1) * GAP + RIGHT
+FIG_H = TOP + 2 * P + GAP + BOTTOM
+
+fig, axes = plt.subplots(2, len(ARMS), figsize=(FIG_W, FIG_H))
 
 for j, (name, _) in enumerate(ARMS):
     a, b = crops[name, "a"], crops[name, "b"]
@@ -84,16 +96,16 @@ axes[1, 0].annotate("300 $\\mu$m", (37, 137), ha="left", va="center",
 axes[1, 0].set_xlim(-0.5, S - 0.5)
 axes[1, 0].set_ylim(S - 0.5, -0.5)
 
-fig.text(0.5, 0.015,
+panel_span_center = (LEFT + (len(ARMS) * P + (len(ARMS) - 1) * GAP) / 2) / FIG_W
+fig.text(panel_span_center, 0.012,
          "Flat ROI, 25-40 $\\mu$m band. Split-stable texture (TGV, v6) is "
-         "what self split-half FRC rewards --- hence cross-FRC vs drizzle "
+         "what self split-half FRC rewards\n--- hence cross-FRC vs drizzle "
          "as metrology (fig31/32).",
          ha="center", va="bottom", fontsize=7, style="italic",
-         color="#444444")
-fig.suptitle("Split-half agreement in a structure-free region",
-             x=0.03, y=0.995, ha="left", fontsize=9)
-fig.subplots_adjust(left=0.05, right=0.985, top=0.78, bottom=0.10,
-                    wspace=0.06, hspace=0.06)
+         color="#444444", linespacing=1.4)
+fig.subplots_adjust(left=LEFT / FIG_W, right=1 - RIGHT / FIG_W,
+                    top=1 - TOP / FIG_H, bottom=BOTTOM / FIG_H,
+                    wspace=GAP / P, hspace=GAP / P)
 
 paths = save_fig(fig, "fig63_splithalf_flat_band")
 print("\n".join(str(p) for p in paths))

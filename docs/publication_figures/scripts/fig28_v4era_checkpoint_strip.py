@@ -39,9 +39,8 @@ Run:
 from __future__ import annotations
 
 import numpy as np
-import matplotlib.pyplot as plt
 
-from pubfig_style import CMAP_TEMPERATURE, REPO_ROOT, W_DOUBLE, save_fig, setup_academic_style
+from pubfig_style import CMAP_TEMPERATURE, REPO_ROOT, save_fig, setup_academic_style, strip_montage
 
 setup_academic_style()
 
@@ -69,29 +68,25 @@ def main() -> None:
     vmin = float(min(c.min() for c in crops))
     vmax = float(max(c.max() for c in crops))
 
-    fig, axes = plt.subplots(1, len(STEPS), figsize=(W_DOUBLE, 1.9))
-
-    im = None
-    for ax, crop, label in zip(axes, crops, STEP_LABELS):
-        im = ax.imshow(crop, cmap=CMAP_TEMPERATURE, vmin=vmin, vmax=vmax,
-                        interpolation="nearest")
-        ax.set_title(label)
-        ax.set_xticks([])
-        ax.set_yticks([])
-        for sp in ax.spines.values():
-            sp.set_visible(False)
+    # Shared checkpoint-strip template (pubfig_style.strip_montage): identical
+    # row-label / step-title / colorbar styling with fig12. Figure title lives
+    # in the caption, not inside the figure.
+    fig, axes = strip_montage(
+        [crops],
+        col_titles=[STEP_LABELS],
+        row_labels=["Unrolled solver (v4)"],
+        cmap=CMAP_TEMPERATURE,
+        vmin=vmin,
+        vmax=vmax,
+        cbar_label="Temperature [$^\\circ$C]",
+        panel_aspect=1.0,
+    )
 
     # 200 um scale bar (20 HR px at 10 um/px output grid), first panel only.
-    ax_sb = axes[0]
+    ax_sb = axes[0][0]
     ax_sb.plot([6, 26], [120, 120], color="white", lw=2.2, solid_capstyle="butt")
     ax_sb.annotate("200 $\\mu$m", (16, 116), color="white", ha="center",
                     va="bottom", fontsize=7)
-
-    cbar = fig.colorbar(im, ax=axes, fraction=0.032, pad=0.02)
-    cbar.set_label("Temperature [$^\\circ$C]")
-
-    fig.suptitle("Solver checkpoint evolution (ACL-027-era, real-data center detail)",
-                  fontsize=11, fontweight="bold")
 
     paths = save_fig(fig, "fig28_v4era_checkpoint_strip")
     print("\n".join(str(p) for p in paths))

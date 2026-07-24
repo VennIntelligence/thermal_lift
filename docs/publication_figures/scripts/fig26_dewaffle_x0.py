@@ -91,7 +91,13 @@ def grid_score(img: np.ndarray) -> float:
 
 def main() -> int:
     setup_academic_style()
+    import matplotlib as mpl
     import matplotlib.pyplot as plt
+
+    # Manual-layout script: constrained layout leaves the aspect-locked
+    # imshow panels floating in oversized cells, and the tight-bbox save
+    # would re-enable it and re-lay out the 2nd (pdf) save.
+    mpl.rcParams["figure.constrained_layout.use"] = False
 
     real = np.load(REAL_DRIZZLE).astype(np.float32)
     pbd = np.load(SYNTH_SCENE / "phase_bin_drizzle_2x.npy").astype(np.float32)
@@ -104,7 +110,31 @@ def main() -> int:
         ("Synthetic $x_0$ = aligned mean\n(ch0, de-waffled)", aligned2x, SYNTH_ROI),
     ]
 
-    fig, axes = plt.subplots(2, 3, figsize=(W_DOUBLE, 4.35))
+    # Inch-based geometry: square panels + slim dedicated colorbar axes so
+    # panel/colorbar positions are exact and no engine redistributes gaps.
+    LEFT, RIGHT = 0.50, 0.0                    # bottom-row ylabel+ticks / edge [in]
+    CB_PAD, CB_W, CB_TXT = 0.04, 0.08, 0.54    # colorbar pad / width / labels [in]
+    COL_GAP = 0.24                             # holds bottom-row ytick labels [in]
+    TOP, ROW_GAP, BOTTOM = 0.36, 0.16, 0.50    # titles / row gap / xlabels [in]
+    SAVE_PAD = 0.06   # savefig pad_inches=0.03 on both sides of the tight bbox
+    P = (W_DOUBLE - SAVE_PAD - LEFT - RIGHT
+         - 3 * (CB_PAD + CB_W + CB_TXT) - 2 * COL_GAP) / 3
+    COL_PITCH = P + CB_PAD + CB_W + CB_TXT + COL_GAP
+    FIG_W = W_DOUBLE
+    FIG_H = TOP + 2 * P + ROW_GAP + BOTTOM
+
+    fig = plt.figure(figsize=(FIG_W, FIG_H))
+    y_row = [BOTTOM + P + ROW_GAP, BOTTOM]     # row 0 = top, row 1 = bottom [in]
+    axes = [[None] * 3 for _ in range(2)]
+    caxes = [[None] * 3 for _ in range(2)]
+    for i in range(2):
+        for j in range(3):
+            x0 = LEFT + j * COL_PITCH
+            axes[i][j] = fig.add_axes(
+                [x0 / FIG_W, y_row[i] / FIG_H, P / FIG_W, P / FIG_H])
+            caxes[i][j] = fig.add_axes(
+                [(x0 + P + CB_PAD) / FIG_W, y_row[i] / FIG_H,
+                 CB_W / FIG_W, P / FIG_H])
     letters = "abcdef"
 
     for j, (title, img, (y0, x0)) in enumerate(fields):
@@ -112,14 +142,14 @@ def main() -> int:
         hp = highpass(img)[y0:y0 + CROP, x0:x0 + CROP]
 
         # ── top: highpass zoom crop ──
-        ax = axes[0, j]
+        ax = axes[0][j]
         vmax = float(np.percentile(np.abs(hp), 99))
         im = ax.imshow(hp, cmap=CMAP_RESID_DIV, vmin=-vmax, vmax=vmax, interpolation="nearest")
         ax.set_title(title)
         ax.set_xticks([]); ax.set_yticks([])
         for s in ax.spines.values():
             s.set_visible(True); s.set_linewidth(0.6)
-        cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cb = fig.colorbar(im, cax=caxes[0][j])
         cb.set_label("Highpass residual [$^\\circ$C]", fontsize=8)
         cb.ax.tick_params(labelsize=7)
         # scale bar: 10 HR px = 100 um = 5 waffle periods
@@ -133,7 +163,7 @@ def main() -> int:
                 bbox=dict(facecolor="white", alpha=0.75, pad=0.8, edgecolor="none"))
 
         # ── bottom: log power spectrum ──
-        ax = axes[1, j]
+        ax = axes[1][j]
         logp, fxm, fym = log_power(win)
         lo, hi = np.percentile(logp, [5, 99.9])
         im = ax.imshow(logp, cmap=CMAP_COVERAGE, vmin=lo, vmax=hi,
@@ -151,14 +181,12 @@ def main() -> int:
         ax.set_xticks([-0.5, 0, 0.5]); ax.set_yticks([-0.5, 0, 0.5])
         for s in ax.spines.values():
             s.set_visible(True); s.set_linewidth(0.6)
-        cb = fig.colorbar(im, ax=ax, fraction=0.046, pad=0.04)
+        cb = fig.colorbar(im, cax=caxes[1][j])
         cb.set_label("log$_{10}$ power [a.u.]", fontsize=8)
         cb.ax.tick_params(labelsize=7)
         ax.text(-0.02, 1.06, f"({letters[3 + j]})", transform=ax.transAxes,
                 ha="right", va="top", fontsize=9, fontweight="bold")
 
-    fig.suptitle("De-waffle warm start (ACL-032): the 2-HR-px coverage checkerboard in the phase-bin\n"
-                 "drizzle $x_0$ and its removal by seeding from the aligned mean", fontsize=11)
     paths = save_fig(fig, "fig26_dewaffle_x0")
     for p in paths:
         print(p)

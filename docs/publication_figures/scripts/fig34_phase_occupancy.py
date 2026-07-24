@@ -40,7 +40,6 @@ from pubfig_style import (  # noqa: E402
     CMAP_COVERAGE,
     METHOD_PALETTE,
     REPO_ROOT,
-    W_DOUBLE,
     save_fig,
     setup_academic_style,
 )
@@ -75,20 +74,45 @@ def load_summary() -> dict[str, dict[str, float]]:
 
 def main() -> None:
     setup_academic_style()
+    import matplotlib as mpl
     import matplotlib.pyplot as plt
+
+    # Manual-layout script: keep the constrained engine off, otherwise the
+    # tight-bbox save restores it and warns/re-lays out the 2nd (pdf) save.
+    mpl.rcParams["figure.constrained_layout.use"] = False
 
     grids = load_detector_grids()
     summ = load_summary()
     n_frames = int(summ["command_prior"]["n_frames"])
 
-    fig = plt.figure(figsize=(W_DOUBLE, 2.9))
-    gs = fig.add_gridspec(1, 3, width_ratios=[1.0, 1.0, 1.55], wspace=0.16)
+    # Manual inch-based geometry: three identical square panel boxes with
+    # aligned tops/bottoms; slim shared colorbar right of (b); legend as a
+    # side column right of (c) so nothing hangs below the panel row.
+    P = 1.38                  # square panel edge [in]
+    LEFT = 0.44               # ylabel "Phase bin y" + tick labels [in]
+    GAP_AB = 0.18             # gap between (a) and (b) [in]
+    CB_PAD, CB_W = 0.06, 0.09   # colorbar pad / width [in]
+    CB_TXT = 0.44             # colorbar tick labels + rotated label [in]
+    C_AXIS = 0.52             # panel-(c) ytick labels + ylabel [in]
+    LEGEND_W = 1.30           # side legend column [in]
+    TOP, BOTTOM = 0.40, 0.38  # 2-line titles / xlabels + tick labels [in]
+    x_a = LEFT
+    x_b = x_a + P + GAP_AB
+    x_cb = x_b + P + CB_PAD
+    x_c = x_cb + CB_W + CB_TXT + C_AXIS
+    FIG_W = x_c + P + LEGEND_W
+    FIG_H = BOTTOM + P + TOP
+
+    fig = plt.figure(figsize=(FIG_W, FIG_H))
+
+    def add_panel(x_in: float):
+        return fig.add_axes([x_in / FIG_W, BOTTOM / FIG_H, P / FIG_W, P / FIG_H])
 
     # ── (a) detector-axis 5x phase-bin occupancy heatmaps ──────────────
     vmax = max(int(grids[m].max()) for m in HEATMAP_METHODS)
     im = None
     for i, method in enumerate(HEATMAP_METHODS):
-        ax = fig.add_subplot(gs[0, i])
+        ax = add_panel([x_a, x_b][i])
         g = grids[method]
         im = ax.imshow(g, cmap=CMAP_COVERAGE, vmin=0, vmax=vmax, origin="upper")
         for y in range(5):
@@ -111,13 +135,13 @@ def main() -> None:
         for s in ax.spines.values():
             s.set_visible(False)
         ax.tick_params(length=0)
-    cbar = fig.colorbar(im, ax=[fig.axes[0], fig.axes[1]], fraction=0.046,
-                        pad=0.03, location="right")
+    cax = fig.add_axes([x_cb / FIG_W, BOTTOM / FIG_H, CB_W / FIG_W, P / FIG_H])
+    cbar = fig.colorbar(im, cax=cax)
     cbar.set_label(f"Frame count (of {n_frames})", fontsize=8)
     cbar.ax.tick_params(labelsize=8)
 
     # ── (c) summary metrics across alignment sources ───────────────────
-    axc = fig.add_subplot(gs[0, 2])
+    axc = add_panel(x_c)
     metrics = [
         ("detector_bin_occupied", 25.0, "Detector 5$\\times$ occupancy (/25)", METHOD_PALETTE["primary"]),
         ("detector_bin_entropy_fraction", 1.0, "Detector entropy fraction", METHOD_PALETTE["secondary"]),
@@ -128,19 +152,23 @@ def main() -> None:
     for j, (key, denom, label, color) in enumerate(metrics):
         vals = [summ[m][key] / denom for m in BAR_METHODS]
         bars = axc.bar(xg + (j - 1) * bw, vals, width=bw - 0.02, color=color, label=label)
+        # stagger the middle metric's value label so neighbours don't merge
+        dy = 0.10 if j == 1 else 0.02
         for b, v in zip(bars, vals):
-            axc.text(b.get_x() + b.get_width() / 2, v + 0.02, f"{v:.2f}",
-                     ha="center", va="bottom", fontsize=7)
+            axc.text(b.get_x() + b.get_width() / 2, v + dy, f"{v:.2f}",
+                     ha="center", va="bottom", fontsize=6.5)
     axc.axhline(1.0, color="#666666", ls="--", lw=0.9)
-    axc.text(len(BAR_METHODS) - 0.55, 1.02, "full (needed for 5$\\times$)",
-             fontsize=7, color="#666666", ha="right", va="bottom")
+    axc.annotate("full (needed for 5$\\times$)",
+                 xy=(1.02, 1.0), xycoords=("axes fraction", "data"),
+                 fontsize=7, color="#666666", ha="left", va="center")
     axc.set_xticks(xg)
     axc.set_xticklabels(BAR_LABELS)
     axc.set_ylim(0, 1.30)
     axc.set_ylabel("Fraction of full [-]")
     axc.set_title("(c) Coverage vs. alignment source", fontsize=9)
-    axc.legend(loc="upper center", bbox_to_anchor=(0.5, -0.22), ncol=1,
-               frameon=False)
+    axc.legend(loc="center left", bbox_to_anchor=(1.04, 0.5), ncol=1,
+               frameon=False, fontsize=7, handlelength=1.2,
+               handletextpad=0.5, borderaxespad=0.0)
     axc.grid(axis="y", alpha=0.3, linewidth=0.5)
     axc.set_axisbelow(True)
 

@@ -115,8 +115,14 @@ def main() -> None:
     ta["theta_hat"] = theta_hat_deg(ta)
     yc["theta_hat"] = theta_hat_deg(yc)
 
+    # 1x3 row of equal square panels across the full double-column width;
+    # width_ratios only absorb panel (a)'s wide ytick labels so the visible
+    # boxes stay equally sized and equally spaced.
     fig, (ax_a, ax_b, ax_c) = plt.subplots(
-        1, 3, figsize=(W_DOUBLE, 3.15), gridspec_kw=dict(width_ratios=[1.30, 1.02, 0.95]))
+        1, 3, figsize=(W_DOUBLE, 2.8),
+        gridspec_kw=dict(width_ratios=[1.22, 1.02, 1.0]))
+    for ax in (ax_a, ax_b, ax_c):
+        ax.set_box_aspect(1.0)
 
     # ================= (a) theta forest =================
     # rows: (group ytick label, per-method [marker_x, (whisker_lo, whisker_hi)])
@@ -178,12 +184,12 @@ def main() -> None:
         ax_a.text(58.5, yy, f"{x:.1f}$^\\circ$", va="center", ha="right",
                   fontsize=ANNOT_FS, color=txt_c)
 
-    ax_a.text(theta_ref + 0.6, y_avi + 1.05,
+    ax_a.text(theta_ref - 0.6, y_avi + 1.05,
               f"configured $\\theta$ = {theta_ref:.1f}$^\\circ$",
-              fontsize=ANNOT_FS, color=REF_LINE["color"], ha="left", va="bottom")
+              fontsize=ANNOT_FS, color=REF_LINE["color"], ha="right", va="bottom")
     ax_a.set_yticks(ylab_pos)
     ax_a.set_yticklabels(ylab_txt, fontsize=mpl.rcParams["ytick.labelsize"] - 1)
-    ax_a.set_ylim(y + 0.4, y_avi + 1.35)
+    ax_a.set_ylim(y + 0.4, y_avi + 2.2)
     ax_a.set_xlim(19, 59)
     ax_a.set_xlabel("Stage-rotation $\\theta$ estimate [deg]")
     ax_a.set_title("(a) $\\theta$ by estimation method", loc="left")
@@ -224,7 +230,7 @@ def main() -> None:
         arrowprops=dict(arrowstyle="-", color="#888888", lw=0.7))
     ax_b.annotate(
         "Y-coordinate pairs:\ngap $\\approx$ 16 frames,\ndrift-dominated",
-        xy=(0.105, 0.34), xytext=(0.24, 0.80), fontsize=ANNOT_FS, color="#444444",
+        xy=(0.105, 0.34), xytext=(0.123, 0.95), fontsize=ANNOT_FS, color="#444444",
         ha="left", va="center",
         arrowprops=dict(arrowstyle="-", color="#888888", lw=0.7))
 

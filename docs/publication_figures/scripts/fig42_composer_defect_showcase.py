@@ -149,16 +149,36 @@ break_ex = _spread_pick(break_pool, key=lambda t: (t[1], t[2]), n=N_PER_ROW)
 # in the same crop.
 ROWS = [
     ("dark dots", dots_ex, 70,
-     lambda t: f"r={t[3]:.1f}px\ndepth={t[4]:.2f}"),
+     lambda t: f"r={t[3]:.1f} px, depth={t[4]:.2f}"),
     ("hot spots", hots_ex, 70,
-     lambda t: f"r={t[3]:.1f}px\namp={t[4]:.2f}"),
+     lambda t: f"r={t[3]:.1f} px, amp={t[4]:.2f}"),
     ("shallow dark blobs\n(softness variant)", darks_ex, 160,
-     lambda t: f"r={t[3]:.1f}px\ndepth={t[4]:.2f}"),
+     lambda t: f"r={t[3]:.1f} px, depth={t[4]:.2f}"),
     ("irregular edge notch", notch_ex, 200, lambda t: "mask-level bite"),
     ("broken trace", break_ex, 200, lambda t: "mask-level gap"),
 ]
 
-fig, axes = plt.subplots(len(ROWS), N_PER_ROW, figsize=(W_DOUBLE, 1.7 * len(ROWS)))
+# Manual grid geometry (no constrained layout, no in-figure suptitle -- the
+# title text moved to the caption): square crop panels fill the full double
+# column width, per-panel titles are single-line so rows pack tightly, and
+# the figure height is derived from the content.
+N_ROWS = len(ROWS)
+_ws, _hs = 0.05, 0.11
+_left, _right = 0.045, 0.998   # left margin: rotated family ylabels
+_top_in, _bot_in = 0.22, 0.02  # inches: row-1 titles / bottom edge
+_ax_w = W_DOUBLE * (_right - _left) / (N_PER_ROW + (N_PER_ROW - 1) * _ws)
+_fig_h = _ax_w * (N_ROWS + (N_ROWS - 1) * _hs) + _top_in + _bot_in
+
+fig, axes = plt.subplots(
+    N_ROWS, N_PER_ROW, figsize=(W_DOUBLE, _fig_h),
+    gridspec_kw=dict(left=_left, right=_right, top=1.0 - _top_in / _fig_h,
+                     bottom=_bot_in / _fig_h, wspace=_ws, hspace=_hs),
+)
+# Freeze the manual geometry: downgrade the rcParams-provided constrained-
+# layout engine to the do-nothing placeholder (a bare None engine would be
+# resurrected to constrained layout by savefig's rcParams round-trip,
+# re-laying the grid out in the saved PDF).
+fig.set_layout_engine("none")
 
 for r, (fam_name, examples, side, label_fn) in enumerate(ROWS):
     for c in range(N_PER_ROW):
@@ -177,13 +197,6 @@ for r, (fam_name, examples, side, label_fn) in enumerate(ROWS):
         ax.set_xticks([]); ax.set_yticks([])
         ax.set_title(label_fn(item), fontsize=7)
     axes[r, 0].set_ylabel(fam_name, fontsize=8, rotation=90, labelpad=4)
-
-fig.suptitle(
-    "v7 composer defect families (ACL-065): HR ground truth, per-row crop size "
-    "(0.7/1.6/2.0 mm), per-crop 0.5-99.5 pct inferno scale, cyan ring = labelled "
-    "defect location",
-    fontsize=10.5,
-)
 
 paths = save_fig(fig, "fig42_composer_defect_showcase")
 print("\n".join(str(p) for p in paths))

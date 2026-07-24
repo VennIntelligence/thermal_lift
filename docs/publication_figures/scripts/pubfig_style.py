@@ -118,3 +118,100 @@ def save_fig(fig: plt.Figure, name: str, formats: tuple[str, ...] = ("png", "pdf
 
 def ylabel_with_unit(desc: str, unit: str) -> str:
     return f"{desc} [{unit}]"
+
+
+# ── Checkpoint-strip montage template (shared by fig12 / fig28) ──────────────
+def strip_montage(
+    panels,
+    *,
+    col_titles=None,
+    row_labels=None,
+    cmap=None,
+    vmin=None,
+    vmax=None,
+    cbar_label=None,
+    fig_width: float = W_DOUBLE,
+    panel_aspect: float = 1.0,
+    wspace: float = 0.02,
+    hspace: float = 0.02,
+    title_fontsize: float = 9.0,
+    label_fontsize: float = 9.0,
+    note: str | None = None,
+    note_fontsize: float = 6.5,
+):
+    """Dense image-strip montage: a grid of image panels + row/column labels.
+
+    Shared template for checkpoint-evolution strips (fig12, fig28 and any
+    future ones) so all strips keep identical row-label / step-title /
+    colorbar styling and tight panel spacing.
+
+    Parameters
+    ----------
+    panels : nested list, ``panels[row][col] -> ndarray``. 2-D arrays are
+        drawn with ``cmap``/``vmin``/``vmax`` (scalar data, e.g. absolute
+        temperature); 3-D arrays are shown as-is (pre-rendered RGB exports).
+    col_titles : per-row list of per-panel titles (rows may use different
+        checkpoint steps, so titles are per panel, not per grid column).
+    row_labels : one label per row, placed as the leftmost ylabel.
+    cbar_label : if given (scalar panels only), one shared colorbar is
+        appended on the right, driven by the last scalar mappable.
+    panel_aspect : width/height of one image panel; used to size the figure
+        so panels sit flush (minimal letterboxing) at the given spacing.
+    wspace, hspace : constrained-layout panel gaps (fraction of axes size).
+    note : optional small display-convention footnote under the strip (e.g.
+        when panels are pre-rendered exports without a shared scale).
+
+    Returns ``(fig, axes)`` (axes is a 2-D array) so callers can add scale
+    bars or other overlays before ``save_fig``.
+    """
+    nrows = len(panels)
+    ncols = max(len(row) for row in panels)
+
+    # Estimate the figure height that makes image panels fill their slots at
+    # the requested width: colorbar and row labels eat horizontal space, while
+    # per-panel titles and the optional footnote eat vertical space.
+    cbar_w_frac = 0.055 if cbar_label else 0.0
+    label_w_in = 0.14 if row_labels else 0.0
+    panel_w = (fig_width * (1.0 - cbar_w_frac) - label_w_in) / ncols
+    panel_h = panel_w / panel_aspect
+    title_h = 0.24 if col_titles else 0.0
+    note_h = 0.18 if note else 0.0
+    fig_h = nrows * (panel_h + title_h) + note_h
+
+    fig, axes = plt.subplots(nrows, ncols, figsize=(fig_width, fig_h), squeeze=False)
+    fig.get_layout_engine().set(wspace=wspace, hspace=hspace, w_pad=0.01, h_pad=0.01)
+
+    mappable = None
+    for r, row in enumerate(panels):
+        for c in range(ncols):
+            ax = axes[r][c]
+            if c >= len(row):
+                ax.set_axis_off()
+                continue
+            img = row[c]
+            if img.ndim == 2:
+                mappable = ax.imshow(img, cmap=cmap, vmin=vmin, vmax=vmax,
+                                     interpolation="nearest")
+            else:
+                ax.imshow(img)
+            ax.set_xticks([])
+            ax.set_yticks([])
+            for sp in ax.spines.values():
+                sp.set_visible(False)
+            if col_titles is not None and c < len(col_titles[r]):
+                ax.set_title(col_titles[r][c], fontsize=title_fontsize, pad=2.5)
+        if row_labels is not None:
+            axes[r][0].set_ylabel(row_labels[r], fontsize=label_fontsize)
+
+    if cbar_label is not None and mappable is not None:
+        cbar = fig.colorbar(
+            mappable, ax=[ax for row_axes in axes for ax in row_axes],
+            fraction=0.032, pad=0.015,
+        )
+        cbar.set_label(cbar_label, fontsize=label_fontsize)
+
+    if note is not None:
+        fig.supxlabel(note, fontsize=note_fontsize, color="#555555",
+                      x=0.01, ha="left")
+
+    return fig, axes

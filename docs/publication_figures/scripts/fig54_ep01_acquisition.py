@@ -117,31 +117,36 @@ def panel_trajectory(ax, fig, df: pd.DataFrame) -> None:
         ax.scatter(g["X"], yoff, facecolor="none", edgecolor=st["color"],
                    marker=st["marker"], s=22, lw=0.9, zorder=3, label=st["label"])
     ax.axhline(-1.1, color="#bbbbbb", lw=0.5, ls=":")
-    ax.text(-2.5, -9.2, "excluded frames\n(row 0, dodged)", fontsize=6,
-            color="#666666", ha="left", va="top")
+    ax.text(12.8, -4.4, "excluded frames\n(row 0, dodged)", fontsize=6,
+            color="#666666", ha="left", va="center")
 
     # 1 detector pixel bracket (pitch 20 um -> whole throw = 2 px)
     ax.plot([0, 20], [42.8, 42.8], color="#333333", lw=0.9)
     for x in (0, 20):
         ax.plot([x, x], [42.0, 43.6], color="#333333", lw=0.9)
-    ax.text(10, 44.2, "1 detector px (20 µm)", ha="center", va="bottom",
+    ax.text(21.8, 42.8, "1 detector px (20 µm)", ha="left", va="center",
             fontsize=6.5, color="#333333")
 
-    ax.set_xlim(-3.5, 43.5)
-    ax.set_ylim(-14, 47.5)
+    # equal x/y spans (56.2 um each) -> equal-aspect box is exactly square
+    ax.set_xlim(-6.3, 49.9)
+    ax.set_ylim(-11.0, 45.2)
     ax.set_aspect("equal")
     ax.set_xticks([0, 10, 20, 30, 40])
     ax.set_yticks([0, 10, 20, 30, 40])
     ax.set_xlabel("Stage offset X [µm]")
     ax.set_ylabel("Stage offset Y [µm]")
     ax.set_title("(a) Step-stop raster trajectory")
+    ax.set_anchor("N")  # align panel top with panel (b)'s title row
 
-    cb = fig.colorbar(sc, ax=ax, location="bottom", fraction=0.05, pad=0.02,
-                      aspect=28, shrink=0.92)
+    # inset cax pinned right below the square panel (axes-fraction coords), so
+    # the colorbar tracks the aspect-locked axes instead of reserving a
+    # full-width layout band that would squeeze the right-hand panels up
+    cax = ax.inset_axes([0.0, -0.20, 1.0, 0.04])
+    cb = fig.colorbar(sc, cax=cax, orientation="horizontal")
     cb.set_label("Acquisition order (of 263 frames)", fontsize=7)
     cb.ax.tick_params(labelsize=7)
-    ax.legend(loc="lower right", bbox_to_anchor=(1.03, -0.015), fontsize=5.5,
-              handletextpad=0.25, borderpad=0.15, labelspacing=0.25,
+    ax.legend(loc="lower right", fontsize=6,
+              handletextpad=0.25, borderpad=0.15, labelspacing=0.3,
               handlelength=1.0)
 
 
@@ -165,8 +170,8 @@ def panel_timeline(ax, df: pd.DataFrame) -> None:
     s2 = df[df["session"] == 2]
     ax.axvspan(s1["t_min"].min() - 0.3, s1["t_min"].max() + 0.3,
                color="#C44E52", alpha=0.07, lw=0)
-    ax.text(-1.2, 21.35, "prewarm\n(session 0)", fontsize=6.5,
-            color="#666666", ha="left", va="top")
+    ax.text(-1.9, 22.2, "prewarm\n(session 0)", fontsize=6,
+            color="#666666", ha="left", va="bottom")
     ax.annotate("aborted cold pass\n(session 1, 7 fr.)",
                 xy=(s1["t_min"].max() + 0.4, s1["T_mean"].iloc[-1]),
                 xytext=(14.5, 19.9), fontsize=6.5, color="#C44E52",
@@ -180,10 +185,10 @@ def panel_timeline(ax, df: pd.DataFrame) -> None:
                 xytext=(78, 21.6), fontsize=6.5, color="#DD8452", ha="right",
                 va="center",
                 arrowprops=dict(arrowstyle="-", lw=0.6, color="#DD8452"))
-    # settling jump between sessions
-    ax.annotate("", xy=(9.9, 23.6), xytext=(9.9, 20.3),
+    # settling jump between sessions (drawn right of the prewarm label)
+    ax.annotate("", xy=(13.6, 23.1), xytext=(13.6, 20.3),
                 arrowprops=dict(arrowstyle="->", lw=0.8, color="#666666"))
-    ax.text(11.0, 22.7, "+3.6 °C", fontsize=6.5, color="#666666", ha="left")
+    ax.text(14.8, 21.7, "+3.6 °C", fontsize=6.5, color="#666666", ha="left")
 
     ax.set_xlim(-2, 86)
     ax.set_ylim(19.0, 24.6)
@@ -225,9 +230,11 @@ def main() -> None:
     print(f"{len(df)} frames, {df['session'].nunique()} sessions, "
           f"{n_usable} SR-usable")
 
-    fig = plt.figure(figsize=(W_DOUBLE, 3.5))
-    gs = fig.add_gridspec(2, 2, width_ratios=[1.0, 1.32],
-                          height_ratios=[1.75, 1.0])
+    # Left: one square trajectory panel (spans both rows); right: timeline and
+    # frame budget stacked, each exactly half of the right-hand height.
+    fig = plt.figure(figsize=(W_DOUBLE, 4.2))
+    gs = fig.add_gridspec(2, 2, width_ratios=[1.10, 1.0],
+                          height_ratios=[1.0, 1.0])
     panel_trajectory(fig.add_subplot(gs[:, 0]), fig, df)
     panel_timeline(fig.add_subplot(gs[0, 1]), df)
     panel_budget(fig.add_subplot(gs[1, 1]), df)

@@ -68,10 +68,12 @@ def line(ax, df, color, marker, label, lw=1.2):
     )
 
 
-fig = plt.figure(figsize=(W_DOUBLE, 5.9), constrained_layout=False)
+# No in-figure suptitle (title belongs in the caption); spacing kept tight
+# so panels, not gaps, dominate the canvas.
+fig = plt.figure(figsize=(W_DOUBLE, 5.4), constrained_layout=False)
 gs = fig.add_gridspec(
-    2, 3, hspace=0.62, wspace=0.55,
-    left=0.07, right=0.985, top=0.90, bottom=0.08,
+    2, 3, hspace=0.45, wspace=0.42,
+    left=0.075, right=0.99, top=0.955, bottom=0.085,
 )
 
 # ── (a) Loss components, log y ──────────────────────────────────────
@@ -138,11 +140,6 @@ ax_f.legend(loc="upper center", fontsize=6.5, ncol=1)
 ax_f.annotate(
     "both frozen\n(ACL-025/026)", xy=(0.5, 0.22), xycoords="axes fraction",
     ha="center", va="center", fontsize=7, color="#666666", style="italic",
-)
-
-fig.suptitle(
-    "V8/K4 full-halo unrolled solver: training-loss and eval diagnostics",
-    fontsize=11, fontweight="bold",
 )
 
 paths = save_fig(fig, "fig15_solver_training_diagnostics")
